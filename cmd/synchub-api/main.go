@@ -39,7 +39,7 @@ func main() {
 
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: apiServer.Handler()}
 	go func() {
-		slog.Info("synchub api listening", "addr", cfg.HTTPAddr)
+		slog.Info("SyncHub api listening", "addr", cfg.HTTPAddr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("api server failed", "error", err)
 			os.Exit(1)
