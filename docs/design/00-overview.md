@@ -26,10 +26,11 @@ SyncHub 后端采用 Rust + Axum 作为主技术栈，不再在 Go Gin 与 Rust 
 - 当前仓库已经是 Cargo Workspace，现有路线图、测试和开发规范也都偏向 Rust 工程化。
 - 后续 Agent、CLI、Tauri GUI、同步核心算法可以复用 Rust crate，减少跨语言模型和协议胶水。
 
-不选择 Go Gin 作为主栈的原因：
-- Gin 更适合快速交付常规 CRUD / REST 服务，但 SyncHub 的长期重点不是普通 API，而是可靠的文件同步和存储一致性。
-- 若服务端用 Go、Agent / CLI / GUI 核心用 Rust，会过早引入双语言维护成本。
-- Go 生态仍可作为未来边缘组件或运维工具选项，但不作为核心后端栈。
+Go Gin 方案评估：
+- 全 Go 技术栈也是可行方案。服务端、CLI、Agent 都可以用 Go 实现，桌面端也可以选择 Wails 或 Web UI，不存在双语言维护成本。
+- Go 的优势是开发速度快、部署简单、并发模型直接、团队招聘和维护成本低，对文件同步服务同样足够成熟。
+- 如果项目优先级是尽快交付服务端、CLI 和 Agent，并且不坚持 Tauri / Rust 生态复用，全 Go 是合理选择。
+- 当前仍推荐 Rust + Axum，是因为仓库已经采用 Cargo Workspace，未来计划包含 Tauri GUI，并且同步核心、存储抽象、版本一致性这类长期复杂逻辑更能受益于 Rust 的类型系统和编译期约束。
 
 ## 目标技术组合
 - Language: Rust stable
