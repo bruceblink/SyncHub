@@ -3,9 +3,11 @@
 Developer Workspace Sync Platform
 
 ## Vision
+
 SyncHub is a Go-based developer workspace synchronization platform.
 
 ### Goals
+
 - Workspace synchronization
 - AI session synchronization
 - File versioning
@@ -15,7 +17,9 @@ SyncHub is a Go-based developer workspace synchronization platform.
 - Multi-device synchronization
 
 ## Workspace
+
 Supports:
+
 - Claude Code
 - Codex
 - VS Code
@@ -29,6 +33,7 @@ Supports:
 Agent -> REST API -> SyncHub Server -> Storage
 
 ## Tech Stack
+
 - Go
 - Gin
 - PostgreSQL
@@ -36,4 +41,5 @@ Agent -> REST API -> SyncHub Server -> Storage
 - Local FS / S3-compatible storage
 
 ## Roadmap
+
 See docs/roadmap/ROADMAP.md
