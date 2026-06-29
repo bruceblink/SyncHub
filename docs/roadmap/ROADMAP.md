@@ -1,16 +1,24 @@
 # SyncHub Roadmap
 
 ## 技术栈结论
-默认推荐后端主栈选择 Rust + Axum，但项目仍处于调研阶段，最终选择应根据团队熟练度、MVP 时间压力和服务端 / Agent 迭代效率确认。
+SyncHub 主技术栈确定为 Go + Gin。
 
-推荐 Rust + Axum 的理由是：项目核心是文件同步、流式 IO、版本一致性、后台任务和长期可维护的同步协议，而不是普通 CRUD API。Rust + Axum 能让服务端、同步核心、CLI 和 Agent 共享领域模型与同步逻辑，并把更多一致性问题前移到编译期。
+选择 Go 的原因：
+- 项目目标之一是训练 Go 工程能力。
+- Go 在本项目中的开发体验和迭代效率优于 Rust。
+- SyncHub 的主要瓶颈预计在网络、磁盘、数据库和对象存储 IO，不存在必须依赖 Rust 才能解决的性能瓶颈。
+- 服务端、CLI 和 Agent 可以统一使用 Go，减少模型、协议、错误处理和构建流程割裂。
 
-全 Go + Gin 也是可行方案。服务端、CLI、Agent 可以统一用 Go 实现，不存在双语言维护成本。它的优势是开发速度快、部署简单、并发模型直接、团队维护成本低。
-
-决策规则：
-- 选择 Rust + Axum：更重视长期正确性、类型约束和复杂同步逻辑的编译期约束。
-- 选择全 Go + Gin：更重视早期交付速度、团队上手成本、部署简洁性和服务端 / Agent 快速迭代。
-- 若团队对 Rust 熟练度不足，或者 MVP 时间压力明显，应优先考虑全 Go。
+核心技术组合：
+- Language: Go stable
+- Web: Gin
+- DB: PostgreSQL + pgx + sqlc
+- Migration: golang-migrate 或 goose
+- Auth: JWT access token + refresh token
+- Storage: Local FS first，S3 / OSS / MinIO compatible storage later
+- API schema: OpenAPI
+- Observability: slog / zap + OpenTelemetry + metrics
+- Packaging: Docker / Docker Compose
 
 ## 总体目标
 先做一个可靠的单用户 / 多设备同步闭环，再逐步扩展 WebDAV、版本恢复、团队空间和云对象存储。
@@ -22,27 +30,36 @@
 4. 冲突不会静默覆盖用户文件。
 5. 再补 WebDAV、客户端适配层、团队能力。
 
-## Phase 0: 工程基础
+## Phase 0: Go 工程基础
 
-目标：建立可持续开发的 Rust workspace 和本地运行环境。
+目标：建立可持续开发的 Go module、本地运行环境和基础工程规范。
 
 任务：
-- 创建 workspace crates:
-  - `synchub-api`
-  - `synchub-core`
-  - `synchub-auth`
-  - `synchub-db`
-  - `synchub-storage`
-  - `synchub-sync`
-- 引入基础依赖：axum、tokio、tower-http、tracing、serde、thiserror、sqlx、uuid、time。
+- 创建 Go module。
+- 建立目录结构：
+  - `cmd/synchub-api`
+  - `cmd/synchub-agent`
+  - `cmd/synchub-cli`
+  - `internal/api`
+  - `internal/auth`
+  - `internal/config`
+  - `internal/domain`
+  - `internal/db`
+  - `internal/file`
+  - `internal/storage`
+  - `internal/sync`
+  - `internal/worker`
+  - `pkg/client`
+  - `migrations`
+- 引入基础依赖：gin、pgx、sqlc、jwt、argon2、uuid、OpenTelemetry。
 - 建立配置加载：环境变量 + typed config。
 - 建立错误模型：domain error -> API error response。
 - 建立 Docker Compose：PostgreSQL + API。
-- 建立 CI 命令：fmt、clippy、test。
+- 建立 CI 命令：fmt、vet、test。
 
 验收标准：
-- `cargo test --workspace` 通过。
-- `cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `go test ./...` 通过。
+- `go vet ./...` 通过。
 - `GET /healthz` 和 `GET /readyz` 可用。
 - 空数据库可以执行 migration。
 
@@ -53,10 +70,11 @@
 ### 1.1 Auth
 任务：
 - users、refresh_tokens migration。
+- sqlc queries 和 repository wrapper。
 - 注册、登录、refresh、logout API。
 - Argon2id password hash。
 - JWT access token 和 refresh token。
-- Axum auth extractor。
+- Gin auth middleware。
 
 验收标准：
 - 用户可注册登录。
@@ -66,7 +84,8 @@
 
 ### 1.2 File Metadata
 任务：
-- file_nodes、file_versions migration。
+- file_nodes、file_versions、change_events migration。
+- sqlc queries 和 repository wrapper。
 - 目录创建、列表、按路径查询、移动、删除 API。
 - path normalization。
 - 用户级数据隔离。
@@ -80,11 +99,11 @@
 
 ### 1.3 Local Storage
 任务：
-- 定义 Storage trait。
+- 定义 Storage interface。
 - 实现 Local FS backend。
 - 支持 put chunk、compose、read、delete。
 - 支持 Range read。
-- 使用 tempfile 完成 storage tests。
+- 使用临时目录完成 storage tests。
 
 验收标准：
 - 大文件读写不需要完整载入内存。
@@ -96,7 +115,7 @@
 - upload_sessions、upload_chunks migration。
 - upload init / put chunk / status / commit API。
 - chunk checksum 校验。
-- commit 事务：写版本、更新 file_nodes、写 change_events。
+- commit 事务：锁定 upload session、校验 chunks、写版本、更新 file_nodes、写 change_events。
 - 幂等提交和 chunk 重传处理。
 - 过期 session 清理任务。
 
@@ -134,7 +153,7 @@
 
 ### 2.2 Change Feed
 任务：
-- change_events migration 和 repository。
+- change_events repository。
 - 所有文件 create/update/move/delete/restore 写 change event。
 - 拉取 changes API。
 - ack API。
@@ -149,6 +168,7 @@
 - CLI login。
 - workspace init。
 - 本地 manifest 扫描：path、size、mtime、sha256。
+- 文件监听。
 - push 本地新增 / 修改文件。
 - pull 服务端变更。
 - sync status。
@@ -223,7 +243,7 @@
 
 ## Phase 6: Client Adapter
 
-目标：在稳定 API 和 Agent 能力之上，支持任意客户端形态接入。GUI 不是核心路线，不绑定 Tauri。
+目标：在稳定 API 和 Agent 能力之上，支持任意客户端形态接入。GUI 不是核心路线，不绑定特定框架。
 
 任务：
 - 提供 Agent local API 或 IPC，用于外部客户端读取同步状态和触发操作。
@@ -247,22 +267,13 @@
 - 面向 AI session 的结构化同步策略。
 
 ## 近期执行顺序
-若最终选择 Rust + Axum，优先执行：
-1. 创建 workspace crates 和基础依赖。
-2. 实现 `synchub-api` 的 health / ready endpoint。
-3. 建立 PostgreSQL migration 目录和 users / refresh_tokens 表。
-4. 实现 Auth MVP。
-5. 实现 file_nodes / file_versions / change_events migration。
-6. 实现 Local FS Storage trait。
-7. 实现 chunk upload 闭环。
-
-完成以上 7 步后，SyncHub 就具备继续做 Agent 同步的服务端基础。
-
-若最终选择全 Go + Gin，对应执行顺序调整为：
-1. 创建 Go module 和 internal package 边界。
+1. 创建 Go module 和目录骨架。
 2. 实现 `cmd/synchub-api` 的 health / ready endpoint。
 3. 建立 PostgreSQL migration 目录和 users / refresh_tokens 表。
-4. 实现 Auth MVP。
-5. 实现 file_nodes / file_versions / change_events migration。
-6. 实现 Storage interface 和 Local FS backend。
-7. 实现 chunk upload 闭环。
+4. 配置 pgx、sqlc、migration 工具和 Docker Compose。
+5. 实现 Auth MVP。
+6. 实现 file_nodes / file_versions / change_events migration。
+7. 实现 Storage interface 和 Local FS backend。
+8. 实现 chunk upload 闭环。
+
+完成以上 8 步后，SyncHub 就具备继续做 Agent 同步的服务端基础。

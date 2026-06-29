@@ -3,7 +3,7 @@
 Developer Workspace Sync Platform
 
 ## Vision
-SyncHub is a Rust-based developer workspace synchronization platform.
+SyncHub is a Go-based developer workspace synchronization platform.
 
 ### Goals
 - Workspace synchronization
@@ -27,6 +27,13 @@ Supports:
 ## Architecture
 
 Agent -> REST API -> SyncHub Server -> Storage
+
+## Tech Stack
+- Go
+- Gin
+- PostgreSQL
+- pgx + sqlc
+- Local FS / S3-compatible storage
 
 ## Roadmap
 See docs/roadmap/ROADMAP.md

@@ -17,42 +17,24 @@ SyncHub 是一个面向开发者工作区的多端同步平台，提供 REST API
 - 多用户隔离存储
 - 本地文件系统与 S3-compatible storage 后端
 
-## 技术栈评估
-项目仍处于调研阶段，仓库当前结构不作为技术栈决策依据。候选方案主要是 Rust + Axum 与全 Go + Gin。
+## 技术栈决策
+SyncHub 主技术栈确定为 Go + Gin。
 
-默认推荐 Rust + Axum 的原因：
-- SyncHub 的核心风险集中在文件 IO、并发上传、增量同步、元数据一致性和后台任务编排，Rust 的所有权、类型系统和错误处理能更早暴露问题。
-- Axum 基于 Tokio / Tower / Hyper 生态，适合构建异步 HTTP 服务、中间件、流式上传下载和可组合的服务边界。
-- 对同步核心、存储抽象、版本一致性这类长期复杂逻辑，Rust 的类型系统和编译期约束更有价值。
+选择 Go 的原因：
+- 项目目标之一是训练 Go 工程能力，服务端、CLI 和 Agent 都适合用 Go 实现。
+- SyncHub 的主要瓶颈预计在网络、磁盘、数据库和对象存储 IO，不存在必须依赖 Rust 才能解决的性能瓶颈。
+- Go 的开发体验、编译速度、部署方式和并发模型更适合快速推进 MVP。
+- Go 在 HTTP 服务、后台任务、文件监听、CLI、WebDAV、S3-compatible storage 等场景都有成熟生态。
+- 统一使用 Go 可以避免服务端与 Agent 在模型、协议、错误处理和构建流程上的割裂。
 
-Go Gin 方案评估：
-- 全 Go 技术栈也是可行方案。服务端、CLI、Agent 都可以用 Go 实现，不存在双语言维护成本。
-- Go 的优势是开发速度快、部署简单、并发模型直接、团队招聘和维护成本低，对文件同步服务同样足够成熟。
-- 如果项目优先级是尽快交付服务端、CLI 和 Agent，全 Go 是合理选择。
+Rust 仍是可行方案，但不作为首期主栈。除非后续出现明确的内存安全、极限性能或 Rust 生态依赖，否则不在 MVP 阶段引入 Rust。
 
-客户端策略：
-- SyncHub 应采用 API-first 设计。服务端 REST / WebDAV / Sync API 定义稳定后，Agent 可以适配 CLI、Web、桌面壳层、移动端或第三方工具。
-- GUI 不是核心技术栈决策因素，也不绑定 Tauri。后续如需 GUI，可在稳定 API 和 Agent 之上选择任意客户端技术。
+## 客户端策略
+SyncHub 采用 API-first + Agent-first 设计。服务端 REST / WebDAV / Sync API 定义稳定后，Agent 可以适配 CLI、Web、桌面壳层、移动端或第三方工具。
 
-建议决策规则：
-- 选择 Rust + Axum：更重视长期正确性、类型约束和复杂同步逻辑的编译期约束。
-- 选择全 Go + Gin：更重视早期交付速度、团队上手成本、部署简洁性和服务端 / Agent 快速迭代。
-- 若团队对 Rust 熟练度不足，或者 MVP 时间压力明显，应优先考虑全 Go。
+GUI 不是核心技术栈决策因素，也不绑定任何框架。后续如需 GUI，可在稳定 API 和 Agent 之上选择任意客户端技术。
 
-## 默认 Rust 技术组合
-- Language: Rust stable
-- Web: Axum
-- Async runtime: Tokio
-- Middleware / service abstraction: Tower
-- DB: PostgreSQL + SQLx
-- Cache / queue: Redis（Phase 2 起引入）
-- Auth: JWT access token + refresh token；OAuth2 作为后续登录扩展
-- Storage: Local FS first，S3 / OSS / MinIO compatible storage later
-- API schema: OpenAPI
-- Observability: tracing + metrics + structured logs
-- Packaging: Docker / Docker Compose
-
-## 全 Go 替代组合
+## 目标技术组合
 - Language: Go stable
 - Web: Gin
 - Runtime: Go runtime + goroutine

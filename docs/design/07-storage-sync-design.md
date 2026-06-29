@@ -1,7 +1,7 @@
 # 同步与存储设计
 
 ## 存储模型
-文件内容通过 Storage trait 写入对象存储，数据库只保存元数据和对象 key。
+文件内容通过 Storage interface 写入对象存储，数据库只保存元数据和对象 key。
 
 首期 Local FS key 规则：
 ```text

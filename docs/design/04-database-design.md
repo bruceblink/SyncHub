@@ -1,7 +1,18 @@
 # 数据库设计
 
 ## 数据库选择
-主数据库使用 PostgreSQL。Rust 侧通过 SQLx 管理查询、连接池和 migration。
+主数据库使用 PostgreSQL。Go 侧使用 pgx 作为连接池和驱动，SQL 查询优先通过 sqlc 生成类型安全代码，migration 使用 golang-migrate 或 goose。
+
+## sqlc 与 GORM 取舍
+默认选择 sqlc + pgx，不把 GORM 作为核心数据访问层。
+
+原因：
+- SyncHub 的关键路径不是普通 CRUD，而是 upload commit 事务、乐观锁、部分唯一索引、游标分页、change feed、冲突检测和后台清理任务。
+- 这些路径需要明确控制 SQL、事务隔离、锁、索引命中和返回字段，手写 SQL 更直接。
+- sqlc 能保留 SQL 可读性，同时生成 Go 类型，减少手写 scan 和字段映射错误。
+- pgx 对 PostgreSQL 支持完整，适合后续使用 `FOR UPDATE`、`RETURNING`、批量写入、copy、事务和连接池能力。
+
+GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，但不建议进入文件同步、版本、上传提交和 change_events 等核心路径。
 
 ## ID 与时间
 - 主键建议使用 UUID 或 ULID，早期统一使用 UUID 便于 PostgreSQL 原生支持。

@@ -1,17 +1,18 @@
 # 开发指南
 
 ## 工具链
-- Rust stable
+- Go stable
 - PostgreSQL 16+
-- SQLx CLI
+- sqlc
+- golang-migrate 或 goose
 - Docker / Docker Compose
 
 ## 推荐命令
 ```bash
-cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo run -p synchub-api
+go fmt ./...
+go vet ./...
+go test ./...
+go run ./cmd/synchub-api
 ```
 
 ## 本地配置
@@ -20,23 +21,40 @@ cargo run -p synchub-api
 - `JWT_SECRET`
 - `STORAGE_BACKEND=local`
 - `LOCAL_STORAGE_ROOT=./.data/storage`
-- `RUST_LOG=synchub=debug,tower_http=debug`
+- `LOG_LEVEL=debug`
 
 ## Migration
+示例使用 golang-migrate：
 ```bash
-sqlx migrate add <name>
-sqlx migrate run
+migrate create -ext sql -dir migrations <name>
+migrate -path migrations -database "$DATABASE_URL" up
 ```
 
-提交涉及 SQLx query macro 的代码前，需要保证离线元数据或数据库连接可用。
+如果改用 goose，需要在项目 README 和 CI 中统一命令。
+
+## SQL 生成
+优先使用 sqlc：
+```bash
+sqlc generate
+```
+
+SQL 文件应按模块组织，例如：
+```text
+internal/db/queries/
+  users.sql
+  files.sql
+  uploads.sql
+  changes.sql
+```
 
 ## 代码规范
-- 所有 crate 使用 `rustfmt` 默认格式。
-- Clippy warning 作为失败处理。
+- 所有 Go 代码通过 `gofmt`。
+- 使用 `go vet ./...` 作为基础静态检查。
 - API handler 保持薄层，只做提取、校验、调用 service 和响应转换。
-- 数据库访问集中在 repository。
+- 数据库访问集中在 repository 或 sqlc query wrapper。
 - 文件内容必须使用 streaming API，禁止在 handler 中一次性读取大文件到内存。
 - 错误类型需要保留可排查上下文，但 API 响应不能泄漏敏感信息。
+- context 必须从请求入口向下传递到 DB、storage 和外部调用。
 
 ## 分支与提交
 - 使用 feature branch。
@@ -47,5 +65,5 @@ sqlx migrate run
 - 功能代码合并。
 - migration 可在空数据库执行。
 - 单元测试和关键集成测试通过。
-- `cargo fmt`、`cargo clippy`、`cargo test` 通过。
+- `go fmt ./...`、`go vet ./...`、`go test ./...` 通过。
 - 文档或 API spec 已同步更新。

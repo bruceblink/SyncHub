@@ -2,8 +2,8 @@
 
 ## 测试分层
 - Unit tests: 领域逻辑、path normalization、冲突命名、hash diff、权限判断。
-- Repository tests: SQLx repository 与 migration，使用测试数据库。
-- API integration tests: Axum router + test database + mock/local storage。
+- Repository tests: sqlc query wrapper、repository 与 migration，使用测试数据库。
+- API integration tests: Gin router + test database + mock/local storage。
 - Storage tests: Local FS backend 的 put/read/delete/compose/range。
 - Sync tests: change cursor、manifest diff、冲突检测。
 
@@ -17,17 +17,17 @@
 - 用户 A 不能访问用户 B 的文件。
 
 ## 测试工具建议
-- `tokio::test` 用于异步单元测试。
-- `tower::ServiceExt` 测试 Axum router。
-- `tempfile` 测试 Local FS storage。
-- `testcontainers` 或 Docker Compose 测试 PostgreSQL。
-- `mockall` 或手写 fake storage 测试 service。
+- `testing` 标准库作为默认测试框架。
+- `net/http/httptest` 测试 Gin router。
+- `t.TempDir()` 测试 Local FS storage。
+- `testcontainers-go` 或 Docker Compose 测试 PostgreSQL。
+- 手写 fake storage / fake repository 测试 service。
 
 ## CI 检查
 ```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+go fmt ./...
+go vet ./...
+go test ./...
 ```
 
 ## 测试数据原则
