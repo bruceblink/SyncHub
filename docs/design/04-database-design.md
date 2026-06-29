@@ -1,21 +1,27 @@
 # 数据库设计
 
 ## 数据库选择
-主数据库使用 PostgreSQL。Go 侧使用 pgx 作为连接池和驱动，SQL 查询优先通过 sqlc 生成类型安全代码，migration 使用 golang-migrate 或 goose。
+
+开发阶段默认使用 SQLite，让本地运行、测试和单机 MVP 不依赖外部数据库服务。数据库访问必须经过 repository 边界，业务层不直接绑定具体 SQL 方言。
+
+后续按部署规模增加 PostgreSQL / MySQL adapter。PostgreSQL 侧优先使用 pgx + sqlc；MySQL 侧优先使用 database/sql 或 sqlc 支持的 MySQL 查询。正式 migration 工具可使用 golang-migrate 或 goose。
 
 ## sqlc 与 GORM 取舍
-默认选择 sqlc + pgx，不把 GORM 作为核心数据访问层。
+
+首期 SQLite repository 使用手写 SQL 保持启动成本低。大型关系型数据库 adapter 默认选择 sqlc + 原生 driver，不把 GORM 作为核心数据访问层。
 
 原因：
+
 - SyncHub 的关键路径不是普通 CRUD，而是 upload commit 事务、乐观锁、部分唯一索引、游标分页、change feed、冲突检测和后台清理任务。
 - 这些路径需要明确控制 SQL、事务隔离、锁、索引命中和返回字段，手写 SQL 更直接。
 - sqlc 能保留 SQL 可读性，同时生成 Go 类型，减少手写 scan 和字段映射错误。
-- pgx 对 PostgreSQL 支持完整，适合后续使用 `FOR UPDATE`、`RETURNING`、批量写入、copy、事务和连接池能力。
+- PostgreSQL 适合后续使用 `FOR UPDATE`、`RETURNING`、批量写入、copy、事务和连接池能力。
 
 GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，但不建议进入文件同步、版本、上传提交和 change_events 等核心路径。
 
 ## ID 与时间
-- 主键建议使用 UUID 或 ULID，早期统一使用 UUID 便于 PostgreSQL 原生支持。
+
+- 主键建议使用 UUID 或 ULID。当前 SQLite 开发库使用 text 保存 UUID，后续 PostgreSQL 可映射为 uuid 类型，MySQL 可映射为 char(36) 或 binary(16)。
 - 所有业务表包含 `created_at`、`updated_at`。
 - 软删除资源包含 `deleted_at`。
 - 对外暴露 ID 时保持字符串格式，不暴露自增序列。
@@ -23,6 +29,7 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 ## 核心表
 
 ### users
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid pk | 用户 ID |
@@ -33,6 +40,7 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | updated_at | timestamptz | 更新时间 |
 
 ### refresh_tokens
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid pk | token ID |
@@ -43,6 +51,7 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | created_at | timestamptz | 创建时间 |
 
 ### devices
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid pk | 设备 ID |
@@ -55,6 +64,7 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | updated_at | timestamptz | 更新时间 |
 
 ### file_nodes
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid pk | 文件或目录 ID |
@@ -73,11 +83,13 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | updated_at | timestamptz | 更新时间 |
 
 约束：
+
 - `(user_id, path)` 在 `deleted_at is null` 时唯一。
 - `(user_id, parent_id, name)` 在 `deleted_at is null` 时唯一。
 - 目录 `size` 为 0，`storage_key` 为空。
 
 ### file_versions
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid pk | 版本 ID |
@@ -91,10 +103,12 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | created_at | timestamptz | 创建时间 |
 
 约束：
+
 - `(file_id, version)` 唯一。
 - `(user_id, sha256, size)` 可建普通索引用于去重或秒传扩展。
 
 ### upload_sessions
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid pk | 上传会话 ID |
@@ -113,9 +127,11 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | updated_at | timestamptz | 更新时间 |
 
 约束：
+
 - `(user_id, idempotency_key)` 在 idempotency_key 非空时唯一。
 
 ### upload_chunks
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid pk | chunk ID |
@@ -127,9 +143,11 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | created_at | timestamptz | 创建时间 |
 
 约束：
+
 - `(upload_id, chunk_index)` 唯一。
 
 ### change_events
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | bigserial pk | 单用户可排序 change id |
@@ -143,10 +161,12 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | created_at | timestamptz | 创建时间 |
 
 索引：
+
 - `(user_id, id)` 用于按游标拉取变更。
 - `(user_id, file_id, created_at)` 用于文件历史。
 
 ### sync_conflicts
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid pk | 冲突 ID |
@@ -160,12 +180,14 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | resolved_at | timestamptz nullable | 解决时间 |
 
 ## 事务规则
+
 - upload commit 必须在单个数据库事务中完成：锁定 upload session、校验 chunks、写入 file_nodes / file_versions、写入 change_events、标记 session committed。
 - 文件 move / delete / restore 必须生成 change_events。
 - 乐观锁使用 `file_nodes.version`，客户端提交的 `base_version` 低于当前版本时返回冲突。
 - storage 对象写入和数据库事务无法天然原子，采用 staging -> commit -> finalize 模式；失败后由后台任务清理孤儿对象。
 
 ## 首期索引
+
 - `users(email)`
 - `devices(user_id, last_seen_at)`
 - `file_nodes(user_id, parent_id, deleted_at)`

@@ -22,16 +22,13 @@ func main() {
 	cfg := config.Load()
 	ctx := context.Background()
 
-	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	repo, closeRepo, err := openRepository(ctx, cfg)
 	if err != nil {
 		slog.Error("connect database", "error", err)
 		os.Exit(1)
 	}
-	if pool != nil {
-		defer pool.Close()
-	}
+	defer closeRepo()
 
-	repo := db.NewRepository(pool)
 	store := storage.NewLocal(cfg.LocalStorageRoot)
 	authService := authsvc.NewService(repo, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL)
@@ -55,5 +52,33 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("api server shutdown failed", "error", err)
 		os.Exit(1)
+	}
+}
+
+type repository interface {
+	api.Pinger
+	authsvc.Repository
+	filesvc.Repository
+}
+
+func openRepository(ctx context.Context, cfg config.Config) (repository, func(), error) {
+	switch cfg.DatabaseDriver {
+	case "sqlite":
+		repo, err := db.OpenSQLite(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, func() { _ = repo.Close() }, nil
+	case "postgres", "postgresql":
+		if cfg.DatabaseURL == "" {
+			return nil, nil, errors.New("DATABASE_URL is required for postgres")
+		}
+		pool, err := db.Connect(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		return db.NewRepository(pool), pool.Close, nil
+	default:
+		return nil, nil, errors.New("unsupported database driver: " + cfg.DatabaseDriver)
 	}
 }

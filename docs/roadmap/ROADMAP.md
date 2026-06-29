@@ -1,19 +1,22 @@
 # SyncHub Roadmap
 
 ## 技术栈结论
+
 SyncHub 主技术栈确定为 Go + Gin。
 
 选择 Go 的原因：
+
 - 项目目标之一是训练 Go 工程能力。
 - Go 在本项目中的开发体验和迭代效率优于 Rust。
 - SyncHub 的主要瓶颈预计在网络、磁盘、数据库和对象存储 IO，不存在必须依赖 Rust 才能解决的性能瓶颈。
 - 服务端、CLI 和 Agent 可以统一使用 Go，减少模型、协议、错误处理和构建流程割裂。
 
 核心技术组合：
+
 - Language: Go stable
 - Web: Gin
-- DB: PostgreSQL + pgx + sqlc
-- Migration: golang-migrate 或 goose
+- DB: SQLite for development first; PostgreSQL / MySQL adapters later
+- Migration: embedded SQLite bootstrap first; golang-migrate 或 goose for larger relational databases later
 - Auth: JWT access token + refresh token
 - Storage: Local FS first，S3 / OSS / MinIO compatible storage later
 - API schema: OpenAPI
@@ -21,9 +24,11 @@ SyncHub 主技术栈确定为 Go + Gin。
 - Packaging: Docker / Docker Compose
 
 ## 总体目标
+
 先做一个可靠的单用户 / 多设备同步闭环，再逐步扩展 WebDAV、版本恢复、团队空间和云对象存储。
 
 优先级顺序：
+
 1. 文件上传下载正确。
 2. 元数据、版本和变更日志正确。
 3. Agent 能稳定增量同步。
@@ -35,6 +40,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 目标：建立可持续开发的 Go module、本地运行环境和基础工程规范。
 
 任务：
+
 - 创建 Go module。
 - 建立目录结构：
   - `cmd/synchub-api`
@@ -51,13 +57,14 @@ SyncHub 主技术栈确定为 Go + Gin。
   - `internal/worker`
   - `pkg/client`
   - `migrations`
-- 引入基础依赖：gin、pgx、sqlc、jwt、argon2、uuid、OpenTelemetry。
+- 引入基础依赖：gin、SQLite driver、jwt、argon2、uuid、OpenTelemetry；后续再补 pgx / MySQL driver / sqlc。
 - 建立配置加载：环境变量 + typed config。
 - 建立错误模型：domain error -> API error response。
-- 建立 Docker Compose：PostgreSQL + API。
+- 建立本地 SQLite 开发数据库；后续建立 Docker Compose：PostgreSQL / MySQL + API。
 - 建立 CI 命令：fmt、vet、test。
 
 验收标准：
+
 - `go test ./...` 通过。
 - `go vet ./...` 通过。
 - `GET /healthz` 和 `GET /readyz` 可用。
@@ -68,37 +75,45 @@ SyncHub 主技术栈确定为 Go + Gin。
 目标：完成可登录、可上传、可下载、可管理文件元数据的最小服务端。
 
 ### 1.1 Auth
+
 任务：
+
 - users、refresh_tokens migration。
-- sqlc queries 和 repository wrapper。
+- SQLite repository wrapper；后续为 PostgreSQL / MySQL 增加 sqlc queries。
 - 注册、登录、refresh、logout API。
 - Argon2id password hash。
 - JWT access token 和 refresh token。
 - Gin auth middleware。
 
 验收标准：
+
 - 用户可注册登录。
 - access token 过期后可 refresh。
 - refresh token 可撤销。
 - 未授权请求返回统一错误。
 
 ### 1.2 File Metadata
+
 任务：
+
 - file_nodes、file_versions、change_events migration。
-- sqlc queries 和 repository wrapper。
+- SQLite repository wrapper；后续为 PostgreSQL / MySQL 增加 sqlc queries。
 - 目录创建、列表、按路径查询、移动、删除 API。
 - path normalization。
 - 用户级数据隔离。
 - 乐观锁版本号。
 
 验收标准：
+
 - 同一用户路径唯一。
 - 不同用户可以拥有相同路径。
 - 删除为 soft delete 并生成 change event。
 - 用户不能访问其他用户文件。
 
 ### 1.3 Local Storage
+
 任务：
+
 - 定义 Storage interface。
 - 实现 Local FS backend。
 - 支持 put chunk、compose、read、delete。
@@ -106,12 +121,15 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 使用临时目录完成 storage tests。
 
 验收标准：
+
 - 大文件读写不需要完整载入内存。
 - Range 下载返回正确字节范围。
 - compose 后 sha256 与客户端声明一致。
 
 ### 1.4 Chunk Upload
+
 任务：
+
 - upload_sessions、upload_chunks migration。
 - upload init / put chunk / status / commit API。
 - chunk checksum 校验。
@@ -120,19 +138,23 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 过期 session 清理任务。
 
 验收标准：
+
 - 支持断点续传。
 - checksum mismatch 可被检测。
 - commit 重试不会产生重复版本。
 - base_version 过旧时返回冲突，不覆盖现有文件。
 
 ### 1.5 Download
+
 任务：
+
 - download content API。
 - ETag / If-None-Match。
 - Range header。
 - 下载权限校验。
 
 验收标准：
+
 - 完整下载与 Range 下载都可用。
 - ETag 命中返回 304。
 - 下载不存在或无权限文件返回统一错误。
@@ -142,29 +164,37 @@ SyncHub 主技术栈确定为 Go + Gin。
 目标：打通多设备同步闭环。
 
 ### 2.1 Device Model
+
 任务：
+
 - devices migration。
 - 设备注册、心跳、同步游标 API。
 - device token 或绑定当前用户 token。
 
 验收标准：
+
 - 用户可注册多个设备。
 - 服务端可记录设备最近在线时间和 last_applied_change_id。
 
 ### 2.2 Change Feed
+
 任务：
+
 - change_events repository。
 - 所有文件 create/update/move/delete/restore 写 change event。
 - 拉取 changes API。
 - ack API。
 
 验收标准：
+
 - 设备可按游标拉取增量变更。
 - ack 后游标推进。
 - 游标失效时返回明确错误，引导 full scan。
 
 ### 2.3 CLI / Agent MVP
+
 任务：
+
 - CLI login。
 - workspace init。
 - 本地 manifest 扫描：path、size、mtime、sha256。
@@ -174,12 +204,15 @@ SyncHub 主技术栈确定为 Go + Gin。
 - sync status。
 
 验收标准：
+
 - 两台设备可以通过服务端同步同一目录。
 - 新增、修改、删除可以在另一端体现。
 - 中断后重新执行 sync 可继续。
 
 ### 2.4 Conflict Detection
+
 任务：
+
 - sync_conflicts migration。
 - 基于 base_version 和 sha256 检测冲突。
 - keep-both 默认策略。
@@ -187,6 +220,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - CLI 展示冲突状态。
 
 验收标准：
+
 - 并发修改不会静默覆盖。
 - 冲突版本可保留并可查询。
 
@@ -195,6 +229,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 目标：让 SyncHub 具备可靠的版本管理能力。
 
 任务：
+
 - 版本历史 API。
 - restore version API。
 - 版本 pin。
@@ -202,6 +237,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 后台清理过期版本和孤儿对象。
 
 验收标准：
+
 - 用户可查看文件历史版本。
 - 用户可恢复指定版本。
 - 删除 / 恢复都会产生 change event。
@@ -212,6 +248,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 目标：让系统能被支持 WebDAV 的客户端挂载或访问。
 
 任务：
+
 - WebDAV auth 集成。
 - PROPFIND 映射目录列表和元数据。
 - GET 映射下载。
@@ -220,6 +257,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - DELETE 映射 soft delete。
 
 验收标准：
+
 - 常见 WebDAV 客户端可浏览目录。
 - 上传、下载、重命名、删除可用。
 - WebDAV 写入同样生成版本和 change event。
@@ -229,6 +267,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 目标：支持更接近生产部署的对象存储和异步任务。
 
 任务：
+
 - S3 / OSS / MinIO storage backend。
 - Redis 任务队列或轻量 worker loop。
 - 上传 staging 清理。
@@ -237,6 +276,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 指标：上传耗时、下载耗时、同步延迟、错误率。
 
 验收标准：
+
 - Local FS 与 S3 backend 通过同一 storage test suite。
 - 后台任务可重复执行且幂等。
 - readyz 能检查 DB 和 storage。
@@ -246,6 +286,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 目标：在稳定 API 和 Agent 能力之上，支持任意客户端形态接入。GUI 不是核心路线，不绑定特定框架。
 
 任务：
+
 - 提供 Agent local API 或 IPC，用于外部客户端读取同步状态和触发操作。
 - 固化客户端配置文件格式。
 - 提供客户端适配文档。
@@ -253,11 +294,13 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 暴露冲突列表、版本历史、同步进度和错误状态。
 
 验收标准：
+
 - 第三方客户端可以通过稳定 API 获取同步状态、冲突和版本信息。
 - 客户端可以触发 login、workspace init、sync、pause、resume。
 - 不引入对特定 GUI 框架的强依赖。
 
 ## Long-term
+
 - Team Workspace。
 - 共享目录与权限模型。
 - Plugin System。
@@ -267,10 +310,11 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 面向 AI session 的结构化同步策略。
 
 ## 近期执行顺序
+
 1. 创建 Go module 和目录骨架。
 2. 实现 `cmd/synchub-api` 的 health / ready endpoint。
-3. 建立 PostgreSQL migration 目录和 users / refresh_tokens 表。
-4. 配置 pgx、sqlc、migration 工具和 Docker Compose。
+3. 建立 SQLite 开发 schema 和 users / refresh_tokens 表。
+4. 保留数据库 repository 边界，后续配置 pgx / MySQL driver、sqlc、migration 工具和 Docker Compose。
 5. 实现 Auth MVP。
 6. 实现 file_nodes / file_versions / change_events migration。
 7. 实现 Storage interface 和 Local FS backend。

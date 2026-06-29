@@ -36,8 +36,8 @@ Agent -> REST API -> SyncHub Server -> Storage
 
 - Go
 - Gin
-- PostgreSQL
-- pgx + sqlc
+- SQLite for local development
+- PostgreSQL / MySQL adapters later
 - Local FS / S3-compatible storage
 
 ## Roadmap

@@ -3,44 +3,57 @@
 ## 模块划分
 
 ### cmd/synchub-api
+
 职责：
+
 - API server 进程入口。
 - 加载配置、初始化日志、数据库、storage、router。
 - 处理 graceful shutdown。
 
 ### cmd/synchub-agent
+
 职责：
+
 - Agent 进程入口。
 - 文件监听、本地 manifest 扫描、同步循环。
 - 与服务端执行 pull / push / ack。
 
 ### cmd/synchub-cli
+
 职责：
+
 - CLI 入口。
 - login、workspace init、sync、status、pull、push 等命令。
 - 与 Agent local API 或服务端 API 交互。
 
 ### internal/api
+
 职责：
+
 - Gin router、handler、middleware。
 - 请求参数校验和响应 DTO。
 - OpenAPI schema 暴露。
 - 将业务错误映射为统一 HTTP 响应。
 
 不负责：
+
 - 直接拼 SQL。
 - 直接访问文件系统或对象存储。
 - 承载复杂业务逻辑。
 
 ### internal/domain
+
 职责：
+
 - 领域模型：User、Device、FileNode、FileVersion、UploadSession、ChangeEvent。
 - 业务错误类型。
 - 通用 ID、时间、分页、path normalization。
 - 跨模块共享 policy，例如 chunk size、文件名规则、冲突命名规则。
 
 ### internal/auth
+
 职责：
+
 - 密码哈希和校验。
 - JWT access token 签发与校验。
 - refresh token 生命周期。
@@ -48,14 +61,18 @@
 - 用户上下文和权限检查。
 
 ### internal/db
+
 职责：
-- pgx pool 初始化。
+
+- SQLite 开发库初始化和 schema bootstrap。
+- PostgreSQL / MySQL adapter 的连接初始化。
 - migration 运行入口或 migration 工具集成。
-- sqlc 生成 query 的封装。
-- repository 实现。
+- sqlc 生成 query 的封装（大型关系型数据库 adapter 阶段）。
+- repository 实现和数据库方言隔离。
 - transaction helper。
 
 Repository 边界：
+
 - `UserRepository`
 - `TokenRepository`
 - `FileRepository`
@@ -64,7 +81,9 @@ Repository 边界：
 - `DeviceRepository`
 
 ### internal/storage
+
 职责：
+
 - Storage interface。
 - Local FS backend。
 - S3-compatible backend 扩展。
@@ -72,6 +91,7 @@ Repository 边界：
 - streaming read / write。
 
 建议 interface：
+
 ```go
 type Storage interface {
     PutChunk(ctx context.Context, key string, r io.Reader, checksum string) error
@@ -82,7 +102,9 @@ type Storage interface {
 ```
 
 ### internal/file
+
 职责：
+
 - 文件元数据应用服务。
 - 目录创建、移动、删除。
 - 上传会话编排。
@@ -90,7 +112,9 @@ type Storage interface {
 - 文件下载权限校验和 storage 调用。
 
 ### internal/sync
+
 职责：
+
 - 设备注册和同步游标。
 - change event 查询和 diff。
 - hash / version compare。
@@ -98,19 +122,24 @@ type Storage interface {
 - 同步计划生成。
 
 ### internal/worker
+
 职责：
+
 - 清理过期 upload session。
 - 清理 staging object。
 - 清理孤儿对象。
 - 后续版本保留策略任务。
 
 ### pkg/client
+
 职责：
+
 - 可选的 Go API client。
 - 供 Agent、CLI 或外部 Go 集成复用。
 - 只暴露稳定 API，不暴露 internal 包。
 
 ## 依赖方向
+
 ```text
 cmd/*
   -> internal/api
@@ -142,6 +171,7 @@ internal/storage -> internal/domain
 API 层可以组合多个 service，但底层模块不要反向依赖 API DTO。
 
 ## 错误处理
+
 - 业务错误定义在 `internal/domain`。
 - DB、storage、auth 的底层错误在模块内转换为业务错误。
 - API 层负责把业务错误转换为 HTTP status 和错误码。
@@ -149,7 +179,10 @@ API 层可以组合多个 service，但底层模块不要反向依赖 API DTO。
 - 日志记录错误链路，HTTP 响应不泄漏敏感细节。
 
 ## 配置
+
 统一 `AppConfig`：
+
+- `database_driver`
 - `database_url`
 - `jwt_secret`
 - `storage_backend`

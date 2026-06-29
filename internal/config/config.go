@@ -3,11 +3,13 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
 	HTTPAddr         string
+	DatabaseDriver   string
 	DatabaseURL      string
 	JWTSecret        string
 	StorageBackend   string
@@ -20,9 +22,19 @@ type Config struct {
 }
 
 func Load() Config {
+	databaseURL := os.Getenv("DATABASE_URL")
+	databaseDriver := strings.ToLower(strings.TrimSpace(os.Getenv("DATABASE_DRIVER")))
+	if databaseDriver == "" {
+		databaseDriver = inferDatabaseDriver(databaseURL)
+	}
+	if databaseURL == "" && databaseDriver == "sqlite" {
+		databaseURL = "./.data/synchub.db"
+	}
+
 	return Config{
 		HTTPAddr:         getEnv("HTTP_ADDR", ":8080"),
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
+		DatabaseDriver:   databaseDriver,
+		DatabaseURL:      databaseURL,
 		JWTSecret:        getEnv("JWT_SECRET", "dev-secret-change-me"),
 		StorageBackend:   getEnv("STORAGE_BACKEND", "local"),
 		LocalStorageRoot: getEnv("LOCAL_STORAGE_ROOT", "./.data/storage"),
@@ -32,6 +44,14 @@ func Load() Config {
 		RefreshTokenTTL:  time.Duration(getEnvInt64("REFRESH_TOKEN_TTL_SECONDS", 30*24*60*60)) * time.Second,
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
 	}
+}
+
+func inferDatabaseDriver(databaseURL string) string {
+	lower := strings.ToLower(strings.TrimSpace(databaseURL))
+	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
+		return "postgres"
+	}
+	return "sqlite"
 }
 
 func getEnv(key, fallback string) string {
