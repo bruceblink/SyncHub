@@ -26,7 +26,7 @@
 - 文件版本历史查询与恢复。
 - WebDAV adapter。
 - CLI 操作：login、sync、status、pull、push。
-- Tauri GUI。
+- 稳定同步协议与 Agent SDK，供任意 GUI、Web、移动端或第三方客户端适配。
 - S3 / OSS / MinIO storage backend。
 - 团队空间与共享目录。
 

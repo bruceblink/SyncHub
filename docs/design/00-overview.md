@@ -23,20 +23,23 @@ SyncHub 是一个面向开发者工作区的多端同步平台，提供 REST API
 默认推荐 Rust + Axum 的原因：
 - SyncHub 的核心风险集中在文件 IO、并发上传、增量同步、元数据一致性和后台任务编排，Rust 的所有权、类型系统和错误处理能更早暴露问题。
 - Axum 基于 Tokio / Tower / Hyper 生态，适合构建异步 HTTP 服务、中间件、流式上传下载和可组合的服务边界。
-- 如果桌面端选择 Tauri，Agent、CLI、GUI 辅助逻辑和同步核心算法可以复用 Rust crate。
 - 对同步核心、存储抽象、版本一致性这类长期复杂逻辑，Rust 的类型系统和编译期约束更有价值。
 
 Go Gin 方案评估：
-- 全 Go 技术栈也是可行方案。服务端、CLI、Agent 都可以用 Go 实现，桌面端也可以选择 Wails 或 Web UI，不存在双语言维护成本。
+- 全 Go 技术栈也是可行方案。服务端、CLI、Agent 都可以用 Go 实现，不存在双语言维护成本。
 - Go 的优势是开发速度快、部署简单、并发模型直接、团队招聘和维护成本低，对文件同步服务同样足够成熟。
-- 如果项目优先级是尽快交付服务端、CLI 和 Agent，并且不坚持 Tauri / Rust 生态复用，全 Go 是合理选择。
+- 如果项目优先级是尽快交付服务端、CLI 和 Agent，全 Go 是合理选择。
+
+客户端策略：
+- SyncHub 应采用 API-first 设计。服务端 REST / WebDAV / Sync API 定义稳定后，Agent 可以适配 CLI、Web、桌面壳层、移动端或第三方工具。
+- GUI 不是核心技术栈决策因素，也不绑定 Tauri。后续如需 GUI，可在稳定 API 和 Agent 之上选择任意客户端技术。
 
 建议决策规则：
-- 选择 Rust + Axum：更重视长期正确性、类型约束、Tauri 生态和跨端核心逻辑复用。
+- 选择 Rust + Axum：更重视长期正确性、类型约束和复杂同步逻辑的编译期约束。
 - 选择全 Go + Gin：更重视早期交付速度、团队上手成本、部署简洁性和服务端 / Agent 快速迭代。
 - 若团队对 Rust 熟练度不足，或者 MVP 时间压力明显，应优先考虑全 Go。
 
-## 目标技术组合
+## 默认 Rust 技术组合
 - Language: Rust stable
 - Web: Axum
 - Async runtime: Tokio
@@ -47,6 +50,18 @@ Go Gin 方案评估：
 - Storage: Local FS first，S3 / OSS / MinIO compatible storage later
 - API schema: OpenAPI
 - Observability: tracing + metrics + structured logs
+- Packaging: Docker / Docker Compose
+
+## 全 Go 替代组合
+- Language: Go stable
+- Web: Gin
+- Runtime: Go runtime + goroutine
+- DB: PostgreSQL + sqlc / pgx
+- Cache / queue: Redis（Phase 2 起引入）
+- Auth: JWT access token + refresh token；OAuth2 作为后续登录扩展
+- Storage: Local FS first，S3 / OSS / MinIO compatible storage later
+- API schema: OpenAPI
+- Observability: slog / zap + OpenTelemetry + metrics
 - Packaging: Docker / Docker Compose
 
 ## 系统边界
