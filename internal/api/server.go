@@ -273,23 +273,43 @@ func (s *Server) download(c *gin.Context) {
 		fail(c, err)
 		return
 	}
+
+	node, err := s.files.GetByID(c.Request.Context(), userID(c), c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Accept-Ranges", "bytes")
+	etag := fileETag(node)
+	if etag != "" {
+		c.Header("ETag", etag)
+		if ifNoneMatch(c.GetHeader("If-None-Match"), etag) {
+			c.Status(http.StatusNotModified)
+			return
+		}
+	}
+
 	rc, info, node, err := s.files.Download(c.Request.Context(), userID(c), c.Param("id"), br)
 	if err != nil {
 		fail(c, err)
 		return
 	}
 	defer rc.Close()
-	if node.SHA256 != nil {
-		c.Header("ETag", fmt.Sprintf(`"%s-%d"`, *node.SHA256, node.Version))
-	}
+
 	status := http.StatusOK
+	contentLength := info.Size
 	if br != nil {
-		status = http.StatusPartialContent
-		if br.End != nil {
-			c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", br.Start, *br.End, info.Size))
+		resolved, err := resolveByteRange(info.Size, br)
+		if err != nil {
+			c.Header("Content-Range", fmt.Sprintf("bytes */%d", info.Size))
+			fail(c, err)
+			return
 		}
+		status = http.StatusPartialContent
+		contentLength = resolved.Length
+		c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", resolved.Start, resolved.End, info.Size))
 	}
-	c.DataFromReader(status, info.Size, "application/octet-stream", rc, nil)
+	c.DataFromReader(status, contentLength, "application/octet-stream", rc, nil)
 }
 
 func (s *Server) requireAuth() gin.HandlerFunc {
@@ -318,6 +338,7 @@ func userID(c *gin.Context) string {
 }
 
 func parseRange(raw string) (*storage.ByteRange, error) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
 	}
@@ -341,6 +362,52 @@ func parseRange(raw string) (*storage.ByteRange, error) {
 		end = &parsed
 	}
 	return &storage.ByteRange{Start: start, End: end}, nil
+}
+
+type resolvedByteRange struct {
+	Start  int64
+	End    int64
+	Length int64
+}
+
+func resolveByteRange(size int64, br *storage.ByteRange) (resolvedByteRange, error) {
+	if br == nil {
+		return resolvedByteRange{Start: 0, End: size - 1, Length: size}, nil
+	}
+	if size <= 0 || br.Start >= size {
+		return resolvedByteRange{}, domain.E(domain.CodeRangeNotSatisfiable, "range not satisfiable", nil)
+	}
+	end := size - 1
+	if br.End != nil && *br.End < end {
+		end = *br.End
+	}
+	return resolvedByteRange{Start: br.Start, End: end, Length: end - br.Start + 1}, nil
+}
+
+func fileETag(node domain.FileNode) string {
+	if node.SHA256 == nil {
+		return ""
+	}
+	return fmt.Sprintf(`"%s-%d"`, *node.SHA256, node.Version)
+}
+
+func ifNoneMatch(header, etag string) bool {
+	if header == "" || etag == "" {
+		return false
+	}
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || normalizeETag(candidate) == normalizeETag(etag) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeETag(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "W/")
+	return value
 }
 
 func userDTO(user domain.User) gin.H {

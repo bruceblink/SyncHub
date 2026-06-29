@@ -44,6 +44,8 @@ func statusFor(code domain.ErrorCode) int {
 		return http.StatusConflict
 	case domain.CodeNotFound, domain.CodeFileNotFound:
 		return http.StatusNotFound
+	case domain.CodeRangeNotSatisfiable:
+		return http.StatusRequestedRangeNotSatisfiable
 	case domain.CodeUploadSessionExpired:
 		return http.StatusGone
 	case domain.CodeUploadChecksumMismatch:

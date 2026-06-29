@@ -14,6 +14,7 @@ const (
 	CodeNotFound               ErrorCode = "NOT_FOUND"
 	CodeFileNotFound           ErrorCode = "FILE_NOT_FOUND"
 	CodeFileConflict           ErrorCode = "FILE_CONFLICT"
+	CodeRangeNotSatisfiable    ErrorCode = "RANGE_NOT_SATISFIABLE"
 	CodeUploadSessionExpired   ErrorCode = "UPLOAD_SESSION_EXPIRED"
 	CodeUploadChecksumMismatch ErrorCode = "UPLOAD_CHECKSUM_MISMATCH"
 	CodeInternal               ErrorCode = "INTERNAL_ERROR"
