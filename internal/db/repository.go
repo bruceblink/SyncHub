@@ -1,0 +1,423 @@
+package db
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/bruceblink/SyncHub/internal/domain"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Repository struct {
+	pool *pgxpool.Pool
+}
+
+func NewRepository(pool *pgxpool.Pool) *Repository {
+	return &Repository{pool: pool}
+}
+
+func (r *Repository) Ping(ctx context.Context) error {
+	if r.pool == nil {
+		return nil
+	}
+	return r.pool.Ping(ctx)
+}
+
+func (r *Repository) CreateUser(ctx context.Context, email, passwordHash string) (domain.User, error) {
+	now := time.Now().UTC()
+	user := domain.User{
+		ID:           uuid.NewString(),
+		Email:        email,
+		PasswordHash: passwordHash,
+		Status:       "active",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	err := r.pool.QueryRow(ctx, `
+		insert into users (id, email, password_hash, status, created_at, updated_at)
+		values ($1, $2, $3, $4, $5, $6)
+		returning id, email, password_hash, status, created_at, updated_at
+	`, user.ID, user.Email, user.PasswordHash, user.Status, user.CreatedAt, user.UpdatedAt).Scan(
+		&user.ID, &user.Email, &user.PasswordHash, &user.Status, &user.CreatedAt, &user.UpdatedAt,
+	)
+	if isUniqueViolation(err) {
+		return domain.User{}, domain.E(domain.CodeAlreadyExists, "email already exists", err)
+	}
+	return user, wrapDBErr(err)
+}
+
+func (r *Repository) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
+	var user domain.User
+	err := r.pool.QueryRow(ctx, `
+		select id, email, password_hash, status, created_at, updated_at
+		from users
+		where email = $1 and status = 'active'
+	`, email).Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	return user, wrapNotFound(err, "user not found")
+}
+
+func (r *Repository) GetUserByID(ctx context.Context, id string) (domain.User, error) {
+	var user domain.User
+	err := r.pool.QueryRow(ctx, `
+		select id, email, password_hash, status, created_at, updated_at
+		from users
+		where id = $1 and status = 'active'
+	`, id).Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	return user, wrapNotFound(err, "user not found")
+}
+
+func (r *Repository) CreateRefreshToken(ctx context.Context, userID, tokenHash string, expiresAt time.Time) (domain.RefreshToken, error) {
+	token := domain.RefreshToken{ID: uuid.NewString(), UserID: userID, TokenHash: tokenHash, ExpiresAt: expiresAt, CreatedAt: time.Now().UTC()}
+	err := r.pool.QueryRow(ctx, `
+		insert into refresh_tokens (id, user_id, token_hash, expires_at, created_at)
+		values ($1, $2, $3, $4, $5)
+		returning id, user_id, token_hash, expires_at, revoked_at, created_at
+	`, token.ID, token.UserID, token.TokenHash, token.ExpiresAt, token.CreatedAt).Scan(
+		&token.ID, &token.UserID, &token.TokenHash, &token.ExpiresAt, &token.RevokedAt, &token.CreatedAt,
+	)
+	return token, wrapDBErr(err)
+}
+
+func (r *Repository) GetRefreshToken(ctx context.Context, tokenHash string) (domain.RefreshToken, error) {
+	var token domain.RefreshToken
+	err := r.pool.QueryRow(ctx, `
+		select id, user_id, token_hash, expires_at, revoked_at, created_at
+		from refresh_tokens
+		where token_hash = $1
+	`, tokenHash).Scan(&token.ID, &token.UserID, &token.TokenHash, &token.ExpiresAt, &token.RevokedAt, &token.CreatedAt)
+	return token, wrapNotFound(err, "refresh token not found")
+}
+
+func (r *Repository) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
+	_, err := r.pool.Exec(ctx, `update refresh_tokens set revoked_at = now() where token_hash = $1`, tokenHash)
+	return wrapDBErr(err)
+}
+
+func (r *Repository) CreateDirectory(ctx context.Context, userID, path, name string, parentID *string) (domain.FileNode, error) {
+	node := domain.FileNode{ID: uuid.NewString(), UserID: userID, ParentID: parentID, Name: name, Path: path, NodeType: domain.NodeTypeDirectory, Version: 1}
+	err := r.pool.QueryRow(ctx, `
+		insert into file_nodes (id, user_id, parent_id, name, path, node_type, version)
+		values ($1, $2, $3, $4, $5, $6, $7)
+		returning id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+	`, node.ID, node.UserID, node.ParentID, node.Name, node.Path, node.NodeType, node.Version).Scan(fileNodeScan(&node)...)
+	if isUniqueViolation(err) {
+		return domain.FileNode{}, domain.E(domain.CodeAlreadyExists, "file path already exists", err)
+	}
+	if err != nil {
+		return domain.FileNode{}, wrapDBErr(err)
+	}
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventCreate, nil, path, nil)
+	return node, wrapDBErr(err)
+}
+
+func (r *Repository) GetFileByID(ctx context.Context, userID, fileID string) (domain.FileNode, error) {
+	var node domain.FileNode
+	err := r.pool.QueryRow(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes
+		where user_id = $1 and id = $2 and deleted_at is null
+	`, userID, fileID).Scan(fileNodeScan(&node)...)
+	return node, wrapNotFound(err, "file not found")
+}
+
+func (r *Repository) GetFileByPath(ctx context.Context, userID, path string) (domain.FileNode, error) {
+	var node domain.FileNode
+	err := r.pool.QueryRow(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes
+		where user_id = $1 and path = $2 and deleted_at is null
+	`, userID, path).Scan(fileNodeScan(&node)...)
+	return node, wrapNotFound(err, "file not found")
+}
+
+func (r *Repository) ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes
+		where user_id = $1 and (($2::uuid is null and parent_id is null) or parent_id = $2::uuid) and deleted_at is null
+		order by node_type, name
+		limit $3
+	`, userID, parentID, limit)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer rows.Close()
+	var nodes []domain.FileNode
+	for rows.Next() {
+		var node domain.FileNode
+		if err := rows.Scan(fileNodeScan(&node)...); err != nil {
+			return nil, wrapDBErr(err)
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, wrapDBErr(rows.Err())
+}
+
+func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error) {
+	old, err := r.GetFileByID(ctx, userID, fileID)
+	if err != nil {
+		return domain.FileNode{}, err
+	}
+	var node domain.FileNode
+	err = r.pool.QueryRow(ctx, `
+		update file_nodes
+		set parent_id = $3, name = $4, path = $5, version = version + 1, updated_at = now()
+		where user_id = $1 and id = $2 and deleted_at is null
+		returning id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+	`, userID, fileID, newParentID, newName, newPath).Scan(fileNodeScan(&node)...)
+	if isUniqueViolation(err) {
+		return domain.FileNode{}, domain.E(domain.CodeAlreadyExists, "file path already exists", err)
+	}
+	if err != nil {
+		return domain.FileNode{}, wrapNotFound(err, "file not found")
+	}
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path)
+	return node, wrapDBErr(err)
+}
+
+func (r *Repository) DeleteFile(ctx context.Context, userID, fileID string) error {
+	node, err := r.GetFileByID(ctx, userID, fileID)
+	if err != nil {
+		return err
+	}
+	tag, err := r.pool.Exec(ctx, `
+		update file_nodes
+		set deleted_at = now(), version = version + 1, updated_at = now()
+		where user_id = $1 and id = $2 and deleted_at is null
+	`, userID, fileID)
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.E(domain.CodeFileNotFound, "file not found", nil)
+	}
+	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path)
+	return wrapDBErr(err)
+}
+
+func (r *Repository) CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error) {
+	if s.ID == "" {
+		s.ID = uuid.NewString()
+	}
+	if s.StagingKey == "" {
+		s.StagingKey = "staging/" + s.UserID + "/" + s.ID
+	}
+	if s.Status == "" {
+		s.Status = domain.UploadStatusPending
+	}
+	err := r.pool.QueryRow(ctx, `
+		insert into upload_sessions (id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key)
+		values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		returning id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+	`, s.ID, s.UserID, s.TargetPath, s.TargetFileID, s.BaseVersion, s.TotalSize, s.ChunkSize, s.SHA256, s.Status, s.StagingKey, s.ExpiresAt, s.IdempotencyKey).Scan(uploadSessionScan(&s)...)
+	return s, wrapDBErr(err)
+}
+
+func (r *Repository) GetUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error) {
+	var s domain.UploadSession
+	err := r.pool.QueryRow(ctx, `
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		from upload_sessions
+		where user_id = $1 and id = $2
+	`, userID, uploadID).Scan(uploadSessionScan(&s)...)
+	return s, wrapNotFound(err, "upload session not found")
+}
+
+func (r *Repository) PutUploadChunk(ctx context.Context, uploadID string, chunkIndex, size int32, sha256sum, storageKey string) (domain.UploadChunk, error) {
+	chunk := domain.UploadChunk{ID: uuid.NewString(), UploadID: uploadID, ChunkIndex: chunkIndex, Size: size, SHA256: sha256sum, StorageKey: storageKey}
+	err := r.pool.QueryRow(ctx, `
+		insert into upload_chunks (id, upload_id, chunk_index, size, sha256, storage_key)
+		values ($1,$2,$3,$4,$5,$6)
+		on conflict (upload_id, chunk_index) do update
+		set size = excluded.size, sha256 = excluded.sha256, storage_key = excluded.storage_key
+		returning id, upload_id, chunk_index, size, sha256, storage_key, created_at
+	`, chunk.ID, chunk.UploadID, chunk.ChunkIndex, chunk.Size, chunk.SHA256, chunk.StorageKey).Scan(&chunk.ID, &chunk.UploadID, &chunk.ChunkIndex, &chunk.Size, &chunk.SHA256, &chunk.StorageKey, &chunk.CreatedAt)
+	return chunk, wrapDBErr(err)
+}
+
+func (r *Repository) ListUploadChunks(ctx context.Context, uploadID string) ([]domain.UploadChunk, error) {
+	rows, err := r.pool.Query(ctx, `
+		select id, upload_id, chunk_index, size, sha256, storage_key, created_at
+		from upload_chunks
+		where upload_id = $1
+		order by chunk_index
+	`, uploadID)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer rows.Close()
+	var chunks []domain.UploadChunk
+	for rows.Next() {
+		var chunk domain.UploadChunk
+		if err := rows.Scan(&chunk.ID, &chunk.UploadID, &chunk.ChunkIndex, &chunk.Size, &chunk.SHA256, &chunk.StorageKey, &chunk.CreatedAt); err != nil {
+			return nil, wrapDBErr(err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks, wrapDBErr(rows.Err())
+}
+
+func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storageKey string) (domain.FileNode, int64, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.FileNode{}, 0, wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var s domain.UploadSession
+	err = tx.QueryRow(ctx, `
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		from upload_sessions
+		where user_id = $1 and id = $2
+		for update
+	`, userID, uploadID).Scan(uploadSessionScan(&s)...)
+	if err != nil {
+		return domain.FileNode{}, 0, wrapNotFound(err, "upload session not found")
+	}
+	if s.Status == domain.UploadStatusCommitted {
+		node, err := r.getFileByPathTx(ctx, tx, userID, s.TargetPath)
+		if err != nil {
+			return domain.FileNode{}, 0, err
+		}
+		return node, 0, tx.Commit(ctx)
+	}
+	if s.Status != domain.UploadStatusPending || time.Now().After(s.ExpiresAt) {
+		return domain.FileNode{}, 0, domain.E(domain.CodeUploadSessionExpired, "upload session is not active", nil)
+	}
+
+	existing, existingErr := r.getFileByPathTx(ctx, tx, userID, s.TargetPath)
+	if existingErr != nil && domain.ErrorCodeOf(existingErr) != domain.CodeNotFound {
+		return domain.FileNode{}, 0, existingErr
+	}
+	if existingErr == nil && s.BaseVersion != nil && existing.Version != *s.BaseVersion {
+		return domain.FileNode{}, 0, domain.E(domain.CodeFileConflict, "base version conflict", nil)
+	}
+
+	parentPath, name, err := domain.SplitPath(s.TargetPath)
+	if err != nil {
+		return domain.FileNode{}, 0, err
+	}
+	var parentID *string
+	if parentPath != "/" {
+		parent, err := r.getFileByPathTx(ctx, tx, userID, parentPath)
+		if err != nil {
+			return domain.FileNode{}, 0, err
+		}
+		parentID = &parent.ID
+	}
+
+	var node domain.FileNode
+	if existingErr == nil {
+		newVersion := existing.Version + 1
+		versionID := uuid.NewString()
+		_, err = tx.Exec(ctx, `
+			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key)
+			values ($1,$2,$3,$4,$5,$6,$7)
+		`, versionID, existing.ID, userID, newVersion, s.TotalSize, s.SHA256, storageKey)
+		if err != nil {
+			return domain.FileNode{}, 0, wrapDBErr(err)
+		}
+		err = tx.QueryRow(ctx, `
+			update file_nodes
+			set current_version_id = $3, size = $4, sha256 = $5, storage_key = $6, version = $7, updated_at = now()
+			where user_id = $1 and id = $2
+			returning id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		`, userID, existing.ID, versionID, s.TotalSize, s.SHA256, storageKey, newVersion).Scan(fileNodeScan(&node)...)
+		if err != nil {
+			return domain.FileNode{}, 0, wrapDBErr(err)
+		}
+	} else {
+		fileID := uuid.NewString()
+		versionID := uuid.NewString()
+		_, err = tx.Exec(ctx, `
+			insert into file_nodes (id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version)
+			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1)
+		`, fileID, userID, parentID, name, s.TargetPath, domain.NodeTypeFile, versionID, s.TotalSize, s.SHA256, storageKey)
+		if err != nil {
+			return domain.FileNode{}, 0, wrapDBErr(err)
+		}
+		_, err = tx.Exec(ctx, `
+			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key)
+			values ($1,$2,$3,1,$4,$5,$6)
+		`, versionID, fileID, userID, s.TotalSize, s.SHA256, storageKey)
+		if err != nil {
+			return domain.FileNode{}, 0, wrapDBErr(err)
+		}
+		node, err = r.getFileByPathTx(ctx, tx, userID, s.TargetPath)
+		if err != nil {
+			return domain.FileNode{}, 0, err
+		}
+	}
+	changeID, err := r.createChangeEvent(ctx, tx, userID, node.ID, domain.EventUpdate, &node.Version, node.Path, nil)
+	if err != nil {
+		return domain.FileNode{}, 0, err
+	}
+	_, err = tx.Exec(ctx, `update upload_sessions set status = $3, updated_at = now() where user_id = $1 and id = $2`, userID, uploadID, domain.UploadStatusCommitted)
+	if err != nil {
+		return domain.FileNode{}, 0, wrapDBErr(err)
+	}
+	return node, changeID, wrapDBErr(tx.Commit(ctx))
+}
+
+func (r *Repository) getFileByPathTx(ctx context.Context, tx pgx.Tx, userID, path string) (domain.FileNode, error) {
+	var node domain.FileNode
+	err := tx.QueryRow(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes
+		where user_id = $1 and path = $2 and deleted_at is null
+	`, userID, path).Scan(fileNodeScan(&node)...)
+	return node, wrapNotFound(err, "file not found")
+}
+
+func (r *Repository) createChangeEvent(ctx context.Context, tx pgx.Tx, userID, fileID, eventType string, version *int64, path string, oldPath *string) (int64, error) {
+	query := `
+		insert into change_events (user_id, file_id, event_type, version, path, old_path)
+		values ($1,$2,$3,$4,$5,$6)
+		returning id
+	`
+	var id int64
+	var err error
+	if tx != nil {
+		err = tx.QueryRow(ctx, query, userID, fileID, eventType, version, path, oldPath).Scan(&id)
+	} else {
+		err = r.pool.QueryRow(ctx, query, userID, fileID, eventType, version, path, oldPath).Scan(&id)
+	}
+	return id, wrapDBErr(err)
+}
+
+func fileNodeScan(n *domain.FileNode) []any {
+	return []any{&n.ID, &n.UserID, &n.ParentID, &n.Name, &n.Path, &n.NodeType, &n.CurrentVersionID, &n.Size, &n.SHA256, &n.StorageKey, &n.Version, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt}
+}
+
+func uploadSessionScan(s *domain.UploadSession) []any {
+	return []any{&s.ID, &s.UserID, &s.TargetPath, &s.TargetFileID, &s.BaseVersion, &s.TotalSize, &s.ChunkSize, &s.SHA256, &s.Status, &s.StagingKey, &s.ExpiresAt, &s.IdempotencyKey, &s.CreatedAt, &s.UpdatedAt}
+}
+
+func wrapNotFound(err error, message string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.E(domain.CodeNotFound, message, err)
+	}
+	return wrapDBErr(err)
+}
+
+func wrapDBErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return domain.E(domain.CodeInternal, "database error", err)
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
