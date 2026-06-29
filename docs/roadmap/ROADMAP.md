@@ -1,13 +1,16 @@
 # SyncHub Roadmap
 
 ## 技术栈结论
-后端主栈选择 Rust + Axum。
+默认推荐后端主栈选择 Rust + Axum，但项目仍处于调研阶段，最终选择应根据团队熟练度、MVP 时间压力和桌面端路线确认。
 
-这是 SyncHub 当前最合适的选择：项目核心是文件同步、流式 IO、版本一致性、后台任务和长期可维护的多端客户端，而不是普通 CRUD API。Rust + Axum 能让服务端、同步核心、CLI、Agent 和未来 Tauri GUI 共享领域模型与同步逻辑，并把更多一致性问题前移到编译期。
+推荐 Rust + Axum 的理由是：项目核心是文件同步、流式 IO、版本一致性、后台任务和长期可维护的多端客户端，而不是普通 CRUD API。Rust + Axum 能让服务端、同步核心、CLI、Agent 和未来 Tauri GUI 共享领域模型与同步逻辑，并把更多一致性问题前移到编译期。
 
 全 Go + Gin 也是可行方案。服务端、CLI、Agent 可以统一用 Go 实现，桌面端可选择 Wails 或 Web UI，这种情况下不存在双语言维护成本。它的优势是开发速度快、部署简单、并发模型直接、团队维护成本低。
 
-当前仍选择 Rust + Axum，是基于本仓库已经采用 Cargo Workspace、后续计划包含 Tauri GUI、同步核心适合跨服务端和客户端复用，以及文件版本一致性等长期复杂逻辑更受益于 Rust 类型系统。若项目目标改成最快交付服务端 + CLI + Agent，且 GUI 不绑定 Tauri，可以重新评估全 Go 方案。
+决策规则：
+- 选择 Rust + Axum：更重视长期正确性、类型约束、Tauri 生态和跨端核心逻辑复用。
+- 选择全 Go + Gin：更重视早期交付速度、团队上手成本、部署简洁性和服务端 / Agent 快速迭代。
+- 若团队对 Rust 熟练度不足，或者 MVP 时间压力明显，应优先考虑全 Go。
 
 ## 总体目标
 先做一个可靠的单用户 / 多设备同步闭环，再逐步扩展 WebDAV、版本恢复、团队空间和云对象存储。
@@ -243,7 +246,7 @@
 - 面向 AI session 的结构化同步策略。
 
 ## 近期执行顺序
-当前仓库应优先执行：
+若最终选择 Rust + Axum，优先执行：
 1. 创建 workspace crates 和基础依赖。
 2. 实现 `synchub-api` 的 health / ready endpoint。
 3. 建立 PostgreSQL migration 目录和 users / refresh_tokens 表。
@@ -253,3 +256,12 @@
 7. 实现 chunk upload 闭环。
 
 完成以上 7 步后，SyncHub 就具备继续做 Agent 同步的服务端基础。
+
+若最终选择全 Go + Gin，对应执行顺序调整为：
+1. 创建 Go module 和 internal package 边界。
+2. 实现 `cmd/synchub-api` 的 health / ready endpoint。
+3. 建立 PostgreSQL migration 目录和 users / refresh_tokens 表。
+4. 实现 Auth MVP。
+5. 实现 file_nodes / file_versions / change_events migration。
+6. 实现 Storage interface 和 Local FS backend。
+7. 实现 chunk upload 闭环。
