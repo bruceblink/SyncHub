@@ -382,6 +382,7 @@ func (r *SQLiteRepository) CommitUpload(ctx context.Context, userID, uploadID, s
 	}
 
 	var node domain.FileNode
+	eventType := domain.EventUpdate
 	now := time.Now().UTC()
 	if existingErr == nil {
 		newVersion := existing.Version + 1
@@ -406,6 +407,7 @@ func (r *SQLiteRepository) CommitUpload(ctx context.Context, userID, uploadID, s
 			return domain.FileNode{}, 0, err
 		}
 	} else {
+		eventType = domain.EventCreate
 		fileID := uuid.NewString()
 		versionID := uuid.NewString()
 		_, err = tx.ExecContext(ctx, `
@@ -427,7 +429,7 @@ func (r *SQLiteRepository) CommitUpload(ctx context.Context, userID, uploadID, s
 			return domain.FileNode{}, 0, err
 		}
 	}
-	changeID, err := r.createChangeEvent(ctx, tx, userID, node.ID, domain.EventUpdate, &node.Version, node.Path, nil)
+	changeID, err := r.createChangeEvent(ctx, tx, userID, node.ID, eventType, &node.Version, node.Path, nil)
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}
@@ -440,6 +442,95 @@ func (r *SQLiteRepository) CommitUpload(ctx context.Context, userID, uploadID, s
 		return domain.FileNode{}, 0, wrapSQLiteDBErr(err)
 	}
 	return node, changeID, wrapSQLiteDBErr(tx.Commit())
+}
+
+func (r *SQLiteRepository) CreateDevice(ctx context.Context, userID, name, platform string) (domain.Device, error) {
+	now := time.Now().UTC()
+	device := domain.Device{
+		ID:        uuid.NewString(),
+		UserID:    userID,
+		Name:      name,
+		Platform:  platform,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	_, err := r.db.ExecContext(ctx, `
+		insert into devices (id, user_id, name, platform, last_applied_change_id, created_at, updated_at)
+		values (?, ?, ?, ?, ?, ?, ?)
+	`, device.ID, device.UserID, device.Name, device.Platform, device.LastAppliedChangeID, device.CreatedAt, device.UpdatedAt)
+	return device, wrapSQLiteDBErr(err)
+}
+
+func (r *SQLiteRepository) HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, `
+		update devices
+		set last_seen_at = ?, updated_at = ?
+		where user_id = ? and id = ?
+	`, now, now, userID, deviceID)
+	if err != nil {
+		return domain.Device{}, wrapSQLiteDBErr(err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return domain.Device{}, domain.E(domain.CodeNotFound, "device not found", nil)
+	}
+	return r.getDevice(ctx, userID, deviceID)
+}
+
+func (r *SQLiteRepository) ListChanges(ctx context.Context, userID, deviceID string, afterChangeID int64, limit int32) ([]domain.ChangeEvent, error) {
+	if _, err := r.getDevice(ctx, userID, deviceID); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		select id, user_id, file_id, event_type, version, path, old_path, source_device_id, created_at
+		from change_events
+		where user_id = ? and id > ?
+		order by id
+		limit ?
+	`, userID, afterChangeID, limit)
+	if err != nil {
+		return nil, wrapSQLiteDBErr(err)
+	}
+	defer rows.Close()
+
+	var events []domain.ChangeEvent
+	for rows.Next() {
+		var event domain.ChangeEvent
+		if err := rows.Scan(changeEventScan(&event)...); err != nil {
+			return nil, wrapSQLiteDBErr(err)
+		}
+		events = append(events, event)
+	}
+	return events, wrapSQLiteDBErr(rows.Err())
+}
+
+func (r *SQLiteRepository) AckDevice(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, `
+		update devices
+		set last_applied_change_id = ?, updated_at = ?
+		where user_id = ? and id = ?
+	`, lastAppliedChangeID, now, userID, deviceID)
+	if err != nil {
+		return domain.Device{}, wrapSQLiteDBErr(err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return domain.Device{}, domain.E(domain.CodeNotFound, "device not found", nil)
+	}
+	return r.getDevice(ctx, userID, deviceID)
+}
+
+func (r *SQLiteRepository) getDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
+	var device domain.Device
+	err := r.db.QueryRowContext(ctx, `
+		select id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+		from devices
+		where user_id = ? and id = ?
+	`, userID, deviceID).Scan(deviceScan(&device)...)
+	return device, wrapSQLiteNotFound(err, "device not found")
 }
 
 func (r *SQLiteRepository) getFileByPathTx(ctx context.Context, tx *sql.Tx, userID, path string) (domain.FileNode, error) {

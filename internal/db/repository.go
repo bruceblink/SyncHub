@@ -314,6 +314,7 @@ func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storage
 	}
 
 	var node domain.FileNode
+	eventType := domain.EventUpdate
 	if existingErr == nil {
 		newVersion := existing.Version + 1
 		versionID := uuid.NewString()
@@ -334,6 +335,7 @@ func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storage
 			return domain.FileNode{}, 0, wrapDBErr(err)
 		}
 	} else {
+		eventType = domain.EventCreate
 		fileID := uuid.NewString()
 		versionID := uuid.NewString()
 		_, err = tx.Exec(ctx, `
@@ -355,7 +357,7 @@ func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storage
 			return domain.FileNode{}, 0, err
 		}
 	}
-	changeID, err := r.createChangeEvent(ctx, tx, userID, node.ID, domain.EventUpdate, &node.Version, node.Path, nil)
+	changeID, err := r.createChangeEvent(ctx, tx, userID, node.ID, eventType, &node.Version, node.Path, nil)
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}
@@ -364,6 +366,78 @@ func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storage
 		return domain.FileNode{}, 0, wrapDBErr(err)
 	}
 	return node, changeID, wrapDBErr(tx.Commit(ctx))
+}
+
+func (r *Repository) CreateDevice(ctx context.Context, userID, name, platform string) (domain.Device, error) {
+	device := domain.Device{ID: uuid.NewString(), UserID: userID, Name: name, Platform: platform}
+	err := r.pool.QueryRow(ctx, `
+		insert into devices (id, user_id, name, platform, last_applied_change_id)
+		values ($1, $2, $3, $4, $5)
+		returning id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+	`, device.ID, device.UserID, device.Name, device.Platform, device.LastAppliedChangeID).Scan(deviceScan(&device)...)
+	return device, wrapDBErr(err)
+}
+
+func (r *Repository) HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
+	var device domain.Device
+	err := r.pool.QueryRow(ctx, `
+		update devices
+		set last_seen_at = now(), updated_at = now()
+		where user_id = $1 and id = $2
+		returning id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+	`, userID, deviceID).Scan(deviceScan(&device)...)
+	return device, wrapNotFound(err, "device not found")
+}
+
+func (r *Repository) ListChanges(ctx context.Context, userID, deviceID string, afterChangeID int64, limit int32) ([]domain.ChangeEvent, error) {
+	if _, err := r.getDevice(ctx, userID, deviceID); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	rows, err := r.pool.Query(ctx, `
+		select id, user_id, file_id, event_type, version, path, old_path, source_device_id, created_at
+		from change_events
+		where user_id = $1 and id > $2
+		order by id
+		limit $3
+	`, userID, afterChangeID, limit)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer rows.Close()
+
+	var events []domain.ChangeEvent
+	for rows.Next() {
+		var event domain.ChangeEvent
+		if err := rows.Scan(changeEventScan(&event)...); err != nil {
+			return nil, wrapDBErr(err)
+		}
+		events = append(events, event)
+	}
+	return events, wrapDBErr(rows.Err())
+}
+
+func (r *Repository) AckDevice(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error) {
+	var device domain.Device
+	err := r.pool.QueryRow(ctx, `
+		update devices
+		set last_applied_change_id = $3, updated_at = now()
+		where user_id = $1 and id = $2
+		returning id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+	`, userID, deviceID, lastAppliedChangeID).Scan(deviceScan(&device)...)
+	return device, wrapNotFound(err, "device not found")
+}
+
+func (r *Repository) getDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
+	var device domain.Device
+	err := r.pool.QueryRow(ctx, `
+		select id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+		from devices
+		where user_id = $1 and id = $2
+	`, userID, deviceID).Scan(deviceScan(&device)...)
+	return device, wrapNotFound(err, "device not found")
 }
 
 func (r *Repository) getFileByPathTx(ctx context.Context, tx pgx.Tx, userID, path string) (domain.FileNode, error) {
@@ -398,6 +472,14 @@ func fileNodeScan(n *domain.FileNode) []any {
 
 func uploadSessionScan(s *domain.UploadSession) []any {
 	return []any{&s.ID, &s.UserID, &s.TargetPath, &s.TargetFileID, &s.BaseVersion, &s.TotalSize, &s.ChunkSize, &s.SHA256, &s.Status, &s.StagingKey, &s.ExpiresAt, &s.IdempotencyKey, &s.CreatedAt, &s.UpdatedAt}
+}
+
+func deviceScan(d *domain.Device) []any {
+	return []any{&d.ID, &d.UserID, &d.Name, &d.Platform, &d.LastSeenAt, &d.LastAppliedChangeID, &d.CreatedAt, &d.UpdatedAt}
+}
+
+func changeEventScan(e *domain.ChangeEvent) []any {
+	return []any{&e.ID, &e.UserID, &e.FileID, &e.EventType, &e.Version, &e.Path, &e.OldPath, &e.SourceDeviceID, &e.CreatedAt}
 }
 
 func wrapNotFound(err error, message string) error {
