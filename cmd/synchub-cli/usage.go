@@ -13,6 +13,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli sync status --path .")
 	fmt.Fprintln(w, "  synchub-cli sync push --path .")
 	fmt.Fprintln(w, "  synchub-cli sync pull --path .")
+	fmt.Fprintln(w, "  synchub-cli sync watch --path .")
 }
 
 func printWorkspaceUsage(w io.Writer) {
@@ -30,4 +31,5 @@ func printSyncUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli sync status --path .")
 	fmt.Fprintln(w, "  synchub-cli sync push --path .")
 	fmt.Fprintln(w, "  synchub-cli sync pull --path .")
+	fmt.Fprintln(w, "  synchub-cli sync watch --path .")
 }

@@ -1,0 +1,83 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/bruceblink/SyncHub/internal/watch"
+)
+
+func runSyncWatch(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("sync watch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	manifestPath := fs.String("manifest", "", "manifest file path")
+	interval := fs.Duration("interval", time.Second, "watch polling interval")
+	once := fs.Bool("once", false, "scan once against the current manifest and exit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *interval <= 0 {
+		return errors.New("watch interval must be positive")
+	}
+
+	root, workspace, localManifestPath, err := loadWorkspaceAndManifestPath(*rootPath, *workspaceConfigPath, *manifestPath)
+	if err != nil {
+		return err
+	}
+	if *once {
+		changes, err := scanManifestChanges(ctx, root, workspace.RemotePath, localManifestPath)
+		if err != nil {
+			return err
+		}
+		printWatchChanges(stdout, changes)
+		return nil
+	}
+
+	poller, err := watch.NewPoller(ctx, root, workspace.RemotePath)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "watching: %s\n", root)
+	return poller.Run(ctx, *interval, func(changes []watch.Change) error {
+		printWatchChanges(stdout, changes)
+		return nil
+	})
+}
+
+func scanManifestChanges(ctx context.Context, root, remotePath, manifestPath string) ([]watch.Change, error) {
+	m, err := readManifest(manifestPath)
+	if err != nil {
+		return nil, err
+	}
+	if m.Root != "" && filepath.Clean(m.Root) != filepath.Clean(root) {
+		return nil, fmt.Errorf("manifest root %s does not match workspace root %s", m.Root, root)
+	}
+	previous := watch.SnapshotFromManifest(m)
+	current, err := watch.Scan(ctx, root, remotePath)
+	if err != nil {
+		return nil, err
+	}
+	return watch.Diff(previous, current), nil
+}
+
+func printWatchChanges(stdout io.Writer, changes []watch.Change) {
+	for _, change := range changes {
+		fmt.Fprintf(stdout, "%s %s\n", change.Type, displayWatchPath(change))
+	}
+	fmt.Fprintf(stdout, "changes: %d\n", len(changes))
+}
+
+func displayWatchPath(change watch.Change) string {
+	if strings.TrimSpace(change.RelativePath) != "" {
+		return change.RelativePath
+	}
+	return change.Path
+}
