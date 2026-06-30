@@ -403,6 +403,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChangeListResponse"
+        "410":
+          description: Sync cursor expired or outside the available change feed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
   /api/v1/sync/ack:
     post:
       tags: [Sync]

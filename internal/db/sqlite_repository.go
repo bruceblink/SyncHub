@@ -516,6 +516,9 @@ func (r *SQLiteRepository) ListChanges(ctx context.Context, userID, deviceID str
 	if _, err := r.getDevice(ctx, userID, deviceID); err != nil {
 		return nil, err
 	}
+	if err := r.validateChangeCursor(ctx, userID, afterChangeID); err != nil {
+		return nil, err
+	}
 	if limit <= 0 || limit > 500 {
 		limit = 500
 	}
@@ -540,6 +543,25 @@ func (r *SQLiteRepository) ListChanges(ctx context.Context, userID, deviceID str
 		events = append(events, event)
 	}
 	return events, wrapSQLiteDBErr(rows.Err())
+}
+
+func (r *SQLiteRepository) validateChangeCursor(ctx context.Context, userID string, afterChangeID int64) error {
+	if afterChangeID == 0 {
+		return nil
+	}
+	var minID, maxID, count int64
+	err := r.db.QueryRowContext(ctx, `
+		select coalesce(min(id), 0), coalesce(max(id), 0), count(*)
+		from change_events
+		where user_id = ?
+	`, userID).Scan(&minID, &maxID, &count)
+	if err != nil {
+		return wrapSQLiteDBErr(err)
+	}
+	if count == 0 || afterChangeID > maxID || afterChangeID < minID-1 {
+		return domain.E(domain.CodeSyncCursorExpired, "sync cursor is outside the available change feed; run a full scan", nil)
+	}
+	return nil
 }
 
 func (r *SQLiteRepository) AckDevice(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error) {

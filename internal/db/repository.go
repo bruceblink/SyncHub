@@ -425,6 +425,9 @@ func (r *Repository) ListChanges(ctx context.Context, userID, deviceID string, a
 	if _, err := r.getDevice(ctx, userID, deviceID); err != nil {
 		return nil, err
 	}
+	if err := r.validateChangeCursor(ctx, userID, afterChangeID); err != nil {
+		return nil, err
+	}
 	if limit <= 0 || limit > 500 {
 		limit = 500
 	}
@@ -449,6 +452,25 @@ func (r *Repository) ListChanges(ctx context.Context, userID, deviceID string, a
 		events = append(events, event)
 	}
 	return events, wrapDBErr(rows.Err())
+}
+
+func (r *Repository) validateChangeCursor(ctx context.Context, userID string, afterChangeID int64) error {
+	if afterChangeID == 0 {
+		return nil
+	}
+	var minID, maxID, count int64
+	err := r.pool.QueryRow(ctx, `
+		select coalesce(min(id), 0), coalesce(max(id), 0), count(*)
+		from change_events
+		where user_id = $1
+	`, userID).Scan(&minID, &maxID, &count)
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	if count == 0 || afterChangeID > maxID || afterChangeID < minID-1 {
+		return domain.E(domain.CodeSyncCursorExpired, "sync cursor is outside the available change feed; run a full scan", nil)
+	}
+	return nil
 }
 
 func (r *Repository) AckDevice(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error) {

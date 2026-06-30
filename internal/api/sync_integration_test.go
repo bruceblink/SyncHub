@@ -157,4 +157,19 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 	if heartbeatResp.Code != http.StatusOK {
 		t.Fatalf("heartbeat status = %d body = %s", heartbeatResp.Code, heartbeatResp.Body.String())
 	}
+
+	expiredCursorReq := httptest.NewRequest(http.MethodGet, "/api/v1/sync/changes?device_id="+deviceBody.Data.ID+"&after_change_id=999999&limit=10", nil)
+	expiredCursorReq.Header.Set("Authorization", "Bearer "+token)
+	expiredCursorRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(expiredCursorRec, expiredCursorReq)
+	if expiredCursorRec.Code != http.StatusGone {
+		t.Fatalf("expired cursor status = %d body = %s", expiredCursorRec.Code, expiredCursorRec.Body.String())
+	}
+	var expiredCursorBody struct {
+		Code string `json:"code"`
+	}
+	decodeBody(t, expiredCursorRec, &expiredCursorBody)
+	if expiredCursorBody.Code != "SYNC_CURSOR_EXPIRED" {
+		t.Fatalf("expired cursor code = %q body = %s", expiredCursorBody.Code, expiredCursorRec.Body.String())
+	}
 }
