@@ -201,7 +201,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 文件监听。
 - push 本地新增 / 修改文件。
 - pull 服务端变更。
-- sync status。
+- sync status：读取工作区配置和本地 manifest，展示本地同步准备状态。
 
 验收标准：
 

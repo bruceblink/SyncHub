@@ -57,6 +57,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runWorkspace(args[1:], stdout, stderr)
 	case "manifest":
 		return runManifest(ctx, args[1:], stdout, stderr)
+	case "sync":
+		return runSync(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -173,6 +175,71 @@ func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+func runSync(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		printSyncUsage(stderr)
+		return errors.New("sync command is required")
+	}
+	switch args[0] {
+	case "status":
+		return runSyncStatus(args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		printSyncUsage(stdout)
+		return nil
+	default:
+		printSyncUsage(stderr)
+		return fmt.Errorf("unknown sync command: %s", args[0])
+	}
+}
+
+func runSyncStatus(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("sync status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	manifestPath := fs.String("manifest", "", "manifest file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	root, err := resolveWorkspaceRoot(*rootPath)
+	if err != nil {
+		return err
+	}
+	configPath := *workspaceConfigPath
+	if strings.TrimSpace(configPath) == "" {
+		configPath = filepath.Join(root, ".synchub", "workspace.json")
+	}
+	workspace, err := readWorkspaceConfig(configPath)
+	if err != nil {
+		return err
+	}
+	if workspace.Root != "" {
+		root = workspace.Root
+	}
+	localManifestPath := *manifestPath
+	if strings.TrimSpace(localManifestPath) == "" {
+		localManifestPath = filepath.Join(root, ".synchub", "manifest.json")
+	}
+
+	fmt.Fprintf(stdout, "workspace: %s\n", root)
+	fmt.Fprintf(stdout, "remote path: %s\n", workspace.RemotePath)
+	fmt.Fprintf(stdout, "user: %s\n", workspace.UserEmail)
+	m, err := readManifest(localManifestPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(stdout, "manifest: missing")
+			fmt.Fprintln(stdout, "next: run synchub-cli manifest scan --path .")
+			return nil
+		}
+		return err
+	}
+	fmt.Fprintf(stdout, "manifest: %s\n", localManifestPath)
+	fmt.Fprintf(stdout, "files: %d\n", len(m.Items))
+	fmt.Fprintf(stdout, "last scan: %s\n", m.GeneratedAt.Format(time.RFC3339))
+	return nil
+}
+
 func runManifest(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		printManifestUsage(stderr)
@@ -236,6 +303,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli login --server http://localhost:8080 --email user@example.com --password password")
 	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path .")
+	fmt.Fprintln(w, "  synchub-cli sync status --path .")
 }
 
 func printWorkspaceUsage(w io.Writer) {
@@ -246,6 +314,11 @@ func printWorkspaceUsage(w io.Writer) {
 func printManifestUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path .")
+}
+
+func printSyncUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  synchub-cli sync status --path .")
 }
 
 func readConfig(path string) (cliConfig, error) {
@@ -288,6 +361,21 @@ func readWorkspaceConfig(path string) (workspaceConfig, error) {
 		return workspaceConfig{}, errors.New("workspace config is incomplete; run synchub-cli workspace init again")
 	}
 	return cfg, nil
+}
+
+func readManifest(path string) (manifest.Manifest, error) {
+	if strings.TrimSpace(path) == "" {
+		return manifest.Manifest{}, errors.New("manifest path is required")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return manifest.Manifest{}, err
+	}
+	var m manifest.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return manifest.Manifest{}, err
+	}
+	return m, nil
 }
 
 func writeConfig(path string, cfg cliConfig) error {

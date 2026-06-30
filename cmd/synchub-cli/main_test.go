@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/bruceblink/SyncHub/internal/manifest"
 	"github.com/bruceblink/SyncHub/pkg/client"
 )
 
@@ -199,6 +201,68 @@ func TestRunManifestScanRequiresWorkspace(t *testing.T) {
 	}
 }
 
+func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+		Items: []manifest.Entry{
+			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: 5, SHA256: "sha"},
+		},
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"workspace: " + root,
+		"remote path: /workspace",
+		"user: user@example.com",
+		"files: 1",
+		"last scan: 2026-06-30T01:02:03Z",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "manifest: missing") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func clientUser(id, email string) client.User {
 	return client.User{ID: id, Email: email, Status: "active"}
+}
+
+func writeTestWorkspaceConfig(t *testing.T, root string) {
+	t.Helper()
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  "http://localhost:8080",
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
 }
