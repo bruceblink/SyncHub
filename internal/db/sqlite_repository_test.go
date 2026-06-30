@@ -39,6 +39,51 @@ func TestSQLiteExpireUploadSessions(t *testing.T) {
 	assertUploadStatus(t, repo, user.ID, committed.ID, domain.UploadStatusCommitted)
 }
 
+func TestSQLiteSchemaIncludesSyncConflicts(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	rows, err := repo.db.QueryContext(ctx, `pragma table_info(sync_conflicts)`)
+	if err != nil {
+		t.Fatalf("pragma sync_conflicts: %v", err)
+	}
+	defer rows.Close()
+
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	for _, name := range []string{"id", "user_id", "file_id", "path", "local_version", "remote_version", "resolution", "created_at", "resolved_at"} {
+		if !columns[name] {
+			t.Fatalf("sync_conflicts missing column %s", name)
+		}
+	}
+
+	var indexName string
+	err = repo.db.QueryRowContext(ctx, `
+		select name
+		from sqlite_master
+		where type = 'index' and name = 'sync_conflicts_user_resolution_idx'
+	`).Scan(&indexName)
+	if err != nil {
+		t.Fatalf("sync conflict resolution index missing: %v", err)
+	}
+}
+
 func createUploadSession(t *testing.T, repo *SQLiteRepository, userID, targetPath, status string, expiresAt time.Time) domain.UploadSession {
 	t.Helper()
 	session, err := repo.CreateUploadSession(context.Background(), domain.UploadSession{

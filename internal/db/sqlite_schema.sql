@@ -113,3 +113,18 @@ create table if not exists devices (
 );
 
 create index if not exists devices_user_id_idx on devices(user_id);
+
+create table if not exists sync_conflicts (
+    id text primary key,
+    user_id text not null references users(id) on delete cascade,
+    file_id text references file_nodes(id) on delete set null,
+    path text not null,
+    local_version integer,
+    remote_version integer,
+    resolution text not null default 'pending' check (resolution in ('pending', 'keep_local', 'keep_remote', 'keep_both')),
+    created_at datetime not null default current_timestamp,
+    resolved_at datetime
+);
+
+create index if not exists sync_conflicts_user_resolution_idx on sync_conflicts(user_id, resolution, created_at);
+create index if not exists sync_conflicts_user_path_idx on sync_conflicts(user_id, path, created_at);

@@ -99,6 +99,18 @@ type Device struct {
 	UpdatedAt           time.Time
 }
 
+type SyncConflict struct {
+	ID            string
+	UserID        string
+	FileID        *string
+	Path          string
+	LocalVersion  *int64
+	RemoteVersion *int64
+	Resolution    string
+	CreatedAt     time.Time
+	ResolvedAt    *time.Time
+}
+
 const (
 	NodeTypeFile      = "file"
 	NodeTypeDirectory = "directory"
@@ -113,4 +125,9 @@ const (
 	EventMove    = "move"
 	EventDelete  = "delete"
 	EventRestore = "restore"
+
+	ConflictResolutionPending    = "pending"
+	ConflictResolutionKeepLocal  = "keep_local"
+	ConflictResolutionKeepRemote = "keep_remote"
+	ConflictResolutionKeepBoth   = "keep_both"
 )
