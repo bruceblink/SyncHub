@@ -1,0 +1,14 @@
+.git
+.data
+.env
+.env.*
+bin
+dist
+coverage.out
+*.exe
+*.test
+*.out
+Dockerfile
+docker-compose.yml
+README.md
+docs
