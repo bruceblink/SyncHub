@@ -195,7 +195,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 
 任务：
 
-- CLI login。
+- CLI login：调用服务端登录 API，并将 token 写入本地配置。
 - workspace init。
 - 本地 manifest 扫描：path、size、mtime、sha256。
 - 文件监听。
