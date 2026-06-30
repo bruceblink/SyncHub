@@ -84,6 +84,56 @@ func TestSQLiteSchemaIncludesSyncConflicts(t *testing.T) {
 	}
 }
 
+func TestSQLiteSyncConflictRepository(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "conflict@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	localVersion := int64(1)
+	remoteVersion := int64(2)
+	created, err := repo.CreateSyncConflict(ctx, domain.SyncConflict{
+		UserID:        user.ID,
+		Path:          "/workspace/a.txt",
+		LocalVersion:  &localVersion,
+		RemoteVersion: &remoteVersion,
+	})
+	if err != nil {
+		t.Fatalf("create sync conflict: %v", err)
+	}
+	if created.ID == "" || created.Resolution != domain.ConflictResolutionPending {
+		t.Fatalf("unexpected created conflict: %#v", created)
+	}
+	if created.LocalVersion == nil || *created.LocalVersion != localVersion {
+		t.Fatalf("local version = %#v", created.LocalVersion)
+	}
+	if created.RemoteVersion == nil || *created.RemoteVersion != remoteVersion {
+		t.Fatalf("remote version = %#v", created.RemoteVersion)
+	}
+
+	conflicts, err := repo.ListSyncConflicts(ctx, user.ID, "", 100)
+	if err != nil {
+		t.Fatalf("list pending sync conflicts: %v", err)
+	}
+	if len(conflicts) != 1 || conflicts[0].ID != created.ID {
+		t.Fatalf("pending conflicts = %#v, want created conflict", conflicts)
+	}
+
+	resolved, err := repo.ListSyncConflicts(ctx, user.ID, domain.ConflictResolutionKeepBoth, 100)
+	if err != nil {
+		t.Fatalf("list keep-both sync conflicts: %v", err)
+	}
+	if len(resolved) != 0 {
+		t.Fatalf("keep-both conflicts = %#v, want none", resolved)
+	}
+}
+
 func createUploadSession(t *testing.T, repo *SQLiteRepository, userID, targetPath, status string, expiresAt time.Time) domain.UploadSession {
 	t.Helper()
 	session, err := repo.CreateUploadSession(context.Background(), domain.UploadSession{

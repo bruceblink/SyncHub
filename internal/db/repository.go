@@ -484,6 +484,51 @@ func (r *Repository) AckDevice(ctx context.Context, userID, deviceID string, las
 	return device, wrapNotFound(err, "device not found")
 }
 
+func (r *Repository) CreateSyncConflict(ctx context.Context, conflict domain.SyncConflict) (domain.SyncConflict, error) {
+	if conflict.ID == "" {
+		conflict.ID = uuid.NewString()
+	}
+	if conflict.Resolution == "" {
+		conflict.Resolution = domain.ConflictResolutionPending
+	}
+	err := r.pool.QueryRow(ctx, `
+		insert into sync_conflicts (id, user_id, file_id, path, local_version, remote_version, resolution)
+		values ($1,$2,$3,$4,$5,$6,$7)
+		returning id, user_id, file_id, path, local_version, remote_version, resolution, created_at, resolved_at
+	`, conflict.ID, conflict.UserID, conflict.FileID, conflict.Path, conflict.LocalVersion, conflict.RemoteVersion, conflict.Resolution).Scan(syncConflictScan(&conflict)...)
+	return conflict, wrapDBErr(err)
+}
+
+func (r *Repository) ListSyncConflicts(ctx context.Context, userID, resolution string, limit int32) ([]domain.SyncConflict, error) {
+	if resolution == "" {
+		resolution = domain.ConflictResolutionPending
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	rows, err := r.pool.Query(ctx, `
+		select id, user_id, file_id, path, local_version, remote_version, resolution, created_at, resolved_at
+		from sync_conflicts
+		where user_id = $1 and resolution = $2
+		order by created_at desc, id desc
+		limit $3
+	`, userID, resolution, limit)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer rows.Close()
+
+	var conflicts []domain.SyncConflict
+	for rows.Next() {
+		var conflict domain.SyncConflict
+		if err := rows.Scan(syncConflictScan(&conflict)...); err != nil {
+			return nil, wrapDBErr(err)
+		}
+		conflicts = append(conflicts, conflict)
+	}
+	return conflicts, wrapDBErr(rows.Err())
+}
+
 func (r *Repository) getDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
 	var device domain.Device
 	err := r.pool.QueryRow(ctx, `
@@ -534,6 +579,10 @@ func deviceScan(d *domain.Device) []any {
 
 func changeEventScan(e *domain.ChangeEvent) []any {
 	return []any{&e.ID, &e.UserID, &e.FileID, &e.EventType, &e.Version, &e.Path, &e.OldPath, &e.SourceDeviceID, &e.CreatedAt}
+}
+
+func syncConflictScan(c *domain.SyncConflict) []any {
+	return []any{&c.ID, &c.UserID, &c.FileID, &c.Path, &c.LocalVersion, &c.RemoteVersion, &c.Resolution, &c.CreatedAt, &c.ResolvedAt}
 }
 
 func wrapNotFound(err error, message string) error {

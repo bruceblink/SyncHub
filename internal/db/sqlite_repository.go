@@ -580,6 +580,64 @@ func (r *SQLiteRepository) AckDevice(ctx context.Context, userID, deviceID strin
 	return r.getDevice(ctx, userID, deviceID)
 }
 
+func (r *SQLiteRepository) CreateSyncConflict(ctx context.Context, conflict domain.SyncConflict) (domain.SyncConflict, error) {
+	if conflict.ID == "" {
+		conflict.ID = uuid.NewString()
+	}
+	if conflict.Resolution == "" {
+		conflict.Resolution = domain.ConflictResolutionPending
+	}
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		insert into sync_conflicts (id, user_id, file_id, path, local_version, remote_version, resolution, created_at)
+		values (?, ?, ?, ?, ?, ?, ?, ?)
+	`, conflict.ID, conflict.UserID, conflict.FileID, conflict.Path, conflict.LocalVersion, conflict.RemoteVersion, conflict.Resolution, now)
+	if err != nil {
+		return domain.SyncConflict{}, wrapSQLiteDBErr(err)
+	}
+	return r.getSyncConflict(ctx, conflict.ID)
+}
+
+func (r *SQLiteRepository) ListSyncConflicts(ctx context.Context, userID, resolution string, limit int32) ([]domain.SyncConflict, error) {
+	if resolution == "" {
+		resolution = domain.ConflictResolutionPending
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		select id, user_id, file_id, path, local_version, remote_version, resolution, created_at, resolved_at
+		from sync_conflicts
+		where user_id = ? and resolution = ?
+		order by created_at desc, id desc
+		limit ?
+	`, userID, resolution, limit)
+	if err != nil {
+		return nil, wrapSQLiteDBErr(err)
+	}
+	defer rows.Close()
+
+	var conflicts []domain.SyncConflict
+	for rows.Next() {
+		var conflict domain.SyncConflict
+		if err := rows.Scan(syncConflictScan(&conflict)...); err != nil {
+			return nil, wrapSQLiteDBErr(err)
+		}
+		conflicts = append(conflicts, conflict)
+	}
+	return conflicts, wrapSQLiteDBErr(rows.Err())
+}
+
+func (r *SQLiteRepository) getSyncConflict(ctx context.Context, conflictID string) (domain.SyncConflict, error) {
+	var conflict domain.SyncConflict
+	err := r.db.QueryRowContext(ctx, `
+		select id, user_id, file_id, path, local_version, remote_version, resolution, created_at, resolved_at
+		from sync_conflicts
+		where id = ?
+	`, conflictID).Scan(syncConflictScan(&conflict)...)
+	return conflict, wrapSQLiteNotFound(err, "sync conflict not found")
+}
+
 func (r *SQLiteRepository) getDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
 	var device domain.Device
 	err := r.db.QueryRowContext(ctx, `
