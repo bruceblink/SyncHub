@@ -56,6 +56,11 @@ Phase 2 起按需要增加：
 - `GET /healthz`: 进程存活。
 - `GET /readyz`: 数据库、storage 可用。
 
+## API 文档
+
+- Swagger UI: `GET /swagger/`
+- OpenAPI YAML: `GET /swagger/openapi.yaml`
+
 ## 备份
 
 - SQLite 开发数据库可随本地数据目录备份；生产级 PostgreSQL / MySQL 需要定期备份。

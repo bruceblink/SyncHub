@@ -1,0 +1,682 @@
+openapi: 3.0.3
+info:
+  title: SyncHub API
+  version: 0.1.0
+  description: REST API for SyncHub workspace synchronization.
+servers:
+  - url: http://localhost:8765
+security:
+  - bearerAuth: []
+tags:
+  - name: Health
+  - name: Auth
+  - name: File
+  - name: Upload
+  - name: Download
+  - name: Sync
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+  /readyz:
+    get:
+      tags: [Health]
+      summary: Readiness check
+      security: []
+      responses:
+        "200":
+          description: Service is ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRequest"
+      responses:
+        "201":
+          description: User and tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRequest"
+      responses:
+        "200":
+          description: User and tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: Token pair.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke refresh token
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: Logged out.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+  /api/v1/files:
+    get:
+      tags: [File]
+      summary: List files
+      parameters:
+        - name: parent_id
+          in: query
+          schema:
+            type: string
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: File list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileListResponse"
+  /api/v1/files/by-path:
+    get:
+      tags: [File]
+      summary: Get file by path
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+            example: /workspace/readme.txt
+      responses:
+        "200":
+          description: File metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileResponse"
+  /api/v1/files/{id}:
+    get:
+      tags: [File]
+      summary: Get file by id
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+      responses:
+        "200":
+          description: File metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileResponse"
+    patch:
+      tags: [File]
+      summary: Move or rename file
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+      responses:
+        "200":
+          description: Updated file metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileResponse"
+    delete:
+      tags: [File]
+      summary: Delete file
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+  /api/v1/files/directories:
+    post:
+      tags: [File]
+      summary: Create directory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                  example: /workspace
+      responses:
+        "201":
+          description: Created directory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileResponse"
+  /api/v1/files/{id}/content:
+    get:
+      tags: [Download]
+      summary: Download file content
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+        - name: Range
+          in: header
+          schema:
+            type: string
+            example: bytes=0-1023
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Partial file content.
+  /api/v1/uploads:
+    post:
+      tags: [Upload]
+      summary: Initialize chunk upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadInitRequest"
+      responses:
+        "201":
+          description: Upload session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+  /api/v1/uploads/{id}:
+    get:
+      tags: [Upload]
+      summary: Get upload status
+      parameters:
+        - $ref: "#/components/parameters/UploadID"
+      responses:
+        "200":
+          description: Upload status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+  /api/v1/uploads/{id}/chunks/{index}:
+    put:
+      tags: [Upload]
+      summary: Upload chunk
+      parameters:
+        - $ref: "#/components/parameters/UploadID"
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+        - name: X-Chunk-Sha256
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Uploaded chunk.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChunkResponse"
+  /api/v1/uploads/{id}/commit:
+    post:
+      tags: [Upload]
+      summary: Commit upload session
+      parameters:
+        - $ref: "#/components/parameters/UploadID"
+      responses:
+        "200":
+          description: Committed upload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommitResponse"
+  /api/v1/devices:
+    post:
+      tags: [Sync]
+      summary: Register device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, platform]
+              properties:
+                name:
+                  type: string
+                  example: work-laptop
+                platform:
+                  type: string
+                  example: windows
+      responses:
+        "201":
+          description: Registered device.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceResponse"
+  /api/v1/devices/{id}/heartbeat:
+    post:
+      tags: [Sync]
+      summary: Update device heartbeat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated device.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceResponse"
+  /api/v1/sync/changes:
+    get:
+      tags: [Sync]
+      summary: Pull change events
+      parameters:
+        - name: device_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: after_change_id
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+            maximum: 500
+      responses:
+        "200":
+          description: Change feed page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeListResponse"
+  /api/v1/sync/ack:
+    post:
+      tags: [Sync]
+      summary: Acknowledge applied changes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, last_applied_change_id]
+              properties:
+                device_id:
+                  type: string
+                last_applied_change_id:
+                  type: integer
+      responses:
+        "200":
+          description: Updated device cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    FileID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    UploadID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    APIResponse:
+      type: object
+      properties:
+        code:
+          oneOf:
+            - type: integer
+            - type: string
+        message:
+          type: string
+        data:
+          type: object
+    AuthRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+    AuthResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                user:
+                  $ref: "#/components/schemas/User"
+                tokens:
+                  $ref: "#/components/schemas/TokenPair"
+    TokenResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TokenPair"
+    TokenPair:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+    FileNode:
+      type: object
+      properties:
+        id:
+          type: string
+        parent_id:
+          type: string
+          nullable: true
+        name:
+          type: string
+        path:
+          type: string
+        node_type:
+          type: string
+          enum: [file, directory]
+        size:
+          type: integer
+        sha256:
+          type: string
+          nullable: true
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    FileResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FileNode"
+    FileListResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FileNode"
+    UploadInitRequest:
+      type: object
+      required: [path, size, sha256]
+      properties:
+        path:
+          type: string
+        size:
+          type: integer
+        sha256:
+          type: string
+        chunk_size:
+          type: integer
+        base_version:
+          type: integer
+          nullable: true
+    UploadSession:
+      type: object
+      properties:
+        upload_id:
+          type: string
+        path:
+          type: string
+        chunk_size:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        uploaded_chunks:
+          type: array
+          items:
+            $ref: "#/components/schemas/UploadChunk"
+    UploadChunk:
+      type: object
+      properties:
+        chunk_index:
+          type: integer
+        size:
+          type: integer
+        sha256:
+          type: string
+    UploadResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UploadSession"
+    ChunkResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UploadChunk"
+    CommitResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                file_id:
+                  type: string
+                version:
+                  type: integer
+                change_id:
+                  type: integer
+    Device:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        platform:
+          type: string
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_applied_change_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeviceResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Device"
+    ChangeEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+        file_id:
+          type: string
+        event_type:
+          type: string
+          enum: [create, update, move, delete, restore]
+        version:
+          type: integer
+          nullable: true
+        path:
+          type: string
+        old_path:
+          type: string
+          nullable: true
+        source_device_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    ChangeListResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ChangeEvent"
+                next_cursor:
+                  type: integer

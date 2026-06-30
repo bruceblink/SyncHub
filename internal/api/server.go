@@ -55,6 +55,9 @@ func (s *Server) routes() {
 		}
 		ok(c, gin.H{"status": "ready"})
 	})
+	s.router.GET("/swagger", swaggerRedirect)
+	s.router.GET("/swagger/", swaggerUI)
+	s.router.GET("/swagger/openapi.yaml", swaggerSpec)
 
 	v1 := s.router.Group("/api/v1")
 	v1.POST("/auth/register", s.register)
