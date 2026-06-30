@@ -128,6 +128,77 @@ func TestRunWorkspaceInitRequiresLogin(t *testing.T) {
 	}
 }
 
+func TestRunManifestScanWritesManifest(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "nested", "b.txt"), []byte("bravo"), 0o644); err != nil {
+		t.Fatalf("write nested file: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  "http://localhost:8080",
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"manifest",
+		"scan",
+		"--path", root,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("manifest scan: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "manifest scanned: 2 files") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, ".synchub", "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest struct {
+		Items []struct {
+			Path         string `json:"path"`
+			RelativePath string `json:"relative_path"`
+			SHA256       string `json:"sha256"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if len(manifest.Items) != 2 {
+		t.Fatalf("items = %d, want 2: %#v", len(manifest.Items), manifest.Items)
+	}
+	if manifest.Items[0].Path != "/workspace/a.txt" || manifest.Items[0].RelativePath != "a.txt" {
+		t.Fatalf("first item = %#v", manifest.Items[0])
+	}
+	if manifest.Items[1].Path != "/workspace/nested/b.txt" || manifest.Items[1].RelativePath != "nested/b.txt" {
+		t.Fatalf("second item = %#v", manifest.Items[1])
+	}
+}
+
+func TestRunManifestScanRequiresWorkspace(t *testing.T) {
+	err := run(context.Background(), []string{
+		"manifest",
+		"scan",
+		"--path", t.TempDir(),
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "workspace is not initialized") {
+		t.Fatalf("error = %v, want workspace not initialized", err)
+	}
+}
+
 func clientUser(id, email string) client.User {
 	return client.User{ID: id, Email: email, Status: "active"}
 }

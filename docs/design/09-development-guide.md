@@ -17,6 +17,7 @@ go test ./...
 go run ./cmd/synchub-api
 go run ./cmd/synchub-cli login --server http://localhost:8080 --email user@example.com --password password
 go run ./cmd/synchub-cli workspace init --path . --remote-path /workspace
+go run ./cmd/synchub-cli manifest scan --path .
 ```
 
 ## 本地配置

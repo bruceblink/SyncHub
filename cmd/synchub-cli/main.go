@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bruceblink/SyncHub/internal/manifest"
 	"github.com/bruceblink/SyncHub/pkg/client"
 )
 
@@ -54,6 +55,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runLogin(ctx, args[1:], stdout, stderr)
 	case "workspace":
 		return runWorkspace(args[1:], stdout, stderr)
+	case "manifest":
+		return runManifest(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -170,15 +173,79 @@ func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+func runManifest(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		printManifestUsage(stderr)
+		return errors.New("manifest command is required")
+	}
+	switch args[0] {
+	case "scan":
+		return runManifestScan(ctx, args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		printManifestUsage(stdout)
+		return nil
+	default:
+		printManifestUsage(stderr)
+		return fmt.Errorf("unknown manifest command: %s", args[0])
+	}
+}
+
+func runManifestScan(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("manifest scan", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	outputPath := fs.String("output", "", "manifest output file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	root, err := resolveWorkspaceRoot(*rootPath)
+	if err != nil {
+		return err
+	}
+	configPath := *workspaceConfigPath
+	if strings.TrimSpace(configPath) == "" {
+		configPath = filepath.Join(root, ".synchub", "workspace.json")
+	}
+	workspace, err := readWorkspaceConfig(configPath)
+	if err != nil {
+		return err
+	}
+	if workspace.Root != "" {
+		root = workspace.Root
+	}
+	m, err := manifest.Scan(ctx, root, workspace.RemotePath)
+	if err != nil {
+		return err
+	}
+	out := *outputPath
+	if strings.TrimSpace(out) == "" {
+		out = filepath.Join(root, ".synchub", "manifest.json")
+	}
+	if err := writeJSONFile(out, m, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "manifest scanned: %d files\n", len(m.Items))
+	fmt.Fprintf(stdout, "output: %s\n", out)
+	return nil
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli login --server http://localhost:8080 --email user@example.com --password password")
 	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace")
+	fmt.Fprintln(w, "  synchub-cli manifest scan --path .")
 }
 
 func printWorkspaceUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace")
+}
+
+func printManifestUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  synchub-cli manifest scan --path .")
 }
 
 func readConfig(path string) (cliConfig, error) {
@@ -198,6 +265,27 @@ func readConfig(path string) (cliConfig, error) {
 	}
 	if cfg.ServerURL == "" || cfg.Tokens.AccessToken == "" {
 		return cliConfig{}, errors.New("login config is incomplete; run synchub-cli login again")
+	}
+	return cfg, nil
+}
+
+func readWorkspaceConfig(path string) (workspaceConfig, error) {
+	if strings.TrimSpace(path) == "" {
+		return workspaceConfig{}, errors.New("workspace config path is required")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return workspaceConfig{}, errors.New("workspace is not initialized; run synchub-cli workspace init first")
+		}
+		return workspaceConfig{}, err
+	}
+	var cfg workspaceConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return workspaceConfig{}, err
+	}
+	if cfg.Root == "" || cfg.RemotePath == "" {
+		return workspaceConfig{}, errors.New("workspace config is incomplete; run synchub-cli workspace init again")
 	}
 	return cfg, nil
 }
