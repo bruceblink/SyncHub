@@ -1,0 +1,299 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/bruceblink/SyncHub/pkg/client"
+)
+
+func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("sync pull", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	deviceName := fs.String("device-name", "", "device name")
+	devicePlatform := fs.String("platform", runtime.GOOS, "device platform")
+	limit := fs.Int("limit", 500, "maximum changes to pull")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *limit <= 0 {
+		return errors.New("limit must be positive")
+	}
+
+	root, workspace, workspacePath, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+	if err != nil {
+		return err
+	}
+	loginConfig, err := readConfig(*configPath)
+	if err != nil {
+		return err
+	}
+	serverURL := workspace.ServerURL
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = loginConfig.ServerURL
+	}
+	apiClient := client.New(serverURL)
+	changed, err := ensureWorkspaceDevice(ctx, apiClient, loginConfig.Tokens.AccessToken, root, &workspace, *deviceName, *devicePlatform)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
+			return err
+		}
+	}
+
+	changes, err := apiClient.ListChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, workspace.LastAppliedChangeID, int32(*limit))
+	if err != nil {
+		return err
+	}
+	files, dirs, deleted, moved := 0, 0, 0, 0
+	for _, event := range changes.Items {
+		result, err := applyChangeEvent(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace.RemotePath, event)
+		if err != nil {
+			return err
+		}
+		files += result.files
+		dirs += result.dirs
+		deleted += result.deleted
+		moved += result.moved
+	}
+	nextCursor := changes.NextCursor
+	if nextCursor == 0 && len(changes.Items) > 0 {
+		nextCursor = changes.Items[len(changes.Items)-1].ID
+	}
+	if nextCursor > workspace.LastAppliedChangeID {
+		device, err := apiClient.AckChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, nextCursor)
+		if err != nil {
+			return err
+		}
+		workspace.LastAppliedChangeID = device.LastAppliedChangeID
+		if workspace.LastAppliedChangeID < nextCursor {
+			workspace.LastAppliedChangeID = nextCursor
+		}
+		if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(stdout, "pulled: %d files\n", files)
+	fmt.Fprintf(stdout, "directories: %d\n", dirs)
+	fmt.Fprintf(stdout, "deleted: %d\n", deleted)
+	fmt.Fprintf(stdout, "moved: %d\n", moved)
+	fmt.Fprintf(stdout, "cursor: %d\n", workspace.LastAppliedChangeID)
+	return nil
+}
+
+func ensureWorkspaceDevice(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace *workspaceConfig, deviceName, platform string) (bool, error) {
+	if strings.TrimSpace(deviceName) == "" {
+		deviceName = defaultDeviceName(root)
+	}
+	if strings.TrimSpace(platform) == "" {
+		platform = runtime.GOOS
+	}
+	if strings.TrimSpace(workspace.DeviceID) == "" {
+		device, err := apiClient.RegisterDevice(ctx, accessToken, deviceName, platform)
+		if err != nil {
+			return false, err
+		}
+		workspace.DeviceID = device.ID
+		workspace.DeviceName = device.Name
+		workspace.DevicePlatform = device.Platform
+		workspace.LastAppliedChangeID = device.LastAppliedChangeID
+		return true, nil
+	}
+	device, err := apiClient.HeartbeatDevice(ctx, accessToken, workspace.DeviceID)
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	if device.LastAppliedChangeID > workspace.LastAppliedChangeID {
+		workspace.LastAppliedChangeID = device.LastAppliedChangeID
+		changed = true
+	}
+	if workspace.DeviceName == "" && device.Name != "" {
+		workspace.DeviceName = device.Name
+		changed = true
+	}
+	if workspace.DevicePlatform == "" && device.Platform != "" {
+		workspace.DevicePlatform = device.Platform
+		changed = true
+	}
+	return changed, nil
+}
+
+type pullApplyResult struct {
+	files   int
+	dirs    int
+	deleted int
+	moved   int
+}
+
+func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken, root, remoteRoot string, event client.ChangeEvent) (pullApplyResult, error) {
+	switch event.EventType {
+	case "create", "update", "restore":
+		localPath, ok, err := localPathForRemote(root, remoteRoot, event.Path)
+		if err != nil || !ok {
+			return pullApplyResult{}, err
+		}
+		if event.Version == nil {
+			if err := os.MkdirAll(localPath, 0o755); err != nil {
+				return pullApplyResult{}, err
+			}
+			return pullApplyResult{dirs: 1}, nil
+		}
+		if err := downloadChangeFile(ctx, apiClient, accessToken, event.FileID, localPath); err != nil {
+			return pullApplyResult{}, err
+		}
+		return pullApplyResult{files: 1}, nil
+	case "delete":
+		localPath, ok, err := localPathForRemote(root, remoteRoot, event.Path)
+		if err != nil || !ok {
+			return pullApplyResult{}, err
+		}
+		if err := os.RemoveAll(localPath); err != nil {
+			return pullApplyResult{}, err
+		}
+		return pullApplyResult{deleted: 1}, nil
+	case "move":
+		if event.OldPath == nil {
+			return pullApplyResult{}, errors.New("move event is missing old_path")
+		}
+		if err := moveLocalPath(root, remoteRoot, *event.OldPath, event.Path); err != nil {
+			return pullApplyResult{}, err
+		}
+		return pullApplyResult{moved: 1}, nil
+	default:
+		return pullApplyResult{}, fmt.Errorf("unsupported change event type: %s", event.EventType)
+	}
+}
+
+func moveLocalPath(root, remoteRoot, oldRemotePath, newRemotePath string) error {
+	oldLocalPath, ok, err := localPathForRemote(root, remoteRoot, oldRemotePath)
+	if err != nil || !ok {
+		return err
+	}
+	newLocalPath, ok, err := localPathForRemote(root, remoteRoot, newRemotePath)
+	if err != nil || !ok {
+		return err
+	}
+	if _, err := os.Stat(oldLocalPath); err != nil {
+		return err
+	}
+	if _, err := os.Stat(newLocalPath); err == nil {
+		return fmt.Errorf("move target already exists: %s", newLocalPath)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(newLocalPath), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(oldLocalPath, newLocalPath)
+}
+
+func downloadChangeFile(ctx context.Context, apiClient *client.Client, accessToken, fileID, localPath string) error {
+	result, err := apiClient.DownloadFile(ctx, accessToken, fileID, client.DownloadOptions{})
+	if err != nil {
+		return err
+	}
+	defer result.Body.Close()
+	if result.StatusCode == http.StatusNotModified {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(localPath), ".synchub-pull-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := io.Copy(tmp, result.Body); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, localPath); err != nil {
+		return err
+	}
+	removeTmp = false
+	return nil
+}
+
+func localPathForRemote(root, remoteRoot, remotePath string) (string, bool, error) {
+	remoteRoot, err := normalizeRemotePath(remoteRoot)
+	if err != nil {
+		return "", false, err
+	}
+	remotePath, err = normalizeRemotePath(remotePath)
+	if err != nil {
+		return "", false, err
+	}
+	var relative string
+	switch {
+	case remoteRoot == "/":
+		relative = strings.TrimPrefix(remotePath, "/")
+	case remotePath == remoteRoot:
+		relative = ""
+	case strings.HasPrefix(remotePath, remoteRoot+"/"):
+		relative = strings.TrimPrefix(strings.TrimPrefix(remotePath, remoteRoot), "/")
+	default:
+		return "", false, nil
+	}
+	localPath := filepath.Join(root, filepath.FromSlash(relative))
+	if err := ensureLocalPathInsideRoot(root, localPath); err != nil {
+		return "", false, err
+	}
+	return localPath, true, nil
+}
+
+func ensureLocalPathInsideRoot(root, localPath string) error {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	absLocal, err := filepath.Abs(localPath)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(absRoot, absLocal)
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return nil
+	}
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
+		return fmt.Errorf("remote path resolves outside workspace: %s", localPath)
+	}
+	return nil
+}
+
+func defaultDeviceName(root string) string {
+	if hostname, err := os.Hostname(); err == nil && strings.TrimSpace(hostname) != "" {
+		return hostname
+	}
+	name := filepath.Base(filepath.Clean(root))
+	if name == "." || name == string(filepath.Separator) || name == "" {
+		return "synchub-cli"
+	}
+	return name
+}

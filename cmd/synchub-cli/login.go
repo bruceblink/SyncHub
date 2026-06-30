@@ -1,0 +1,52 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/bruceblink/SyncHub/pkg/client"
+)
+
+func runLogin(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	serverURL := fs.String("server", envOrDefault("SYNCHUB_SERVER", defaultServerURL), "SyncHub API server URL")
+	email := fs.String("email", os.Getenv("SYNCHUB_EMAIL"), "login email")
+	password := fs.String("password", os.Getenv("SYNCHUB_PASSWORD"), "login password")
+	configPath := fs.String("config", defaultConfigPath(), "config file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*email) == "" {
+		return errors.New("email is required")
+	}
+	if *password == "" {
+		return errors.New("password is required")
+	}
+
+	apiClient := client.New(*serverURL)
+	data, err := apiClient.Login(ctx, *email, *password)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	cfg := cliConfig{
+		ServerURL:            apiClient.BaseURL,
+		User:                 data.User,
+		Tokens:               data.Tokens,
+		AccessTokenExpiresAt: data.Tokens.AccessTokenExpiresAt(now),
+		UpdatedAt:            now,
+	}
+	if err := writeConfig(*configPath, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "logged in as %s\n", data.User.Email)
+	fmt.Fprintf(stdout, "config: %s\n", *configPath)
+	return nil
+}
