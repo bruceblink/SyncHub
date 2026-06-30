@@ -329,6 +329,19 @@ func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storage
 		return domain.FileNode{}, 0, existingErr
 	}
 	if existingErr == nil && s.BaseVersion != nil && existing.Version != *s.BaseVersion {
+		remoteVersion := existing.Version
+		if err := createSyncConflictTx(ctx, tx, domain.SyncConflict{
+			UserID:        userID,
+			FileID:        &existing.ID,
+			Path:          s.TargetPath,
+			LocalVersion:  s.BaseVersion,
+			RemoteVersion: &remoteVersion,
+		}); err != nil {
+			return domain.FileNode{}, 0, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return domain.FileNode{}, 0, wrapDBErr(err)
+		}
 		return domain.FileNode{}, 0, domain.E(domain.CodeFileConflict, "base version conflict", nil)
 	}
 
@@ -497,6 +510,20 @@ func (r *Repository) CreateSyncConflict(ctx context.Context, conflict domain.Syn
 		returning id, user_id, file_id, path, local_version, remote_version, resolution, created_at, resolved_at
 	`, conflict.ID, conflict.UserID, conflict.FileID, conflict.Path, conflict.LocalVersion, conflict.RemoteVersion, conflict.Resolution).Scan(syncConflictScan(&conflict)...)
 	return conflict, wrapDBErr(err)
+}
+
+func createSyncConflictTx(ctx context.Context, tx pgx.Tx, conflict domain.SyncConflict) error {
+	if conflict.ID == "" {
+		conflict.ID = uuid.NewString()
+	}
+	if conflict.Resolution == "" {
+		conflict.Resolution = domain.ConflictResolutionPending
+	}
+	_, err := tx.Exec(ctx, `
+		insert into sync_conflicts (id, user_id, file_id, path, local_version, remote_version, resolution)
+		values ($1,$2,$3,$4,$5,$6,$7)
+	`, conflict.ID, conflict.UserID, conflict.FileID, conflict.Path, conflict.LocalVersion, conflict.RemoteVersion, conflict.Resolution)
+	return wrapDBErr(err)
 }
 
 func (r *Repository) ListSyncConflicts(ctx context.Context, userID, resolution string, limit int32) ([]domain.SyncConflict, error) {
