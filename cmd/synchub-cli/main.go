@@ -300,7 +300,7 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
-	files, dirs, deleted := 0, 0, 0
+	files, dirs, deleted, moved := 0, 0, 0, 0
 	for _, event := range changes.Items {
 		result, err := applyChangeEvent(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace.RemotePath, event)
 		if err != nil {
@@ -309,6 +309,7 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		files += result.files
 		dirs += result.dirs
 		deleted += result.deleted
+		moved += result.moved
 	}
 	nextCursor := changes.NextCursor
 	if nextCursor == 0 && len(changes.Items) > 0 {
@@ -330,6 +331,7 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	fmt.Fprintf(stdout, "pulled: %d files\n", files)
 	fmt.Fprintf(stdout, "directories: %d\n", dirs)
 	fmt.Fprintf(stdout, "deleted: %d\n", deleted)
+	fmt.Fprintf(stdout, "moved: %d\n", moved)
 	fmt.Fprintf(stdout, "cursor: %d\n", workspace.LastAppliedChangeID)
 	return nil
 }
@@ -538,6 +540,7 @@ type pullApplyResult struct {
 	files   int
 	dirs    int
 	deleted int
+	moved   int
 }
 
 func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken, root, remoteRoot string, event client.ChangeEvent) (pullApplyResult, error) {
@@ -567,10 +570,39 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 		}
 		return pullApplyResult{deleted: 1}, nil
 	case "move":
-		return pullApplyResult{}, fmt.Errorf("sync pull does not support move events yet")
+		if event.OldPath == nil {
+			return pullApplyResult{}, errors.New("move event is missing old_path")
+		}
+		if err := moveLocalPath(root, remoteRoot, *event.OldPath, event.Path); err != nil {
+			return pullApplyResult{}, err
+		}
+		return pullApplyResult{moved: 1}, nil
 	default:
 		return pullApplyResult{}, fmt.Errorf("unsupported change event type: %s", event.EventType)
 	}
+}
+
+func moveLocalPath(root, remoteRoot, oldRemotePath, newRemotePath string) error {
+	oldLocalPath, ok, err := localPathForRemote(root, remoteRoot, oldRemotePath)
+	if err != nil || !ok {
+		return err
+	}
+	newLocalPath, ok, err := localPathForRemote(root, remoteRoot, newRemotePath)
+	if err != nil || !ok {
+		return err
+	}
+	if _, err := os.Stat(oldLocalPath); err != nil {
+		return err
+	}
+	if _, err := os.Stat(newLocalPath); err == nil {
+		return fmt.Errorf("move target already exists: %s", newLocalPath)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(newLocalPath), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(oldLocalPath, newLocalPath)
 }
 
 func downloadChangeFile(ctx context.Context, apiClient *client.Client, accessToken, fileID, localPath string) error {

@@ -569,6 +569,98 @@ func TestRunSyncPullAppliesDeleteEvents(t *testing.T) {
 	}
 }
 
+func TestRunSyncPullAppliesMoveEvents(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "old.txt")
+	newPath := filepath.Join(root, "renamed.txt")
+	if err := os.WriteFile(oldPath, []byte("move me"), 0o644); err != nil {
+		t.Fatalf("write old file: %v", err)
+	}
+	acked := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices/dev_1/heartbeat":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"laptop","platform":"windows","last_applied_change_id":3,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/changes":
+			if got := r.URL.Query().Get("after_change_id"); got != "3" {
+				t.Fatalf("after_change_id = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":4,"file_id":"file_1","event_type":"move","version":3,"path":"/workspace/renamed.txt","old_path":"/workspace/old.txt","created_at":"2026-06-30T00:02:00Z"}],"next_cursor":4}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sync/ack":
+			var req struct {
+				DeviceID            string `json:"device_id"`
+				LastAppliedChangeID int64  `json:"last_applied_change_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode ack request: %v", err)
+			}
+			if req.DeviceID != "dev_1" || req.LastAppliedChangeID != 4 {
+				t.Fatalf("ack request = %#v", req)
+			}
+			acked = true
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"laptop","platform":"windows","last_applied_change_id":4,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:03:00Z"}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	workspacePath := filepath.Join(root, ".synchub", "workspace.json")
+	if err := writeJSONFile(workspacePath, workspaceConfig{
+		Version:             1,
+		Root:                root,
+		RemotePath:          "/workspace",
+		ServerURL:           server.URL,
+		UserID:              "u1",
+		UserEmail:           "user@example.com",
+		DeviceID:            "dev_1",
+		DeviceName:          "laptop",
+		DevicePlatform:      "windows",
+		LastAppliedChangeID: 3,
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"pull",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync pull move: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "moved: 1") || !strings.Contains(stdout.String(), "cursor: 4") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old file still exists or stat failed: %v", err)
+	}
+	raw, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatalf("read renamed file: %v", err)
+	}
+	if string(raw) != "move me" {
+		t.Fatalf("renamed file = %q", string(raw))
+	}
+	if !acked {
+		t.Fatal("move change was not acked")
+	}
+}
+
 func clientUser(id, email string) client.User {
 	return client.User{ID: id, Email: email, Status: "active"}
 }
