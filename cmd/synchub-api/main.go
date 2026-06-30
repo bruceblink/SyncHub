@@ -16,6 +16,7 @@ import (
 	"github.com/bruceblink/SyncHub/internal/db"
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
 	"github.com/bruceblink/SyncHub/internal/storage"
+	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
 )
 
 func main() {
@@ -32,7 +33,8 @@ func main() {
 	store := storage.NewLocal(cfg.LocalStorageRoot)
 	authService := authsvc.NewService(repo, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL)
-	apiServer := api.New(authService, fileService, repo)
+	syncService := syncsvc.NewService(repo)
+	apiServer := api.NewWithSync(authService, fileService, syncService, repo)
 
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: apiServer.Handler()}
 	go func() {
@@ -59,6 +61,7 @@ type repository interface {
 	api.Pinger
 	authsvc.Repository
 	filesvc.Repository
+	syncsvc.Repository
 }
 
 func openRepository(ctx context.Context, cfg config.Config) (repository, func(), error) {

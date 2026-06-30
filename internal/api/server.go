@@ -11,6 +11,7 @@ import (
 	"github.com/bruceblink/SyncHub/internal/domain"
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
 	"github.com/bruceblink/SyncHub/internal/storage"
+	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,14 +23,19 @@ type Server struct {
 	router *gin.Engine
 	auth   *authsvc.Service
 	files  *filesvc.Service
+	sync   *syncsvc.Service
 	db     Pinger
 }
 
 func New(auth *authsvc.Service, files *filesvc.Service, db Pinger) *Server {
+	return NewWithSync(auth, files, nil, db)
+}
+
+func NewWithSync(auth *authsvc.Service, files *filesvc.Service, sync *syncsvc.Service, db Pinger) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	s := &Server{router: r, auth: auth, files: files, db: db}
+	s := &Server{router: r, auth: auth, files: files, sync: sync, db: db}
 	s.routes()
 	return s
 }
@@ -69,6 +75,10 @@ func (s *Server) routes() {
 	protected.PUT("/uploads/:id/chunks/:index", s.putChunk)
 	protected.GET("/uploads/:id", s.uploadStatus)
 	protected.POST("/uploads/:id/commit", s.commitUpload)
+	protected.POST("/devices", s.registerDevice)
+	protected.POST("/devices/:id/heartbeat", s.heartbeatDevice)
+	protected.GET("/sync/changes", s.listChanges)
+	protected.POST("/sync/ack", s.ackChanges)
 }
 
 func (s *Server) register(c *gin.Context) {
@@ -312,6 +322,90 @@ func (s *Server) download(c *gin.Context) {
 	c.DataFromReader(status, contentLength, "application/octet-stream", rc, nil)
 }
 
+func (s *Server) registerDevice(c *gin.Context) {
+	if s.sync == nil {
+		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
+		return
+	}
+	var req struct {
+		Name     string `json:"name"`
+		Platform string `json:"platform"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+		return
+	}
+	device, err := s.sync.RegisterDevice(c.Request.Context(), userID(c), req.Name, req.Platform)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	created(c, deviceDTO(device))
+}
+
+func (s *Server) heartbeatDevice(c *gin.Context) {
+	if s.sync == nil {
+		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
+		return
+	}
+	device, err := s.sync.Heartbeat(c.Request.Context(), userID(c), c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, deviceDTO(device))
+}
+
+func (s *Server) listChanges(c *gin.Context) {
+	if s.sync == nil {
+		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
+		return
+	}
+	afterChangeID, err := parseInt64Query(c, "after_change_id", 0)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	limit64, err := parseInt64Query(c, "limit", 500)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	events, err := s.sync.Changes(c.Request.Context(), userID(c), c.Query("device_id"), afterChangeID, int32(limit64))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	items := make([]any, 0, len(events))
+	var nextCursor int64
+	for _, event := range events {
+		items = append(items, changeEventDTO(event))
+		nextCursor = event.ID
+	}
+	ok(c, gin.H{"items": items, "next_cursor": nextCursor})
+}
+
+func (s *Server) ackChanges(c *gin.Context) {
+	if s.sync == nil {
+		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
+		return
+	}
+	var req struct {
+		DeviceID            string `json:"device_id"`
+		LastAppliedChangeID int64  `json:"last_applied_change_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+		return
+	}
+	device, err := s.sync.Ack(c.Request.Context(), userID(c), req.DeviceID, req.LastAppliedChangeID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, deviceDTO(device))
+}
+
 func (s *Server) requireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
@@ -410,6 +504,18 @@ func normalizeETag(value string) string {
 	return value
 }
 
+func parseInt64Query(c *gin.Context, name string, fallback int64) (int64, error) {
+	raw := c.Query(name)
+	if raw == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, domain.E(domain.CodeInvalidArgument, "invalid "+name, err)
+	}
+	return parsed, nil
+}
+
 func userDTO(user domain.User) gin.H {
 	return gin.H{"id": user.ID, "email": user.Email, "status": user.Status}
 }
@@ -428,4 +534,12 @@ func uploadDTO(session domain.UploadSession, chunks []domain.UploadChunk) gin.H 
 
 func chunkDTO(chunk domain.UploadChunk) gin.H {
 	return gin.H{"chunk_index": chunk.ChunkIndex, "size": chunk.Size, "sha256": chunk.SHA256}
+}
+
+func deviceDTO(device domain.Device) gin.H {
+	return gin.H{"id": device.ID, "name": device.Name, "platform": device.Platform, "last_seen_at": device.LastSeenAt, "last_applied_change_id": device.LastAppliedChangeID, "created_at": device.CreatedAt, "updated_at": device.UpdatedAt}
+}
+
+func changeEventDTO(event domain.ChangeEvent) gin.H {
+	return gin.H{"id": event.ID, "file_id": event.FileID, "event_type": event.EventType, "version": event.Version, "path": event.Path, "old_path": event.OldPath, "source_device_id": event.SourceDeviceID, "created_at": event.CreatedAt}
 }
