@@ -5,6 +5,7 @@ import "testing"
 func TestLoadDefaultsToSQLite(t *testing.T) {
 	t.Setenv("DATABASE_DRIVER", "")
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("UPLOAD_CLEANUP_INTERVAL_SECONDS", "")
 
 	cfg := Load()
 	if cfg.DatabaseDriver != "sqlite" {
@@ -15,6 +16,9 @@ func TestLoadDefaultsToSQLite(t *testing.T) {
 	}
 	if cfg.HTTPAddr != ":8765" {
 		t.Fatalf("http addr = %q, want :8765", cfg.HTTPAddr)
+	}
+	if cfg.UploadCleanupInterval <= 0 {
+		t.Fatalf("upload cleanup interval = %s, want positive duration", cfg.UploadCleanupInterval)
 	}
 }
 

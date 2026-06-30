@@ -30,6 +30,7 @@ go run ./cmd/synchub-cli sync status --path .
 - `JWT_SECRET`
 - `STORAGE_BACKEND=local`
 - `LOCAL_STORAGE_ROOT=./.data/storage`
+- `UPLOAD_CLEANUP_INTERVAL_SECONDS=3600`
 - `LOG_LEVEL=debug`
 
 ## Migration

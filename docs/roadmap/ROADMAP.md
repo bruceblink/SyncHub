@@ -135,7 +135,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - chunk checksum 校验。
 - commit 事务：锁定 upload session、校验 chunks、写版本、更新 file_nodes、写 change_events。
 - 幂等提交和 chunk 重传处理。
-- 过期 session 清理任务。
+- 过期 session 清理任务：API 进程内轻量 worker 周期性将过期 pending session 标记为 expired。
 
 验收标准：
 

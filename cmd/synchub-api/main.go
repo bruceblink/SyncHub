@@ -17,6 +17,7 @@ import (
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
 	"github.com/bruceblink/SyncHub/internal/storage"
 	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
+	workersvc "github.com/bruceblink/SyncHub/internal/worker"
 )
 
 func main() {
@@ -34,7 +35,14 @@ func main() {
 	authService := authsvc.NewService(repo, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL)
 	syncService := syncsvc.NewService(repo)
+	workerService := workersvc.NewService(repo)
 	apiServer := api.NewWithSync(authService, fileService, syncService, repo)
+
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	go workerService.RunUploadSessionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, 1000, func(err error) {
+		slog.Error("upload session cleanup failed", "error", err)
+	})
 
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: apiServer.Handler()}
 	go func() {
@@ -48,6 +56,7 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
+	stopWorker()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -62,6 +71,7 @@ type repository interface {
 	authsvc.Repository
 	filesvc.Repository
 	syncsvc.Repository
+	workersvc.Repository
 }
 
 func openRepository(ctx context.Context, cfg config.Config) (repository, func(), error) {

@@ -294,6 +294,28 @@ func (r *SQLiteRepository) GetUploadSession(ctx context.Context, userID, uploadI
 	return s, wrapSQLiteNotFound(err, "upload session not found")
 }
 
+func (r *SQLiteRepository) ExpireUploadSessions(ctx context.Context, now time.Time, limit int32) (int64, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	result, err := r.db.ExecContext(ctx, `
+		update upload_sessions
+		set status = ?, updated_at = ?
+		where id in (
+			select id
+			from upload_sessions
+			where status = ? and expires_at <= ?
+			order by expires_at
+			limit ?
+		)
+	`, domain.UploadStatusExpired, now, domain.UploadStatusPending, now, limit)
+	if err != nil {
+		return 0, wrapSQLiteDBErr(err)
+	}
+	rows, err := result.RowsAffected()
+	return rows, wrapSQLiteDBErr(err)
+}
+
 func (r *SQLiteRepository) getUploadSessionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.UploadSession, error) {
 	var s domain.UploadSession
 	err := r.db.QueryRowContext(ctx, `

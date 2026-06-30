@@ -233,6 +233,25 @@ func (r *Repository) GetUploadSession(ctx context.Context, userID, uploadID stri
 	return s, wrapNotFound(err, "upload session not found")
 }
 
+func (r *Repository) ExpireUploadSessions(ctx context.Context, now time.Time, limit int32) (int64, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	tag, err := r.pool.Exec(ctx, `
+		with expired as (
+			select id
+			from upload_sessions
+			where status = $1 and expires_at <= $2
+			order by expires_at
+			limit $3
+		)
+		update upload_sessions
+		set status = $4, updated_at = now()
+		where id in (select id from expired)
+	`, domain.UploadStatusPending, now, limit, domain.UploadStatusExpired)
+	return tag.RowsAffected(), wrapDBErr(err)
+}
+
 func (r *Repository) getUploadSessionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.UploadSession, error) {
 	var s domain.UploadSession
 	err := r.pool.QueryRow(ctx, `
