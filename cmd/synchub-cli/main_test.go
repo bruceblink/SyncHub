@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -249,6 +252,119 @@ func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
 	}
 }
 
+func TestRunSyncPushUploadsManifestFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	content := []byte("hello")
+	if err := os.WriteFile(filepath.Join(root, "nested", "a.txt"), content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	var dirs []string
+	var chunks []string
+	committed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/directories":
+			var req struct {
+				Path string `json:"path"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode directory request: %v", err)
+			}
+			dirs = append(dirs, req.Path)
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"dir","path":"/workspace","node_type":"directory","version":1}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads":
+			if got := r.Header.Get("Idempotency-Key"); got == "" {
+				t.Fatal("missing idempotency key")
+			}
+			var req client.InitUploadRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode init upload request: %v", err)
+			}
+			if req.Path != "/workspace/nested/a.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) {
+				t.Fatalf("unexpected init upload request: %#v", req)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_1","path":"/workspace/nested/a.txt","chunk_size":3,"expires_at":"2026-06-30T00:00:00Z","status":"pending","uploaded_chunks":[]}}`))
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/v1/uploads/upl_1/chunks/"):
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read chunk: %v", err)
+			}
+			if got := r.Header.Get("X-Chunk-Sha256"); got != testSHA(body) {
+				t.Fatalf("chunk sha = %q, want %q", got, testSHA(body))
+			}
+			chunks = append(chunks, string(body))
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"chunk_index":0,"size":3,"sha256":"ok"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads/upl_1/commit":
+			committed = true
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file_id":"file_1","version":1,"change_id":2}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Now().UTC(),
+		Items: []manifest.Entry{
+			{Path: "/workspace/nested/a.txt", RelativePath: "nested/a.txt", Size: int64(len(content)), SHA256: testSHA(content)},
+		},
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"push",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	if stdout.String() != "uploaded: 1 files\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if len(dirs) != 2 || dirs[0] != "/workspace" || dirs[1] != "/workspace/nested" {
+		t.Fatalf("dirs = %#v", dirs)
+	}
+	if len(chunks) != 2 || chunks[0] != "hel" || chunks[1] != "lo" {
+		t.Fatalf("chunks = %#v", chunks)
+	}
+	if !committed {
+		t.Fatal("upload was not committed")
+	}
+}
+
 func clientUser(id, email string) client.User {
 	return client.User{ID: id, Email: email, Status: "active"}
 }
@@ -265,4 +381,9 @@ func writeTestWorkspaceConfig(t *testing.T, root string) {
 	}, 0o600); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
+}
+
+func testSHA(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
 }

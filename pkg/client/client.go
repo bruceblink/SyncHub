@@ -34,6 +34,19 @@ type LoginData struct {
 	Tokens TokenPair `json:"tokens"`
 }
 
+type FileNode struct {
+	ID        string    `json:"id"`
+	ParentID  *string   `json:"parent_id"`
+	Name      string    `json:"name"`
+	Path      string    `json:"path"`
+	NodeType  string    `json:"node_type"`
+	Size      int64     `json:"size"`
+	SHA256    *string   `json:"sha256"`
+	Version   int64     `json:"version"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type InitUploadRequest struct {
 	Path        string `json:"path"`
 	Size        int64  `json:"size"`
@@ -86,6 +99,14 @@ func (c *Client) Login(ctx context.Context, email, password string) (LoginData, 
 		"email":    email,
 		"password": password,
 	}, &data)
+	return data, err
+}
+
+func (c *Client) CreateDirectory(ctx context.Context, accessToken, path string) (FileNode, error) {
+	var data FileNode
+	err := c.postJSONAuth(ctx, "/api/v1/files/directories", accessToken, map[string]string{
+		"path": path,
+	}, nil, &data)
 	return data, err
 }
 
