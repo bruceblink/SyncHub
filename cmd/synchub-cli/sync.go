@@ -26,6 +26,8 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runSyncPull(ctx, args[1:], stdout, stderr)
 	case "watch":
 		return runSyncWatch(ctx, args[1:], stdout, stderr)
+	case "conflicts":
+		return runSyncConflicts(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printSyncUsage(stdout)
 		return nil
