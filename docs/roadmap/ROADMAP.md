@@ -196,7 +196,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 任务：
 
 - CLI login：调用服务端登录 API，并将 token 写入本地配置。
-- workspace init。
+- workspace init：创建本地 `.synchub/workspace.json`，记录本地根目录、远端路径和登录上下文。
 - 本地 manifest 扫描：path、size、mtime、sha256。
 - 文件监听。
 - push 本地新增 / 修改文件。

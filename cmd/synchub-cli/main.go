@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -25,6 +26,17 @@ type cliConfig struct {
 	UpdatedAt            time.Time        `json:"updated_at"`
 }
 
+type workspaceConfig struct {
+	Version    int       `json:"version"`
+	Root       string    `json:"root"`
+	RemotePath string    `json:"remote_path"`
+	ServerURL  string    `json:"server_url"`
+	UserID     string    `json:"user_id"`
+	UserEmail  string    `json:"user_email"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -40,6 +52,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "login":
 		return runLogin(ctx, args[1:], stdout, stderr)
+	case "workspace":
+		return runWorkspace(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -87,24 +101,168 @@ func runLogin(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	return nil
 }
 
+func runWorkspace(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		printWorkspaceUsage(stderr)
+		return errors.New("workspace command is required")
+	}
+	switch args[0] {
+	case "init":
+		return runWorkspaceInit(args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		printWorkspaceUsage(stdout)
+		return nil
+	default:
+		printWorkspaceUsage(stderr)
+		return fmt.Errorf("unknown workspace command: %s", args[0])
+	}
+}
+
+func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("workspace init", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	remotePath := fs.String("remote-path", "", "remote workspace path")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	loginConfig, err := readConfig(*configPath)
+	if err != nil {
+		return err
+	}
+	root, err := resolveWorkspaceRoot(*rootPath)
+	if err != nil {
+		return err
+	}
+	remote := *remotePath
+	if strings.TrimSpace(remote) == "" {
+		remote = defaultRemotePath(root)
+	}
+	normalizedRemote, err := normalizeRemotePath(remote)
+	if err != nil {
+		return err
+	}
+	outputPath := *workspaceConfigPath
+	if strings.TrimSpace(outputPath) == "" {
+		outputPath = filepath.Join(root, ".synchub", "workspace.json")
+	}
+
+	now := time.Now().UTC()
+	cfg := workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: normalizedRemote,
+		ServerURL:  loginConfig.ServerURL,
+		UserID:     loginConfig.User.ID,
+		UserEmail:  loginConfig.User.Email,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := writeJSONFile(outputPath, cfg, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "workspace initialized: %s\n", root)
+	fmt.Fprintf(stdout, "remote path: %s\n", normalizedRemote)
+	fmt.Fprintf(stdout, "config: %s\n", outputPath)
+	return nil
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli login --server http://localhost:8080 --email user@example.com --password password")
+	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace")
+}
+
+func printWorkspaceUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace")
+}
+
+func readConfig(path string) (cliConfig, error) {
+	if strings.TrimSpace(path) == "" {
+		return cliConfig{}, errors.New("config path is required")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return cliConfig{}, errors.New("not logged in; run synchub-cli login first")
+		}
+		return cliConfig{}, err
+	}
+	var cfg cliConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return cliConfig{}, err
+	}
+	if cfg.ServerURL == "" || cfg.Tokens.AccessToken == "" {
+		return cliConfig{}, errors.New("login config is incomplete; run synchub-cli login again")
+	}
+	return cfg, nil
 }
 
 func writeConfig(path string, cfg cliConfig) error {
+	return writeJSONFile(path, cfg, 0o600)
+}
+
+func writeJSONFile(path string, v any, perm os.FileMode) error {
 	if strings.TrimSpace(path) == "" {
 		return errors.New("config path is required")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	payload, err := json.MarshalIndent(cfg, "", "  ")
+	payload, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 	payload = append(payload, '\n')
-	return os.WriteFile(path, payload, 0o600)
+	return os.WriteFile(path, payload, perm)
+}
+
+func resolveWorkspaceRoot(root string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		return "", errors.New("workspace path is required")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace path is not a directory: %s", abs)
+	}
+	return filepath.Clean(abs), nil
+}
+
+func defaultRemotePath(root string) string {
+	name := filepath.Base(filepath.Clean(root))
+	if name == "." || name == string(filepath.Separator) || name == "" {
+		return "/workspace"
+	}
+	return "/" + name
+}
+
+func normalizeRemotePath(p string) (string, error) {
+	p = strings.TrimSpace(strings.ReplaceAll(p, "\\", "/"))
+	if p == "" {
+		return "", errors.New("remote path is required")
+	}
+	if strings.ContainsRune(p, 0) {
+		return "", errors.New("remote path contains null byte")
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	cleaned := pathpkg.Clean(p)
+	if cleaned == "." {
+		return "/", nil
+	}
+	return cleaned, nil
 }
 
 func defaultConfigPath() string {
