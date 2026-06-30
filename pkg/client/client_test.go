@@ -50,6 +50,37 @@ func TestLoginReturnsAPIError(t *testing.T) {
 	}
 }
 
+func TestCreateDirectory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/files/directories" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Path != "/workspace" {
+			t.Fatalf("path = %q", req.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"workspace","path":"/workspace","node_type":"directory","version":1}}`))
+	}))
+	defer server.Close()
+
+	node, err := New(server.URL).CreateDirectory(context.Background(), "access-token", "/workspace")
+	if err != nil {
+		t.Fatalf("create directory: %v", err)
+	}
+	if node.ID != "dir_1" || node.Path != "/workspace" || node.NodeType != "directory" {
+		t.Fatalf("unexpected node: %#v", node)
+	}
+}
+
 func TestInitUpload(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/uploads" {
@@ -85,6 +116,129 @@ func TestInitUpload(t *testing.T) {
 	}
 	if session.UploadID != "upl_1" || session.ChunkSize != 2 || session.Status != "pending" {
 		t.Fatalf("unexpected upload session: %#v", session)
+	}
+}
+
+func TestDownloadFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files/file_1/content" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.Header.Get("Range"); got != "bytes=1-3" {
+			t.Fatalf("range = %q", got)
+		}
+		if got := r.Header.Get("If-None-Match"); got != `"etag"` {
+			t.Fatalf("if-none-match = %q", got)
+		}
+		w.Header().Set("ETag", `"etag2"`)
+		w.Header().Set("Content-Range", "bytes 1-3/5")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write([]byte("ell"))
+	}))
+	defer server.Close()
+
+	result, err := New(server.URL).DownloadFile(context.Background(), "access-token", "file_1", DownloadOptions{
+		Range:       "bytes=1-3",
+		IfNoneMatch: `"etag"`,
+	})
+	if err != nil {
+		t.Fatalf("download file: %v", err)
+	}
+	defer result.Body.Close()
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if result.StatusCode != http.StatusPartialContent || result.ETag != `"etag2"` || result.ContentRange != "bytes 1-3/5" || string(body) != "ell" {
+		t.Fatalf("unexpected download result: %#v body=%q", result, string(body))
+	}
+}
+
+func TestDeviceAndChangeMethods(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices":
+			var req struct {
+				Name     string `json:"name"`
+				Platform string `json:"platform"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode register device: %v", err)
+			}
+			if req.Name != "laptop" || req.Platform != "windows" {
+				t.Fatalf("register request = %#v", req)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"laptop","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices/dev_1/heartbeat":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"laptop","platform":"windows","last_seen_at":"2026-06-30T00:01:00Z","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/changes":
+			if got := r.URL.Query().Get("device_id"); got != "dev_1" {
+				t.Fatalf("device_id = %q", got)
+			}
+			if got := r.URL.Query().Get("after_change_id"); got != "7" {
+				t.Fatalf("after_change_id = %q", got)
+			}
+			if got := r.URL.Query().Get("limit"); got != "50" {
+				t.Fatalf("limit = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":8,"file_id":"file_1","event_type":"create","version":1,"path":"/workspace/a.txt","created_at":"2026-06-30T00:02:00Z"}],"next_cursor":8}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sync/ack":
+			var req struct {
+				DeviceID            string `json:"device_id"`
+				LastAppliedChangeID int64  `json:"last_applied_change_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode ack: %v", err)
+			}
+			if req.DeviceID != "dev_1" || req.LastAppliedChangeID != 8 {
+				t.Fatalf("ack request = %#v", req)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"laptop","platform":"windows","last_applied_change_id":8,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:03:00Z"}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	apiClient := New(server.URL)
+	device, err := apiClient.RegisterDevice(context.Background(), "access-token", "laptop", "windows")
+	if err != nil {
+		t.Fatalf("register device: %v", err)
+	}
+	if device.ID != "dev_1" || device.Name != "laptop" {
+		t.Fatalf("unexpected device: %#v", device)
+	}
+
+	heartbeat, err := apiClient.HeartbeatDevice(context.Background(), "access-token", "dev_1")
+	if err != nil {
+		t.Fatalf("heartbeat device: %v", err)
+	}
+	if heartbeat.LastSeenAt == nil {
+		t.Fatalf("heartbeat missing last_seen_at: %#v", heartbeat)
+	}
+
+	changes, err := apiClient.ListChanges(context.Background(), "access-token", "dev_1", 7, 50)
+	if err != nil {
+		t.Fatalf("list changes: %v", err)
+	}
+	if changes.NextCursor != 8 || len(changes.Items) != 1 || changes.Items[0].Path != "/workspace/a.txt" {
+		t.Fatalf("unexpected changes: %#v", changes)
+	}
+
+	acked, err := apiClient.AckChanges(context.Background(), "access-token", "dev_1", changes.NextCursor)
+	if err != nil {
+		t.Fatalf("ack changes: %v", err)
+	}
+	if acked.LastAppliedChangeID != 8 {
+		t.Fatalf("unexpected acked device: %#v", acked)
 	}
 }
 
