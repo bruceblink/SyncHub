@@ -242,6 +242,44 @@ func TestDeviceAndChangeMethods(t *testing.T) {
 	}
 }
 
+func TestListSyncConflicts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sync/conflicts" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("resolution"); got != "pending" {
+			t.Fatalf("resolution = %q", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "25" {
+			t.Fatalf("limit = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"conf_1","file_id":"file_1","path":"/workspace/a.txt","local_version":1,"remote_version":2,"resolution":"pending","created_at":"2026-06-30T00:00:00Z"}]}}`))
+	}))
+	defer server.Close()
+
+	conflicts, err := New(server.URL).ListSyncConflicts(context.Background(), "access-token", "pending", 25)
+	if err != nil {
+		t.Fatalf("list sync conflicts: %v", err)
+	}
+	if len(conflicts.Items) != 1 {
+		t.Fatalf("conflict count = %d", len(conflicts.Items))
+	}
+	conflict := conflicts.Items[0]
+	if conflict.ID != "conf_1" || conflict.Path != "/workspace/a.txt" || conflict.Resolution != "pending" {
+		t.Fatalf("unexpected conflict: %#v", conflict)
+	}
+	if conflict.LocalVersion == nil || *conflict.LocalVersion != 1 {
+		t.Fatalf("local version = %#v", conflict.LocalVersion)
+	}
+	if conflict.RemoteVersion == nil || *conflict.RemoteVersion != 2 {
+		t.Fatalf("remote version = %#v", conflict.RemoteVersion)
+	}
+}
+
 func TestPutUploadChunk(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/uploads/upl_1/chunks/2" {

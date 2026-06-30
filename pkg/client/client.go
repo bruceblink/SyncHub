@@ -102,6 +102,21 @@ type ChangeList struct {
 	NextCursor int64         `json:"next_cursor"`
 }
 
+type SyncConflict struct {
+	ID            string     `json:"id"`
+	FileID        *string    `json:"file_id"`
+	Path          string     `json:"path"`
+	LocalVersion  *int64     `json:"local_version"`
+	RemoteVersion *int64     `json:"remote_version"`
+	Resolution    string     `json:"resolution"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ResolvedAt    *time.Time `json:"resolved_at"`
+}
+
+type SyncConflictList struct {
+	Items []SyncConflict `json:"items"`
+}
+
 type DownloadOptions struct {
 	Range       string
 	IfNoneMatch string
@@ -250,6 +265,23 @@ func (c *Client) AckChanges(ctx context.Context, accessToken, deviceID string, l
 		"device_id":              deviceID,
 		"last_applied_change_id": lastAppliedChangeID,
 	}, nil, &data)
+	return data, err
+}
+
+func (c *Client) ListSyncConflicts(ctx context.Context, accessToken, resolution string, limit int32) (SyncConflictList, error) {
+	var data SyncConflictList
+	values := url.Values{}
+	if strings.TrimSpace(resolution) != "" {
+		values.Set("resolution", resolution)
+	}
+	if limit > 0 {
+		values.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	path := "/api/v1/sync/conflicts"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	err := c.getJSONAuth(ctx, path, accessToken, &data)
 	return data, err
 }
 
