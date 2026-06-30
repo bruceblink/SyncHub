@@ -300,7 +300,7 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
-	files, dirs := 0, 0
+	files, dirs, deleted := 0, 0, 0
 	for _, event := range changes.Items {
 		result, err := applyChangeEvent(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace.RemotePath, event)
 		if err != nil {
@@ -308,6 +308,7 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		}
 		files += result.files
 		dirs += result.dirs
+		deleted += result.deleted
 	}
 	nextCursor := changes.NextCursor
 	if nextCursor == 0 && len(changes.Items) > 0 {
@@ -328,6 +329,7 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	fmt.Fprintf(stdout, "pulled: %d files\n", files)
 	fmt.Fprintf(stdout, "directories: %d\n", dirs)
+	fmt.Fprintf(stdout, "deleted: %d\n", deleted)
 	fmt.Fprintf(stdout, "cursor: %d\n", workspace.LastAppliedChangeID)
 	return nil
 }
@@ -533,8 +535,9 @@ func ensureWorkspaceDevice(ctx context.Context, apiClient *client.Client, access
 }
 
 type pullApplyResult struct {
-	files int
-	dirs  int
+	files   int
+	dirs    int
+	deleted int
 }
 
 func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken, root, remoteRoot string, event client.ChangeEvent) (pullApplyResult, error) {
@@ -554,8 +557,17 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 			return pullApplyResult{}, err
 		}
 		return pullApplyResult{files: 1}, nil
-	case "delete", "move":
-		return pullApplyResult{}, fmt.Errorf("sync pull does not support %s events yet", event.EventType)
+	case "delete":
+		localPath, ok, err := localPathForRemote(root, remoteRoot, event.Path)
+		if err != nil || !ok {
+			return pullApplyResult{}, err
+		}
+		if err := os.RemoveAll(localPath); err != nil {
+			return pullApplyResult{}, err
+		}
+		return pullApplyResult{deleted: 1}, nil
+	case "move":
+		return pullApplyResult{}, fmt.Errorf("sync pull does not support move events yet")
 	default:
 		return pullApplyResult{}, fmt.Errorf("unsupported change event type: %s", event.EventType)
 	}

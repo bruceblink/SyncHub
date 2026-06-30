@@ -474,6 +474,101 @@ func TestRunSyncPullDownloadsChangesAndStoresCursor(t *testing.T) {
 	}
 }
 
+func TestRunSyncPullAppliesDeleteEvents(t *testing.T) {
+	root := t.TempDir()
+	targetPath := filepath.Join(root, "obsolete.txt")
+	if err := os.WriteFile(targetPath, []byte("remove me"), 0o644); err != nil {
+		t.Fatalf("write obsolete file: %v", err)
+	}
+	acked := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices/dev_1/heartbeat":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"laptop","platform":"windows","last_applied_change_id":2,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/changes":
+			if got := r.URL.Query().Get("after_change_id"); got != "2" {
+				t.Fatalf("after_change_id = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":3,"file_id":"file_1","event_type":"delete","version":2,"path":"/workspace/obsolete.txt","old_path":"/workspace/obsolete.txt","created_at":"2026-06-30T00:02:00Z"}],"next_cursor":3}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sync/ack":
+			var req struct {
+				DeviceID            string `json:"device_id"`
+				LastAppliedChangeID int64  `json:"last_applied_change_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode ack request: %v", err)
+			}
+			if req.DeviceID != "dev_1" || req.LastAppliedChangeID != 3 {
+				t.Fatalf("ack request = %#v", req)
+			}
+			acked = true
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"laptop","platform":"windows","last_applied_change_id":3,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:03:00Z"}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	workspacePath := filepath.Join(root, ".synchub", "workspace.json")
+	if err := writeJSONFile(workspacePath, workspaceConfig{
+		Version:             1,
+		Root:                root,
+		RemotePath:          "/workspace",
+		ServerURL:           server.URL,
+		UserID:              "u1",
+		UserEmail:           "user@example.com",
+		DeviceID:            "dev_1",
+		DeviceName:          "laptop",
+		DevicePlatform:      "windows",
+		LastAppliedChangeID: 2,
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"pull",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync pull delete: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "deleted: 1") || !strings.Contains(stdout.String(), "cursor: 3") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("obsolete file still exists or stat failed: %v", err)
+	}
+	if !acked {
+		t.Fatal("delete change was not acked")
+	}
+	var workspace workspaceConfig
+	workspaceRaw, err := os.ReadFile(workspacePath)
+	if err != nil {
+		t.Fatalf("read workspace config: %v", err)
+	}
+	if err := json.Unmarshal(workspaceRaw, &workspace); err != nil {
+		t.Fatalf("decode workspace config: %v", err)
+	}
+	if workspace.LastAppliedChangeID != 3 {
+		t.Fatalf("last applied change id = %d", workspace.LastAppliedChangeID)
+	}
+}
+
 func clientUser(id, email string) client.User {
 	return client.User{ID: id, Email: email, Status: "active"}
 }
