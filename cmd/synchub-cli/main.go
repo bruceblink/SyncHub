@@ -10,9 +10,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -31,14 +33,18 @@ type cliConfig struct {
 }
 
 type workspaceConfig struct {
-	Version    int       `json:"version"`
-	Root       string    `json:"root"`
-	RemotePath string    `json:"remote_path"`
-	ServerURL  string    `json:"server_url"`
-	UserID     string    `json:"user_id"`
-	UserEmail  string    `json:"user_email"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Version             int       `json:"version"`
+	Root                string    `json:"root"`
+	RemotePath          string    `json:"remote_path"`
+	ServerURL           string    `json:"server_url"`
+	UserID              string    `json:"user_id"`
+	UserEmail           string    `json:"user_email"`
+	DeviceID            string    `json:"device_id,omitempty"`
+	DeviceName          string    `json:"device_name,omitempty"`
+	DevicePlatform      string    `json:"device_platform,omitempty"`
+	LastAppliedChangeID int64     `json:"last_applied_change_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 func main() {
@@ -188,6 +194,8 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runSyncStatus(args[1:], stdout, stderr)
 	case "push":
 		return runSyncPush(ctx, args[1:], stdout, stderr)
+	case "pull":
+		return runSyncPull(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printSyncUsage(stdout)
 		return nil
@@ -230,6 +238,10 @@ func runSyncStatus(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "workspace: %s\n", root)
 	fmt.Fprintf(stdout, "remote path: %s\n", workspace.RemotePath)
 	fmt.Fprintf(stdout, "user: %s\n", workspace.UserEmail)
+	if workspace.DeviceID != "" {
+		fmt.Fprintf(stdout, "device: %s\n", workspace.DeviceID)
+		fmt.Fprintf(stdout, "last applied change: %d\n", workspace.LastAppliedChangeID)
+	}
 	m, err := readManifest(localManifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -242,6 +254,81 @@ func runSyncStatus(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "manifest: %s\n", localManifestPath)
 	fmt.Fprintf(stdout, "files: %d\n", len(m.Items))
 	fmt.Fprintf(stdout, "last scan: %s\n", m.GeneratedAt.Format(time.RFC3339))
+	return nil
+}
+
+func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("sync pull", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	deviceName := fs.String("device-name", "", "device name")
+	devicePlatform := fs.String("platform", runtime.GOOS, "device platform")
+	limit := fs.Int("limit", 500, "maximum changes to pull")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *limit <= 0 {
+		return errors.New("limit must be positive")
+	}
+
+	root, workspace, workspacePath, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+	if err != nil {
+		return err
+	}
+	loginConfig, err := readConfig(*configPath)
+	if err != nil {
+		return err
+	}
+	serverURL := workspace.ServerURL
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = loginConfig.ServerURL
+	}
+	apiClient := client.New(serverURL)
+	changed, err := ensureWorkspaceDevice(ctx, apiClient, loginConfig.Tokens.AccessToken, root, &workspace, *deviceName, *devicePlatform)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
+			return err
+		}
+	}
+
+	changes, err := apiClient.ListChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, workspace.LastAppliedChangeID, int32(*limit))
+	if err != nil {
+		return err
+	}
+	files, dirs := 0, 0
+	for _, event := range changes.Items {
+		result, err := applyChangeEvent(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace.RemotePath, event)
+		if err != nil {
+			return err
+		}
+		files += result.files
+		dirs += result.dirs
+	}
+	nextCursor := changes.NextCursor
+	if nextCursor == 0 && len(changes.Items) > 0 {
+		nextCursor = changes.Items[len(changes.Items)-1].ID
+	}
+	if nextCursor > workspace.LastAppliedChangeID {
+		device, err := apiClient.AckChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, nextCursor)
+		if err != nil {
+			return err
+		}
+		workspace.LastAppliedChangeID = device.LastAppliedChangeID
+		if workspace.LastAppliedChangeID < nextCursor {
+			workspace.LastAppliedChangeID = nextCursor
+		}
+		if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(stdout, "pulled: %d files\n", files)
+	fmt.Fprintf(stdout, "directories: %d\n", dirs)
+	fmt.Fprintf(stdout, "cursor: %d\n", workspace.LastAppliedChangeID)
 	return nil
 }
 
@@ -356,6 +443,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path .")
 	fmt.Fprintln(w, "  synchub-cli sync status --path .")
 	fmt.Fprintln(w, "  synchub-cli sync push --path .")
+	fmt.Fprintln(w, "  synchub-cli sync pull --path .")
 }
 
 func printWorkspaceUsage(w io.Writer) {
@@ -372,9 +460,10 @@ func printSyncUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli sync status --path .")
 	fmt.Fprintln(w, "  synchub-cli sync push --path .")
+	fmt.Fprintln(w, "  synchub-cli sync pull --path .")
 }
 
-func loadWorkspaceAndManifestPath(rootPath, workspaceConfigPath, manifestPath string) (string, workspaceConfig, string, error) {
+func loadWorkspace(rootPath, workspaceConfigPath string) (string, workspaceConfig, string, error) {
 	root, err := resolveWorkspaceRoot(rootPath)
 	if err != nil {
 		return "", workspaceConfig{}, "", err
@@ -390,11 +479,188 @@ func loadWorkspaceAndManifestPath(rootPath, workspaceConfigPath, manifestPath st
 	if workspace.Root != "" {
 		root = workspace.Root
 	}
+	return root, workspace, configPath, nil
+}
+
+func loadWorkspaceAndManifestPath(rootPath, workspaceConfigPath, manifestPath string) (string, workspaceConfig, string, error) {
+	root, workspace, _, err := loadWorkspace(rootPath, workspaceConfigPath)
+	if err != nil {
+		return "", workspaceConfig{}, "", err
+	}
 	localManifestPath := manifestPath
 	if strings.TrimSpace(localManifestPath) == "" {
 		localManifestPath = filepath.Join(root, ".synchub", "manifest.json")
 	}
 	return root, workspace, localManifestPath, nil
+}
+
+func ensureWorkspaceDevice(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace *workspaceConfig, deviceName, platform string) (bool, error) {
+	if strings.TrimSpace(deviceName) == "" {
+		deviceName = defaultDeviceName(root)
+	}
+	if strings.TrimSpace(platform) == "" {
+		platform = runtime.GOOS
+	}
+	if strings.TrimSpace(workspace.DeviceID) == "" {
+		device, err := apiClient.RegisterDevice(ctx, accessToken, deviceName, platform)
+		if err != nil {
+			return false, err
+		}
+		workspace.DeviceID = device.ID
+		workspace.DeviceName = device.Name
+		workspace.DevicePlatform = device.Platform
+		workspace.LastAppliedChangeID = device.LastAppliedChangeID
+		return true, nil
+	}
+	device, err := apiClient.HeartbeatDevice(ctx, accessToken, workspace.DeviceID)
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	if device.LastAppliedChangeID > workspace.LastAppliedChangeID {
+		workspace.LastAppliedChangeID = device.LastAppliedChangeID
+		changed = true
+	}
+	if workspace.DeviceName == "" && device.Name != "" {
+		workspace.DeviceName = device.Name
+		changed = true
+	}
+	if workspace.DevicePlatform == "" && device.Platform != "" {
+		workspace.DevicePlatform = device.Platform
+		changed = true
+	}
+	return changed, nil
+}
+
+type pullApplyResult struct {
+	files int
+	dirs  int
+}
+
+func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken, root, remoteRoot string, event client.ChangeEvent) (pullApplyResult, error) {
+	switch event.EventType {
+	case "create", "update", "restore":
+		localPath, ok, err := localPathForRemote(root, remoteRoot, event.Path)
+		if err != nil || !ok {
+			return pullApplyResult{}, err
+		}
+		if event.Version == nil {
+			if err := os.MkdirAll(localPath, 0o755); err != nil {
+				return pullApplyResult{}, err
+			}
+			return pullApplyResult{dirs: 1}, nil
+		}
+		if err := downloadChangeFile(ctx, apiClient, accessToken, event.FileID, localPath); err != nil {
+			return pullApplyResult{}, err
+		}
+		return pullApplyResult{files: 1}, nil
+	case "delete", "move":
+		return pullApplyResult{}, fmt.Errorf("sync pull does not support %s events yet", event.EventType)
+	default:
+		return pullApplyResult{}, fmt.Errorf("unsupported change event type: %s", event.EventType)
+	}
+}
+
+func downloadChangeFile(ctx context.Context, apiClient *client.Client, accessToken, fileID, localPath string) error {
+	result, err := apiClient.DownloadFile(ctx, accessToken, fileID, client.DownloadOptions{})
+	if err != nil {
+		return err
+	}
+	defer result.Body.Close()
+	if result.StatusCode == http.StatusNotModified {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(localPath), ".synchub-pull-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := io.Copy(tmp, result.Body); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, localPath); err != nil {
+		return err
+	}
+	removeTmp = false
+	return nil
+}
+
+func localPathForRemote(root, remoteRoot, remotePath string) (string, bool, error) {
+	remoteRoot, err := normalizeRemotePath(remoteRoot)
+	if err != nil {
+		return "", false, err
+	}
+	remotePath, err = normalizeRemotePath(remotePath)
+	if err != nil {
+		return "", false, err
+	}
+	var relative string
+	switch {
+	case remoteRoot == "/":
+		relative = strings.TrimPrefix(remotePath, "/")
+	case remotePath == remoteRoot:
+		relative = ""
+	case strings.HasPrefix(remotePath, remoteRoot+"/"):
+		relative = strings.TrimPrefix(strings.TrimPrefix(remotePath, remoteRoot), "/")
+	default:
+		return "", false, nil
+	}
+	localPath := filepath.Join(root, filepath.FromSlash(relative))
+	if err := ensureLocalPathInsideRoot(root, localPath); err != nil {
+		return "", false, err
+	}
+	return localPath, true, nil
+}
+
+func ensureLocalPathInsideRoot(root, localPath string) error {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	absLocal, err := filepath.Abs(localPath)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(absRoot, absLocal)
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return nil
+	}
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
+		return fmt.Errorf("remote path resolves outside workspace: %s", localPath)
+	}
+	return nil
+}
+
+func writeWorkspaceConfig(path string, cfg workspaceConfig) error {
+	cfg.UpdatedAt = time.Now().UTC()
+	return writeJSONFile(path, cfg, 0o600)
+}
+
+func defaultDeviceName(root string) string {
+	if hostname, err := os.Hostname(); err == nil && strings.TrimSpace(hostname) != "" {
+		return hostname
+	}
+	name := filepath.Base(filepath.Clean(root))
+	if name == "." || name == string(filepath.Separator) || name == "" {
+		return "synchub-cli"
+	}
+	return name
 }
 
 func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, item manifest.Entry, createdDirs map[string]struct{}) error {
