@@ -13,10 +13,17 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bruceblink/SyncHub/internal/manifest"
 	"github.com/bruceblink/SyncHub/pkg/client"
 )
+
+var syncPushNow = time.Now
+
+type pushManifestResult struct {
+	conflictKept bool
+}
 
 func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("sync push", flag.ContinueOnError)
@@ -54,17 +61,41 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	apiClient := client.New(serverURL)
 	createdDirs := map[string]struct{}{}
 	uploaded := 0
+	conflictKept := 0
 	for _, item := range m.Items {
-		if err := pushManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, root, item, createdDirs); err != nil {
+		result, err := pushManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, item, createdDirs)
+		if err != nil {
 			return err
 		}
 		uploaded++
+		if result.conflictKept {
+			conflictKept++
+		}
 	}
 	fmt.Fprintf(stdout, "uploaded: %d files\n", uploaded)
+	if conflictKept > 0 {
+		fmt.Fprintf(stdout, "conflicts kept: %d\n", conflictKept)
+	}
 	return nil
 }
 
-func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, item manifest.Entry, createdDirs map[string]struct{}) error {
+func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace workspaceConfig, item manifest.Entry, createdDirs map[string]struct{}) (pushManifestResult, error) {
+	if err := uploadManifestEntry(ctx, apiClient, accessToken, root, item, createdDirs); err != nil {
+		if !isAPIErrorCode(err, "FILE_CONFLICT") {
+			return pushManifestResult{}, err
+		}
+		conflictItem := item
+		conflictItem.Path = conflictRemotePath(item.Path, conflictDeviceLabel(workspace), syncPushNow().UTC())
+		conflictItem.RemoteVersion = nil
+		if err := uploadManifestEntry(ctx, apiClient, accessToken, root, conflictItem, createdDirs); err != nil {
+			return pushManifestResult{}, fmt.Errorf("upload conflict copy for %s: %w", item.Path, err)
+		}
+		return pushManifestResult{conflictKept: true}, nil
+	}
+	return pushManifestResult{}, nil
+}
+
+func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, item manifest.Entry, createdDirs map[string]struct{}) error {
 	localPath := filepath.Join(root, filepath.FromSlash(item.RelativePath))
 	if err := ensureRemoteDirectories(ctx, apiClient, accessToken, item.Path, createdDirs); err != nil {
 		return err
@@ -83,6 +114,59 @@ func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToke
 	}
 	_, err = apiClient.CommitUpload(ctx, accessToken, session.UploadID)
 	return err
+}
+
+func conflictRemotePath(remotePath, device string, timestamp time.Time) string {
+	cleaned := pathpkg.Clean("/" + strings.TrimPrefix(strings.ReplaceAll(remotePath, "\\", "/"), "/"))
+	dir := pathpkg.Dir(cleaned)
+	base := pathpkg.Base(cleaned)
+	ext := pathpkg.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	if name == "" {
+		name = strings.TrimPrefix(base, ".")
+		ext = ""
+	}
+	conflictName := fmt.Sprintf("%s.conflict-%s-%s%s", name, sanitizeConflictPathPart(device), timestamp.UTC().Format("20060102T150405.000000000Z"), ext)
+	if dir == "." || dir == "/" {
+		return "/" + conflictName
+	}
+	return pathpkg.Join(dir, conflictName)
+}
+
+func conflictDeviceLabel(workspace workspaceConfig) string {
+	if label := strings.TrimSpace(workspace.DeviceID); label != "" {
+		return label
+	}
+	if label := strings.TrimSpace(workspace.DeviceName); label != "" {
+		return label
+	}
+	return "device"
+}
+
+func sanitizeConflictPathPart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "device"
+	}
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '-',
+			r == '_',
+			r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	sanitized := strings.Trim(b.String(), "._-")
+	if sanitized == "" {
+		return "device"
+	}
+	return sanitized
 }
 
 func ensureRemoteDirectories(ctx context.Context, apiClient *client.Client, accessToken, filePath string, created map[string]struct{}) error {
