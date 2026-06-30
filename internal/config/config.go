@@ -32,7 +32,7 @@ func Load() Config {
 	}
 
 	return Config{
-		HTTPAddr:         getEnv("HTTP_ADDR", ":8080"),
+		HTTPAddr:         getEnv("HTTP_ADDR", ":8765"),
 		DatabaseDriver:   databaseDriver,
 		DatabaseURL:      databaseURL,
 		JWTSecret:        getEnv("JWT_SECRET", "dev-secret-change-me"),

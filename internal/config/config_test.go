@@ -13,6 +13,9 @@ func TestLoadDefaultsToSQLite(t *testing.T) {
 	if cfg.DatabaseURL != "./.data/synchub.db" {
 		t.Fatalf("database url = %q, want default sqlite path", cfg.DatabaseURL)
 	}
+	if cfg.HTTPAddr != ":8765" {
+		t.Fatalf("http addr = %q, want :8765", cfg.HTTPAddr)
+	}
 }
 
 func TestLoadInfersPostgresFromURL(t *testing.T) {

@@ -28,7 +28,7 @@ Phase 2 起按需要增加：
 - `DATABASE_DRIVER`，默认 `sqlite`
 - `DATABASE_URL`，SQLite 默认 `./.data/synchub.db`
 - `LOG_LEVEL`
-- `HTTP_ADDR`
+- `HTTP_ADDR`，默认 `:8765`
 - `UPLOAD_CHUNK_SIZE`
 - `UPLOAD_SESSION_TTL_SECONDS`
 - `REDIS_URL`
