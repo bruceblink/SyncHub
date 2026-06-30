@@ -17,6 +17,7 @@ import (
 	"github.com/bruceblink/SyncHub/internal/domain"
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
 	"github.com/bruceblink/SyncHub/internal/storage"
+	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
 )
 
 func TestSQLiteRepositoryUploadDownloadFlow(t *testing.T) {
@@ -127,7 +128,8 @@ func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
-	server := New(authService, fileService, repo)
+	syncService := syncsvc.NewService(repo)
+	server := NewWithSync(authService, fileService, syncService, repo)
 
 	registerResp := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
 		"email":    "conflict@example.com",
@@ -216,6 +218,29 @@ func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
 	}
 	if conflicts[0].RemoteVersion == nil || *conflicts[0].RemoteVersion != 1 {
 		t.Fatalf("remote version = %#v", conflicts[0].RemoteVersion)
+	}
+
+	conflictsResp := doJSON(t, server, http.MethodGet, "/api/v1/sync/conflicts?resolution=pending&limit=10", token, nil)
+	if conflictsResp.Code != http.StatusOK {
+		t.Fatalf("conflicts status = %d body = %s", conflictsResp.Code, conflictsResp.Body.String())
+	}
+	var conflictsBody struct {
+		Data struct {
+			Items []struct {
+				ID            string `json:"id"`
+				Path          string `json:"path"`
+				Resolution    string `json:"resolution"`
+				LocalVersion  *int64 `json:"local_version"`
+				RemoteVersion *int64 `json:"remote_version"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	decodeBody(t, conflictsResp, &conflictsBody)
+	if len(conflictsBody.Data.Items) != 1 || conflictsBody.Data.Items[0].ID != conflicts[0].ID {
+		t.Fatalf("conflict response = %#v", conflictsBody.Data.Items)
+	}
+	if conflictsBody.Data.Items[0].Path != "/workspace/conflict.txt" || conflictsBody.Data.Items[0].Resolution != domain.ConflictResolutionPending {
+		t.Fatalf("conflict response item = %#v", conflictsBody.Data.Items[0])
 	}
 }
 

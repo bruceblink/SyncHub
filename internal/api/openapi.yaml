@@ -432,6 +432,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeviceResponse"
+  /api/v1/sync/conflicts:
+    get:
+      tags: [Sync]
+      summary: List sync conflicts
+      parameters:
+        - name: resolution
+          in: query
+          schema:
+            type: string
+            enum: [pending, keep_local, keep_remote, keep_both]
+            default: pending
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+      responses:
+        "200":
+          description: Sync conflicts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncConflictListResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -693,3 +717,41 @@ components:
                     $ref: "#/components/schemas/ChangeEvent"
                 next_cursor:
                   type: integer
+    SyncConflict:
+      type: object
+      properties:
+        id:
+          type: string
+        file_id:
+          type: string
+          nullable: true
+        path:
+          type: string
+        local_version:
+          type: integer
+          nullable: true
+        remote_version:
+          type: integer
+          nullable: true
+        resolution:
+          type: string
+          enum: [pending, keep_local, keep_remote, keep_both]
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+    SyncConflictListResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SyncConflict"

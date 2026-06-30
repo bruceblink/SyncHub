@@ -82,6 +82,7 @@ func (s *Server) routes() {
 	protected.POST("/devices/:id/heartbeat", s.heartbeatDevice)
 	protected.GET("/sync/changes", s.listChanges)
 	protected.POST("/sync/ack", s.ackChanges)
+	protected.GET("/sync/conflicts", s.listSyncConflicts)
 }
 
 func (s *Server) register(c *gin.Context) {
@@ -409,6 +410,28 @@ func (s *Server) ackChanges(c *gin.Context) {
 	ok(c, deviceDTO(device))
 }
 
+func (s *Server) listSyncConflicts(c *gin.Context) {
+	if s.sync == nil {
+		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
+		return
+	}
+	limit64, err := parseInt64Query(c, "limit", 100)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	conflicts, err := s.sync.Conflicts(c.Request.Context(), userID(c), c.Query("resolution"), int32(limit64))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	items := make([]any, 0, len(conflicts))
+	for _, conflict := range conflicts {
+		items = append(items, syncConflictDTO(conflict))
+	}
+	ok(c, gin.H{"items": items})
+}
+
 func (s *Server) requireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
@@ -545,4 +568,8 @@ func deviceDTO(device domain.Device) gin.H {
 
 func changeEventDTO(event domain.ChangeEvent) gin.H {
 	return gin.H{"id": event.ID, "file_id": event.FileID, "event_type": event.EventType, "version": event.Version, "path": event.Path, "old_path": event.OldPath, "source_device_id": event.SourceDeviceID, "created_at": event.CreatedAt}
+}
+
+func syncConflictDTO(conflict domain.SyncConflict) gin.H {
+	return gin.H{"id": conflict.ID, "file_id": conflict.FileID, "path": conflict.Path, "local_version": conflict.LocalVersion, "remote_version": conflict.RemoteVersion, "resolution": conflict.Resolution, "created_at": conflict.CreatedAt, "resolved_at": conflict.ResolvedAt}
 }
