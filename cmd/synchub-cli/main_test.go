@@ -459,6 +459,100 @@ func TestRunSyncPushUploadsManifestFiles(t *testing.T) {
 	}
 }
 
+func TestRunSyncPushSendsManifestRemoteVersion(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("local change")
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	remoteVersion := int64(7)
+	baseVersionSeen := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/directories":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"workspace","path":"/workspace","node_type":"directory","version":1}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads":
+			var req client.InitUploadRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode init upload request: %v", err)
+			}
+			if req.Path != "/workspace/a.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) {
+				t.Fatalf("unexpected init upload request: %#v", req)
+			}
+			if req.BaseVersion == nil || *req.BaseVersion != remoteVersion {
+				t.Fatalf("base version = %#v, want %d", req.BaseVersion, remoteVersion)
+			}
+			baseVersionSeen = true
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_1","path":"/workspace/a.txt","chunk_size":1024,"expires_at":"2026-06-30T00:00:00Z","status":"pending","uploaded_chunks":[]}}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/uploads/upl_1/chunks/0":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read chunk: %v", err)
+			}
+			if string(body) != string(content) {
+				t.Fatalf("chunk body = %q", string(body))
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"chunk_index":0,"size":12,"sha256":"ok"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads/upl_1/commit":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file_id":"file_1","version":8,"change_id":9}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Now().UTC(),
+		Items: []manifest.Entry{
+			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: int64(len(content)), SHA256: testSHA(content), RemoteVersion: &remoteVersion},
+		},
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"push",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	if stdout.String() != "uploaded: 1 files\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !baseVersionSeen {
+		t.Fatal("base version was not sent")
+	}
+}
+
 func TestRunSyncPullDownloadsChangesAndStoresCursor(t *testing.T) {
 	root := t.TempDir()
 	content := []byte("pulled file")

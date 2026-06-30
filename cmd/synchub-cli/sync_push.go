@@ -70,9 +70,10 @@ func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToke
 		return err
 	}
 	session, err := apiClient.InitUpload(ctx, accessToken, client.InitUploadRequest{
-		Path:   item.Path,
-		Size:   item.Size,
-		SHA256: item.SHA256,
+		Path:        item.Path,
+		Size:        item.Size,
+		SHA256:      item.SHA256,
+		BaseVersion: item.RemoteVersion,
 	}, uploadIdempotencyKey(item))
 	if err != nil {
 		return err

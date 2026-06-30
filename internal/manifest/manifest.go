@@ -22,11 +22,12 @@ type Manifest struct {
 }
 
 type Entry struct {
-	Path         string    `json:"path"`
-	RelativePath string    `json:"relative_path"`
-	Size         int64     `json:"size"`
-	ModTime      time.Time `json:"mtime"`
-	SHA256       string    `json:"sha256"`
+	Path          string    `json:"path"`
+	RelativePath  string    `json:"relative_path"`
+	Size          int64     `json:"size"`
+	ModTime       time.Time `json:"mtime"`
+	SHA256        string    `json:"sha256"`
+	RemoteVersion *int64    `json:"remote_version,omitempty"`
 }
 
 func Scan(ctx context.Context, root, remotePath string) (Manifest, error) {
