@@ -116,7 +116,71 @@ func TestSQLiteRepositoryUploadDownloadFlow(t *testing.T) {
 	}
 }
 
+func TestSQLiteUploadInitIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
+	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
+	server := New(authService, fileService, repo)
+
+	registerResp := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"email":    "idempotent@example.com",
+		"password": "password123",
+	})
+	if registerResp.Code != http.StatusCreated {
+		t.Fatalf("register status = %d body = %s", registerResp.Code, registerResp.Body.String())
+	}
+	var registerBody struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, registerResp, &registerBody)
+
+	sum := sha256.Sum256([]byte("hello"))
+	body := map[string]any{
+		"path":       "/workspace/idempotent.txt",
+		"size":       5,
+		"sha256":     hex.EncodeToString(sum[:]),
+		"chunk_size": 5,
+	}
+	first := doJSONWithHeaders(t, server, http.MethodPost, "/api/v1/uploads", registerBody.Data.Tokens.AccessToken, body, map[string]string{
+		"Idempotency-Key": "upload-init-1",
+	})
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first init status = %d body = %s", first.Code, first.Body.String())
+	}
+	second := doJSONWithHeaders(t, server, http.MethodPost, "/api/v1/uploads", registerBody.Data.Tokens.AccessToken, body, map[string]string{
+		"Idempotency-Key": "upload-init-1",
+	})
+	if second.Code != http.StatusCreated {
+		t.Fatalf("second init status = %d body = %s", second.Code, second.Body.String())
+	}
+
+	var firstBody, secondBody struct {
+		Data struct {
+			UploadID string `json:"upload_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, first, &firstBody)
+	decodeBody(t, second, &secondBody)
+	if firstBody.Data.UploadID == "" || firstBody.Data.UploadID != secondBody.Data.UploadID {
+		t.Fatalf("upload ids = %q and %q, want same non-empty id", firstBody.Data.UploadID, secondBody.Data.UploadID)
+	}
+}
+
 func doJSON(t *testing.T, server *Server, method, target, token string, body any) *httptest.ResponseRecorder {
+	return doJSONWithHeaders(t, server, method, target, token, body, nil)
+}
+
+func doJSONWithHeaders(t *testing.T, server *Server, method, target, token string, body any, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	var buf bytes.Buffer
@@ -127,6 +191,9 @@ func doJSON(t *testing.T, server *Server, method, target, token string, body any
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)

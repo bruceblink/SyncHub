@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/bruceblink/SyncHub/internal/domain"
@@ -102,7 +103,7 @@ func (s *Service) Delete(ctx context.Context, userID, fileID string) error {
 	return s.repo.DeleteFile(ctx, userID, fileID)
 }
 
-func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, size int64, sha256sum string, requestedChunkSize int64, baseVersion *int64) (domain.UploadSession, error) {
+func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, size int64, sha256sum string, requestedChunkSize int64, baseVersion *int64, idempotencyKey string) (domain.UploadSession, error) {
 	normalized, err := domain.NormalizePath(targetPath)
 	if err != nil {
 		return domain.UploadSession{}, err
@@ -122,15 +123,20 @@ func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, siz
 	if err == nil {
 		targetFileID = &existing.ID
 	}
+	var key *string
+	if trimmed := strings.TrimSpace(idempotencyKey); trimmed != "" {
+		key = &trimmed
+	}
 	session := domain.UploadSession{
-		UserID:       userID,
-		TargetPath:   normalized,
-		TargetFileID: targetFileID,
-		BaseVersion:  baseVersion,
-		TotalSize:    size,
-		ChunkSize:    int32(chunkSize),
-		SHA256:       sha256sum,
-		ExpiresAt:    time.Now().Add(s.uploadSessionTTL),
+		UserID:         userID,
+		TargetPath:     normalized,
+		TargetFileID:   targetFileID,
+		BaseVersion:    baseVersion,
+		TotalSize:      size,
+		ChunkSize:      int32(chunkSize),
+		SHA256:         sha256sum,
+		ExpiresAt:      time.Now().Add(s.uploadSessionTTL),
+		IdempotencyKey: key,
 	}
 	return s.repo.CreateUploadSession(ctx, session)
 }

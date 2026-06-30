@@ -278,6 +278,9 @@ func (r *SQLiteRepository) CreateUploadSession(ctx context.Context, s domain.Upl
 		insert into upload_sessions (id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at)
 		values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, s.ID, s.UserID, s.TargetPath, s.TargetFileID, s.BaseVersion, s.TotalSize, s.ChunkSize, s.SHA256, s.Status, s.StagingKey, s.ExpiresAt, s.IdempotencyKey, s.CreatedAt, s.UpdatedAt)
+	if isSQLiteUniqueViolation(err) && s.IdempotencyKey != nil {
+		return r.getUploadSessionByIdempotencyKey(ctx, s.UserID, *s.IdempotencyKey)
+	}
 	return s, wrapSQLiteDBErr(err)
 }
 
@@ -288,6 +291,16 @@ func (r *SQLiteRepository) GetUploadSession(ctx context.Context, userID, uploadI
 		from upload_sessions
 		where user_id = ? and id = ?
 	`, userID, uploadID).Scan(uploadSessionScan(&s)...)
+	return s, wrapSQLiteNotFound(err, "upload session not found")
+}
+
+func (r *SQLiteRepository) getUploadSessionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.UploadSession, error) {
+	var s domain.UploadSession
+	err := r.db.QueryRowContext(ctx, `
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		from upload_sessions
+		where user_id = ? and idempotency_key = ?
+	`, userID, idempotencyKey).Scan(uploadSessionScan(&s)...)
 	return s, wrapSQLiteNotFound(err, "upload session not found")
 }
 

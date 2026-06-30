@@ -256,6 +256,13 @@ paths:
     post:
       tags: [Upload]
       summary: Initialize chunk upload
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+          description: Reuses the existing upload session when the same user retries with the same key.
       requestBody:
         required: true
         content:

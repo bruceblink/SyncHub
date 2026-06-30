@@ -217,6 +217,9 @@ func (r *Repository) CreateUploadSession(ctx context.Context, s domain.UploadSes
 		values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		returning id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
 	`, s.ID, s.UserID, s.TargetPath, s.TargetFileID, s.BaseVersion, s.TotalSize, s.ChunkSize, s.SHA256, s.Status, s.StagingKey, s.ExpiresAt, s.IdempotencyKey).Scan(uploadSessionScan(&s)...)
+	if isUniqueViolation(err) && s.IdempotencyKey != nil {
+		return r.getUploadSessionByIdempotencyKey(ctx, s.UserID, *s.IdempotencyKey)
+	}
 	return s, wrapDBErr(err)
 }
 
@@ -227,6 +230,16 @@ func (r *Repository) GetUploadSession(ctx context.Context, userID, uploadID stri
 		from upload_sessions
 		where user_id = $1 and id = $2
 	`, userID, uploadID).Scan(uploadSessionScan(&s)...)
+	return s, wrapNotFound(err, "upload session not found")
+}
+
+func (r *Repository) getUploadSessionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.UploadSession, error) {
+	var s domain.UploadSession
+	err := r.pool.QueryRow(ctx, `
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		from upload_sessions
+		where user_id = $1 and idempotency_key = $2
+	`, userID, idempotencyKey).Scan(uploadSessionScan(&s)...)
 	return s, wrapNotFound(err, "upload session not found")
 }
 

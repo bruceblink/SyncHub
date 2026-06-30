@@ -110,6 +110,9 @@ Request:
 ### 上传初始化
 `POST /api/v1/uploads`
 
+Headers:
+- `Idempotency-Key: <key>` 可选；同一用户使用相同 key 重试时返回同一个上传会话。
+
 Request:
 ```json
 {

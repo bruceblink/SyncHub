@@ -239,7 +239,7 @@ func (s *Server) initUpload(c *gin.Context) {
 		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
 		return
 	}
-	session, err := s.files.InitUpload(c.Request.Context(), userID(c), req.Path, req.Size, req.SHA256, req.ChunkSize, req.BaseVersion)
+	session, err := s.files.InitUpload(c.Request.Context(), userID(c), req.Path, req.Size, req.SHA256, req.ChunkSize, req.BaseVersion, c.GetHeader("Idempotency-Key"))
 	if err != nil {
 		fail(c, err)
 		return
