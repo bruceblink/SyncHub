@@ -104,3 +104,16 @@ create table change_events (
 
 create index change_events_user_id_idx on change_events(user_id, id);
 create index change_events_user_file_created_idx on change_events(user_id, file_id, created_at);
+
+create table devices (
+    id uuid primary key,
+    user_id uuid not null references users(id) on delete cascade,
+    name text not null,
+    platform text not null,
+    last_seen_at timestamptz,
+    last_applied_change_id bigint not null default 0,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create index devices_user_id_idx on devices(user_id);

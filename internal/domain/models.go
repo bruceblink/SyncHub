@@ -88,6 +88,17 @@ type ChangeEvent struct {
 	CreatedAt      time.Time
 }
 
+type Device struct {
+	ID                  string
+	UserID              string
+	Name                string
+	Platform            string
+	LastSeenAt          *time.Time
+	LastAppliedChangeID int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
 const (
 	NodeTypeFile      = "file"
 	NodeTypeDirectory = "directory"

@@ -1,3 +1,4 @@
+drop table if exists devices;
 drop table if exists change_events;
 drop table if exists upload_chunks;
 drop table if exists upload_sessions;

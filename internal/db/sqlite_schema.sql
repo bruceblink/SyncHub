@@ -100,3 +100,16 @@ create table if not exists change_events (
 
 create index if not exists change_events_user_id_idx on change_events(user_id, id);
 create index if not exists change_events_user_file_created_idx on change_events(user_id, file_id, created_at);
+
+create table if not exists devices (
+    id text primary key,
+    user_id text not null references users(id) on delete cascade,
+    name text not null,
+    platform text not null,
+    last_seen_at datetime,
+    last_applied_change_id integer not null default 0,
+    created_at datetime not null default current_timestamp,
+    updated_at datetime not null default current_timestamp
+);
+
+create index if not exists devices_user_id_idx on devices(user_id);
