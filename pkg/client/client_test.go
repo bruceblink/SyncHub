@@ -129,6 +129,37 @@ func TestDeleteFile(t *testing.T) {
 	}
 }
 
+func TestMoveFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/files/file_1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Path != "/workspace/renamed.txt" {
+			t.Fatalf("path = %q", req.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"renamed.txt","path":"/workspace/renamed.txt","node_type":"file","version":4}}`))
+	}))
+	defer server.Close()
+
+	node, err := New(server.URL).MoveFile(context.Background(), "access-token", "file_1", "/workspace/renamed.txt")
+	if err != nil {
+		t.Fatalf("move file: %v", err)
+	}
+	if node.ID != "file_1" || node.Path != "/workspace/renamed.txt" || node.Version != 4 {
+		t.Fatalf("unexpected node: %#v", node)
+	}
+}
+
 func TestInitUpload(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/uploads" {

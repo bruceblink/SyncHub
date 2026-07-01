@@ -70,17 +70,42 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
+	plannedMoves, err := planPushMoves(m, currentManifest, currentPaths)
+	if err != nil {
+		return err
+	}
 
 	apiClient := client.New(serverURL)
 	createdDirs := map[string]struct{}{}
 	uploaded := 0
 	deleted := 0
+	moved := 0
 	conflictKept := 0
 	manifestChanged := false
+	moveSources := make(map[string]struct{}, len(plannedMoves))
+	moveTargets := make(map[string]int64, len(plannedMoves))
+	for _, move := range plannedMoves {
+		if err := ensureRemoteDirectories(ctx, apiClient, loginConfig.Tokens.AccessToken, move.to.Path, createdDirs); err != nil {
+			return err
+		}
+		version, err := moveManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, move.from, move.to)
+		if err != nil {
+			return err
+		}
+		moveSources[move.sourcePath] = struct{}{}
+		if version > 0 {
+			moveTargets[move.targetPath] = version
+		}
+		moved++
+		manifestChanged = true
+	}
 	for _, item := range m.Items {
 		path, err := normalizeRemotePath(item.Path)
 		if err != nil {
 			return err
+		}
+		if _, ok := moveSources[path]; ok {
+			continue
 		}
 		if _, ok := currentPaths[path]; !ok {
 			if err := deleteManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, item); err != nil {
@@ -91,6 +116,15 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		}
 	}
 	for i, item := range currentManifest.Items {
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			return err
+		}
+		if version, ok := moveTargets[path]; ok {
+			version := version
+			currentManifest.Items[i].RemoteVersion = &version
+			continue
+		}
 		result, err := pushManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, item, createdDirs)
 		if err != nil {
 			return err
@@ -114,6 +148,9 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if deleted > 0 {
 		fmt.Fprintf(stdout, "deleted: %d files\n", deleted)
 	}
+	if moved > 0 {
+		fmt.Fprintf(stdout, "moved: %d files\n", moved)
+	}
 	if conflictKept > 0 {
 		fmt.Fprintf(stdout, "conflicts kept: %d\n", conflictKept)
 	}
@@ -135,6 +172,81 @@ func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToke
 		return pushManifestResult{conflictKept: true}, nil
 	}
 	return pushManifestResult{version: version}, nil
+}
+
+type pushMovePlan struct {
+	sourcePath string
+	targetPath string
+	from       manifest.Entry
+	to         manifest.Entry
+}
+
+func planPushMoves(previous manifest.Manifest, current manifest.Manifest, currentPaths map[string]struct{}) ([]pushMovePlan, error) {
+	type key struct {
+		sha256 string
+		size   int64
+	}
+	candidates := map[key][]manifest.Entry{}
+	for _, item := range current.Items {
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			return nil, err
+		}
+		if previousHasPath(previous, path) {
+			continue
+		}
+		candidates[key{sha256: item.SHA256, size: item.Size}] = append(candidates[key{sha256: item.SHA256, size: item.Size}], item)
+	}
+	moves := []pushMovePlan{}
+	for _, item := range previous.Items {
+		sourcePath, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := currentPaths[sourcePath]; ok {
+			continue
+		}
+		if item.RemoteVersion == nil {
+			continue
+		}
+		k := key{sha256: item.SHA256, size: item.Size}
+		items := candidates[k]
+		if len(items) != 1 {
+			continue
+		}
+		targetPath, err := normalizeRemotePath(items[0].Path)
+		if err != nil {
+			return nil, err
+		}
+		moves = append(moves, pushMovePlan{sourcePath: sourcePath, targetPath: targetPath, from: item, to: items[0]})
+		delete(candidates, k)
+	}
+	return moves, nil
+}
+
+func previousHasPath(previous manifest.Manifest, remotePath string) bool {
+	for _, item := range previous.Items {
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			continue
+		}
+		if path == remotePath {
+			return true
+		}
+	}
+	return false
+}
+
+func moveManifestEntry(ctx context.Context, apiClient *client.Client, accessToken string, from, to manifest.Entry) (int64, error) {
+	node, err := apiClient.GetFileByPath(ctx, accessToken, from.Path)
+	if err != nil {
+		return 0, err
+	}
+	moved, err := apiClient.MoveFile(ctx, accessToken, node.ID, to.Path)
+	if err != nil {
+		return 0, err
+	}
+	return moved.Version, nil
 }
 
 func mergePushManifestRemoteVersions(current *manifest.Manifest, previous manifest.Manifest) error {

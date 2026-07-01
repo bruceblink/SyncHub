@@ -182,6 +182,15 @@ func (c *Client) DeleteFile(ctx context.Context, accessToken, fileID string) err
 	return c.doJSON(req, nil)
 }
 
+func (c *Client) MoveFile(ctx context.Context, accessToken, fileID, path string) (FileNode, error) {
+	var data FileNode
+	endpoint := fmt.Sprintf("/api/v1/files/%s", url.PathEscape(fileID))
+	err := c.patchJSONAuth(ctx, endpoint, accessToken, map[string]string{
+		"path": path,
+	}, &data)
+	return data, err
+}
+
 func (c *Client) InitUpload(ctx context.Context, accessToken string, req InitUploadRequest, idempotencyKey string) (UploadSession, error) {
 	var data UploadSession
 	headers := map[string]string{}
@@ -329,6 +338,20 @@ func (c *Client) getJSONAuth(ctx context.Context, path, accessToken string, out 
 	if err != nil {
 		return err
 	}
+	setBearerToken(req, accessToken)
+	return c.doJSON(req, out)
+}
+
+func (c *Client) patchJSONAuth(ctx context.Context, path, accessToken string, body any, out any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.endpoint(path), bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	setBearerToken(req, accessToken)
 	return c.doJSON(req, out)
 }
