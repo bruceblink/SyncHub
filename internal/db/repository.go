@@ -160,6 +160,34 @@ func (r *Repository) ListFiles(ctx context.Context, userID string, parentID *str
 	return nodes, wrapDBErr(rows.Err())
 }
 
+func (r *Repository) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, `
+		select v.id, v.file_id, v.user_id, v.version, v.size, v.sha256, v.storage_key, v.created_by_device_id, v.created_at
+		from file_versions v
+		join file_nodes n on n.id = v.file_id and n.user_id = v.user_id
+		where v.user_id = $1 and v.file_id = $2 and n.deleted_at is null
+		order by v.version desc
+		limit $3
+	`, userID, fileID, limit)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer rows.Close()
+
+	versions := make([]domain.FileVersion, 0)
+	for rows.Next() {
+		var version domain.FileVersion
+		if err := rows.Scan(fileVersionScan(&version)...); err != nil {
+			return nil, wrapDBErr(err)
+		}
+		versions = append(versions, version)
+	}
+	return versions, wrapDBErr(rows.Err())
+}
+
 func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error) {
 	old, err := r.GetFileByID(ctx, userID, fileID)
 	if err != nil {
@@ -594,6 +622,10 @@ func (r *Repository) createChangeEvent(ctx context.Context, tx pgx.Tx, userID, f
 
 func fileNodeScan(n *domain.FileNode) []any {
 	return []any{&n.ID, &n.UserID, &n.ParentID, &n.Name, &n.Path, &n.NodeType, &n.CurrentVersionID, &n.Size, &n.SHA256, &n.StorageKey, &n.Version, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt}
+}
+
+func fileVersionScan(v *domain.FileVersion) []any {
+	return []any{&v.ID, &v.FileID, &v.UserID, &v.Version, &v.Size, &v.SHA256, &v.StorageKey, &v.CreatedByDeviceID, &v.CreatedAt}
 }
 
 func uploadSessionScan(s *domain.UploadSession) []any {

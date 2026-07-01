@@ -244,6 +244,127 @@ func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
 	}
 }
 
+func TestSQLiteFileVersionHistory(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
+	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
+	server := New(authService, fileService, repo)
+
+	registerResp := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"email":    "versions@example.com",
+		"password": "password123",
+	})
+	if registerResp.Code != http.StatusCreated {
+		t.Fatalf("register status = %d body = %s", registerResp.Code, registerResp.Body.String())
+	}
+	var registerBody struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, registerResp, &registerBody)
+	token := registerBody.Data.Tokens.AccessToken
+
+	createDirResp := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/workspace"})
+	if createDirResp.Code != http.StatusCreated {
+		t.Fatalf("create directory status = %d body = %s", createDirResp.Code, createDirResp.Body.String())
+	}
+
+	first := []byte("first")
+	firstSHA := sha256.Sum256(first)
+	firstUpload := doJSON(t, server, http.MethodPost, "/api/v1/uploads", token, map[string]any{
+		"path":       "/workspace/history.txt",
+		"size":       len(first),
+		"sha256":     hex.EncodeToString(firstSHA[:]),
+		"chunk_size": len(first),
+	})
+	if firstUpload.Code != http.StatusCreated {
+		t.Fatalf("first upload status = %d body = %s", firstUpload.Code, firstUpload.Body.String())
+	}
+	var firstUploadBody struct {
+		Data struct {
+			UploadID string `json:"upload_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, firstUpload, &firstUploadBody)
+	putChunk(t, server, token, firstUploadBody.Data.UploadID, first, hex.EncodeToString(firstSHA[:]))
+	firstCommit := doJSON(t, server, http.MethodPost, "/api/v1/uploads/"+firstUploadBody.Data.UploadID+"/commit", token, map[string]any{})
+	if firstCommit.Code != http.StatusOK {
+		t.Fatalf("first commit status = %d body = %s", firstCommit.Code, firstCommit.Body.String())
+	}
+	var firstCommitBody struct {
+		Data struct {
+			FileID  string `json:"file_id"`
+			Version int64  `json:"version"`
+		} `json:"data"`
+	}
+	decodeBody(t, firstCommit, &firstCommitBody)
+	if firstCommitBody.Data.FileID == "" || firstCommitBody.Data.Version != 1 {
+		t.Fatalf("first commit data = %#v", firstCommitBody.Data)
+	}
+
+	second := []byte("second")
+	secondSHA := sha256.Sum256(second)
+	secondUpload := doJSON(t, server, http.MethodPost, "/api/v1/uploads", token, map[string]any{
+		"path":         "/workspace/history.txt",
+		"size":         len(second),
+		"sha256":       hex.EncodeToString(secondSHA[:]),
+		"chunk_size":   len(second),
+		"base_version": firstCommitBody.Data.Version,
+	})
+	if secondUpload.Code != http.StatusCreated {
+		t.Fatalf("second upload status = %d body = %s", secondUpload.Code, secondUpload.Body.String())
+	}
+	var secondUploadBody struct {
+		Data struct {
+			UploadID string `json:"upload_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, secondUpload, &secondUploadBody)
+	putChunk(t, server, token, secondUploadBody.Data.UploadID, second, hex.EncodeToString(secondSHA[:]))
+	secondCommit := doJSON(t, server, http.MethodPost, "/api/v1/uploads/"+secondUploadBody.Data.UploadID+"/commit", token, map[string]any{})
+	if secondCommit.Code != http.StatusOK {
+		t.Fatalf("second commit status = %d body = %s", secondCommit.Code, secondCommit.Body.String())
+	}
+
+	versionsResp := doJSON(t, server, http.MethodGet, "/api/v1/files/"+firstCommitBody.Data.FileID+"/versions?limit=10", token, nil)
+	if versionsResp.Code != http.StatusOK {
+		t.Fatalf("versions status = %d body = %s", versionsResp.Code, versionsResp.Body.String())
+	}
+	var versionsBody struct {
+		Data struct {
+			Items []struct {
+				ID      string `json:"id"`
+				FileID  string `json:"file_id"`
+				Version int64  `json:"version"`
+				Size    int64  `json:"size"`
+				SHA256  string `json:"sha256"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	decodeBody(t, versionsResp, &versionsBody)
+	if len(versionsBody.Data.Items) != 2 {
+		t.Fatalf("versions = %#v, want two", versionsBody.Data.Items)
+	}
+	if versionsBody.Data.Items[0].Version != 2 || versionsBody.Data.Items[0].SHA256 != hex.EncodeToString(secondSHA[:]) || versionsBody.Data.Items[0].Size != int64(len(second)) {
+		t.Fatalf("latest version = %#v", versionsBody.Data.Items[0])
+	}
+	if versionsBody.Data.Items[1].Version != 1 || versionsBody.Data.Items[1].SHA256 != hex.EncodeToString(firstSHA[:]) || versionsBody.Data.Items[1].Size != int64(len(first)) {
+		t.Fatalf("initial version = %#v", versionsBody.Data.Items[1])
+	}
+	if versionsBody.Data.Items[0].FileID != firstCommitBody.Data.FileID || versionsBody.Data.Items[1].FileID != firstCommitBody.Data.FileID {
+		t.Fatalf("version file ids = %#v", versionsBody.Data.Items)
+	}
+}
+
 func TestSQLiteUploadInitIdempotencyKey(t *testing.T) {
 	ctx := context.Background()
 	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

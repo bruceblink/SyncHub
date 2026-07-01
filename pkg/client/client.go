@@ -47,6 +47,19 @@ type FileNode struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type FileVersion struct {
+	ID        string    `json:"id"`
+	FileID    string    `json:"file_id"`
+	Version   int64     `json:"version"`
+	Size      int64     `json:"size"`
+	SHA256    string    `json:"sha256"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type FileVersionList struct {
+	Items []FileVersion `json:"items"`
+}
+
 type InitUploadRequest struct {
 	Path        string `json:"path"`
 	Size        int64  `json:"size"`
@@ -169,6 +182,20 @@ func (c *Client) GetFileByPath(ctx context.Context, accessToken, path string) (F
 	values := url.Values{}
 	values.Set("path", path)
 	err := c.getJSONAuth(ctx, "/api/v1/files/by-path?"+values.Encode(), accessToken, &data)
+	return data, err
+}
+
+func (c *Client) ListFileVersions(ctx context.Context, accessToken, fileID string, limit int32) (FileVersionList, error) {
+	var data FileVersionList
+	values := url.Values{}
+	if limit > 0 {
+		values.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	path := fmt.Sprintf("/api/v1/files/%s/versions", url.PathEscape(fileID))
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	err := c.getJSONAuth(ctx, path, accessToken, &data)
 	return data, err
 }
 

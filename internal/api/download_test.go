@@ -185,6 +185,11 @@ func (r *downloadFileRepo) ListFiles(ctx context.Context, userID string, parentI
 	return nil, errNotImplemented()
 }
 
+func (r *downloadFileRepo) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
+	_, _, _, _ = ctx, userID, fileID, limit
+	return nil, errNotImplemented()
+}
+
 func (r *downloadFileRepo) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error) {
 	_, _, _, _, _ = ctx, userID, fileID, newPath, newName
 	_ = newParentID

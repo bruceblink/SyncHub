@@ -68,6 +68,7 @@ func (s *Server) routes() {
 	protected := v1.Group("")
 	protected.Use(s.requireAuth())
 	protected.GET("/files/:id", s.getFile)
+	protected.GET("/files/:id/versions", s.listFileVersions)
 	protected.GET("/files/by-path", s.getFileByPath)
 	protected.GET("/files", s.listFiles)
 	protected.POST("/files/directories", s.createDirectory)
@@ -186,6 +187,24 @@ func (s *Server) listFiles(c *gin.Context) {
 		data = append(data, fileDTO(node))
 	}
 	ok(c, gin.H{"items": data})
+}
+
+func (s *Server) listFileVersions(c *gin.Context) {
+	limit64, err := parseInt64Query(c, "limit", 100)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	versions, err := s.files.Versions(c.Request.Context(), userID(c), c.Param("id"), int32(limit64))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	items := make([]any, 0, len(versions))
+	for _, version := range versions {
+		items = append(items, fileVersionDTO(version))
+	}
+	ok(c, gin.H{"items": items})
 }
 
 func (s *Server) createDirectory(c *gin.Context) {
@@ -548,6 +567,10 @@ func userDTO(user domain.User) gin.H {
 
 func fileDTO(node domain.FileNode) gin.H {
 	return gin.H{"id": node.ID, "parent_id": node.ParentID, "name": node.Name, "path": node.Path, "node_type": node.NodeType, "size": node.Size, "sha256": node.SHA256, "version": node.Version, "created_at": node.CreatedAt, "updated_at": node.UpdatedAt}
+}
+
+func fileVersionDTO(version domain.FileVersion) gin.H {
+	return gin.H{"id": version.ID, "file_id": version.FileID, "version": version.Version, "size": version.Size, "sha256": version.SHA256, "created_at": version.CreatedAt}
 }
 
 func uploadDTO(session domain.UploadSession, chunks []domain.UploadChunk) gin.H {

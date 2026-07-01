@@ -20,6 +20,7 @@ type Repository interface {
 	GetFileByID(ctx context.Context, userID, fileID string) (domain.FileNode, error)
 	GetFileByPath(ctx context.Context, userID, path string) (domain.FileNode, error)
 	ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error)
+	ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error)
 	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error)
 	DeleteFile(ctx context.Context, userID, fileID string) error
 	CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error)
@@ -77,6 +78,23 @@ func (s *Service) GetByPath(ctx context.Context, userID, p string) (domain.FileN
 
 func (s *Service) List(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error) {
 	return s.repo.ListFiles(ctx, userID, parentID, limit)
+}
+
+func (s *Service) Versions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
+	if strings.TrimSpace(fileID) == "" {
+		return nil, domain.E(domain.CodeInvalidArgument, "file id is required", nil)
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	node, err := s.repo.GetFileByID(ctx, userID, fileID)
+	if err != nil {
+		return nil, err
+	}
+	if node.NodeType != domain.NodeTypeFile {
+		return nil, domain.E(domain.CodeInvalidArgument, "file versions are only available for files", nil)
+	}
+	return s.repo.ListFileVersions(ctx, userID, fileID, limit)
 }
 
 func (s *Service) Move(ctx context.Context, userID, fileID, newPath string) (domain.FileNode, error) {

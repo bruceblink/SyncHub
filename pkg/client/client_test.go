@@ -106,6 +106,34 @@ func TestGetFileByPath(t *testing.T) {
 	}
 }
 
+func TestListFileVersions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files/file_1/versions" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "20" {
+			t.Fatalf("limit = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"ver_2","file_id":"file_1","version":2,"size":6,"sha256":"sha2","created_at":"2026-06-30T00:02:00Z"},{"id":"ver_1","file_id":"file_1","version":1,"size":5,"sha256":"sha1","created_at":"2026-06-30T00:01:00Z"}]}}`))
+	}))
+	defer server.Close()
+
+	versions, err := New(server.URL).ListFileVersions(context.Background(), "access-token", "file_1", 20)
+	if err != nil {
+		t.Fatalf("list file versions: %v", err)
+	}
+	if len(versions.Items) != 2 {
+		t.Fatalf("version count = %d", len(versions.Items))
+	}
+	if versions.Items[0].ID != "ver_2" || versions.Items[0].Version != 2 || versions.Items[0].SHA256 != "sha2" {
+		t.Fatalf("unexpected first version: %#v", versions.Items[0])
+	}
+}
+
 func TestDeleteFile(t *testing.T) {
 	deleted := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

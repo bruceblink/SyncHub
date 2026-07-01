@@ -205,6 +205,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIResponse"
+  /api/v1/files/{id}/versions:
+    get:
+      tags: [File]
+      summary: List file versions
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+      responses:
+        "200":
+          description: File version history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileVersionListResponse"
   /api/v1/files/directories:
     post:
       tags: [File]
@@ -562,6 +581,22 @@ components:
         updated_at:
           type: string
           format: date-time
+    FileVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        file_id:
+          type: string
+        version:
+          type: integer
+        size:
+          type: integer
+        sha256:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     FileResponse:
       allOf:
         - $ref: "#/components/schemas/APIResponse"
@@ -581,6 +616,18 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/FileNode"
+    FileVersionListResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FileVersion"
     UploadInitRequest:
       type: object
       required: [path, size, sha256]
