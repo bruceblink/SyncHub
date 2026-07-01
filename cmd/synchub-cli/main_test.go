@@ -548,6 +548,113 @@ func TestRunSyncPushDeletesRemovedManifestFiles(t *testing.T) {
 	}
 }
 
+func TestRunSyncPushDiscoversNewLocalFiles(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("new file")
+	if err := os.WriteFile(filepath.Join(root, "new.txt"), content, 0o644); err != nil {
+		t.Fatalf("write new file: %v", err)
+	}
+	committed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/directories":
+			var req struct {
+				Path string `json:"path"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode directory request: %v", err)
+			}
+			if req.Path != "/workspace" {
+				t.Fatalf("directory path = %q", req.Path)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"workspace","path":"/workspace","node_type":"directory","version":1}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads":
+			var req client.InitUploadRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode init upload request: %v", err)
+			}
+			if req.Path != "/workspace/new.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) {
+				t.Fatalf("unexpected init upload request: %#v", req)
+			}
+			if req.BaseVersion != nil {
+				t.Fatalf("base version = %#v, want nil", req.BaseVersion)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_1","path":"/workspace/new.txt","chunk_size":1024,"expires_at":"2026-06-30T00:00:00Z","status":"pending","uploaded_chunks":[]}}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/uploads/upl_1/chunks/0":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read chunk: %v", err)
+			}
+			if string(body) != string(content) {
+				t.Fatalf("chunk body = %q", string(body))
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"chunk_index":0,"size":8,"sha256":"ok"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads/upl_1/commit":
+			committed = true
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file_id":"file_1","version":1,"change_id":2}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	manifestPath := filepath.Join(root, ".synchub", "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Now().UTC(),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"push",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	if stdout.String() != "uploaded: 1 files\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !committed {
+		t.Fatal("upload was not committed")
+	}
+	updatedManifest, err := readManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read updated manifest: %v", err)
+	}
+	if len(updatedManifest.Items) != 1 || updatedManifest.Items[0].Path != "/workspace/new.txt" || updatedManifest.Items[0].RemoteVersion == nil || *updatedManifest.Items[0].RemoteVersion != 1 {
+		t.Fatalf("updated manifest = %#v", updatedManifest.Items)
+	}
+}
+
 func TestRunSyncPushSendsManifestRemoteVersion(t *testing.T) {
 	root := t.TempDir()
 	content := []byte("local change")
