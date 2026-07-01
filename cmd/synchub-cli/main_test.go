@@ -655,6 +655,71 @@ func TestRunSyncPushDiscoversNewLocalFiles(t *testing.T) {
 	}
 }
 
+func TestRunSyncPushSkipsUnchangedManifestFiles(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("unchanged")
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request = %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	remoteVersion := int64(5)
+	manifestPath := filepath.Join(root, ".synchub", "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Now().UTC(),
+		Items: []manifest.Entry{
+			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: int64(len(content)), SHA256: testSHA(content), RemoteVersion: &remoteVersion},
+		},
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"push",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	if stdout.String() != "uploaded: 0 files\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	updatedManifest, err := readManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read updated manifest: %v", err)
+	}
+	if len(updatedManifest.Items) != 1 || updatedManifest.Items[0].RemoteVersion == nil || *updatedManifest.Items[0].RemoteVersion != remoteVersion {
+		t.Fatalf("updated manifest = %#v", updatedManifest.Items)
+	}
+}
+
 func TestRunSyncPushMovesRenamedManifestFiles(t *testing.T) {
 	root := t.TempDir()
 	content := []byte("same content")
@@ -823,7 +888,7 @@ func TestRunSyncPushSendsManifestRemoteVersion(t *testing.T) {
 		RemotePath:  "/workspace",
 		GeneratedAt: time.Now().UTC(),
 		Items: []manifest.Entry{
-			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: int64(len(content)), SHA256: testSHA(content), RemoteVersion: &remoteVersion},
+			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: int64(len("old content")), SHA256: testSHA([]byte("old content")), RemoteVersion: &remoteVersion},
 		},
 	}, 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
@@ -959,7 +1024,7 @@ func TestRunSyncPushKeepsConflictCopy(t *testing.T) {
 		RemotePath:  "/workspace",
 		GeneratedAt: time.Now().UTC(),
 		Items: []manifest.Entry{
-			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: int64(len(content)), SHA256: testSHA(content), RemoteVersion: &remoteVersion},
+			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: int64(len("old content")), SHA256: testSHA([]byte("old content")), RemoteVersion: &remoteVersion},
 		},
 	}, 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)

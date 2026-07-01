@@ -66,6 +66,10 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err := mergePushManifestRemoteVersions(&currentManifest, m); err != nil {
 		return err
 	}
+	previousEntries, err := manifestEntriesByPath(m)
+	if err != nil {
+		return err
+	}
 	currentPaths, err := manifestPathSet(currentManifest)
 	if err != nil {
 		return err
@@ -123,6 +127,10 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		if version, ok := moveTargets[path]; ok {
 			version := version
 			currentManifest.Items[i].RemoteVersion = &version
+			continue
+		}
+		previousItem, existed := previousEntries[path]
+		if existed && previousItem.RemoteVersion != nil && !manifestContentChanged(previousItem, item) {
 			continue
 		}
 		result, err := pushManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, item, createdDirs)
@@ -235,6 +243,22 @@ func previousHasPath(previous manifest.Manifest, remotePath string) bool {
 		}
 	}
 	return false
+}
+
+func manifestEntriesByPath(m manifest.Manifest) (map[string]manifest.Entry, error) {
+	entries := make(map[string]manifest.Entry, len(m.Items))
+	for _, item := range m.Items {
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			return nil, err
+		}
+		entries[path] = item
+	}
+	return entries, nil
+}
+
+func manifestContentChanged(before, after manifest.Entry) bool {
+	return before.Size != after.Size || before.SHA256 != after.SHA256
 }
 
 func moveManifestEntry(ctx context.Context, apiClient *client.Client, accessToken string, from, to manifest.Entry) (int64, error) {
