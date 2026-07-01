@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/bruceblink/SyncHub/internal/manifest"
 	"github.com/bruceblink/SyncHub/pkg/client"
 )
 
@@ -21,6 +22,7 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	rootPath := fs.String("path", ".", "local workspace root")
 	configPath := fs.String("config", defaultConfigPath(), "login config file path")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	manifestPath := fs.String("manifest", "", "manifest file path")
 	deviceName := fs.String("device-name", "", "device name")
 	devicePlatform := fs.String("platform", runtime.GOOS, "device platform")
 	limit := fs.Int("limit", 500, "maximum changes to pull")
@@ -32,6 +34,14 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 
 	root, workspace, workspacePath, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+	if err != nil {
+		return err
+	}
+	localManifestPath := *manifestPath
+	if strings.TrimSpace(localManifestPath) == "" {
+		localManifestPath = filepath.Join(root, ".synchub", "manifest.json")
+	}
+	previousManifest, err := readPullManifest(root, localManifestPath)
 	if err != nil {
 		return err
 	}
@@ -69,6 +79,11 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		deleted += result.deleted
 		moved += result.moved
 	}
+	if len(changes.Items) > 0 {
+		if err := writePullManifest(ctx, root, workspace.RemotePath, localManifestPath, previousManifest, changes.Items); err != nil {
+			return err
+		}
+	}
 	nextCursor := changes.NextCursor
 	if nextCursor == 0 && len(changes.Items) > 0 {
 		nextCursor = changes.Items[len(changes.Items)-1].ID
@@ -92,6 +107,106 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	fmt.Fprintf(stdout, "moved: %d\n", moved)
 	fmt.Fprintf(stdout, "cursor: %d\n", workspace.LastAppliedChangeID)
 	return nil
+}
+
+func readPullManifest(root, manifestPath string) (manifest.Manifest, error) {
+	m, err := readManifest(manifestPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return manifest.Manifest{}, nil
+		}
+		return manifest.Manifest{}, err
+	}
+	if m.Root != "" && filepath.Clean(m.Root) != filepath.Clean(root) {
+		return manifest.Manifest{}, fmt.Errorf("manifest root %s does not match workspace root %s", m.Root, root)
+	}
+	return m, nil
+}
+
+func writePullManifest(ctx context.Context, root, remoteRoot, manifestPath string, previous manifest.Manifest, changes []client.ChangeEvent) error {
+	current, err := manifest.Scan(ctx, root, remoteRoot)
+	if err != nil {
+		return err
+	}
+	if err := mergePullManifestVersions(&current, previous, changes); err != nil {
+		return err
+	}
+	return writeManifest(manifestPath, current)
+}
+
+func mergePullManifestVersions(current *manifest.Manifest, previous manifest.Manifest, changes []client.ChangeEvent) error {
+	versions := make(map[string]int64, len(previous.Items))
+	for _, item := range previous.Items {
+		if item.RemoteVersion == nil {
+			continue
+		}
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			return err
+		}
+		versions[path] = *item.RemoteVersion
+	}
+	for _, event := range changes {
+		path, err := normalizeRemotePath(event.Path)
+		if err != nil {
+			return err
+		}
+		switch event.EventType {
+		case "create", "update", "restore":
+			if event.Version != nil {
+				versions[path] = *event.Version
+			}
+		case "delete":
+			removeManifestVersionsAt(versions, path)
+		case "move":
+			if event.OldPath != nil {
+				oldPath, err := normalizeRemotePath(*event.OldPath)
+				if err != nil {
+					return err
+				}
+				moveManifestVersions(versions, oldPath, path)
+			}
+			if event.Version != nil {
+				versions[path] = *event.Version
+			}
+		}
+	}
+	for i := range current.Items {
+		path, err := normalizeRemotePath(current.Items[i].Path)
+		if err != nil {
+			return err
+		}
+		if version, ok := versions[path]; ok {
+			version := version
+			current.Items[i].RemoteVersion = &version
+		}
+	}
+	return nil
+}
+
+func removeManifestVersionsAt(versions map[string]int64, remotePath string) {
+	for path := range versions {
+		if path == remotePath || strings.HasPrefix(path, remotePath+"/") {
+			delete(versions, path)
+		}
+	}
+}
+
+func moveManifestVersions(versions map[string]int64, oldPath, newPath string) {
+	moved := map[string]int64{}
+	for path, version := range versions {
+		switch {
+		case path == oldPath:
+			moved[newPath] = version
+			delete(versions, path)
+		case strings.HasPrefix(path, oldPath+"/"):
+			moved[newPath+strings.TrimPrefix(path, oldPath)] = version
+			delete(versions, path)
+		}
+	}
+	for path, version := range moved {
+		versions[path] = version
+	}
 }
 
 func ensureWorkspaceDevice(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace *workspaceConfig, deviceName, platform string) (bool, error) {

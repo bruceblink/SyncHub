@@ -816,6 +816,13 @@ func TestRunSyncPullDownloadsChangesAndStoresCursor(t *testing.T) {
 	if workspace.DeviceID != "dev_1" || workspace.LastAppliedChangeID != 2 {
 		t.Fatalf("workspace sync state = %#v", workspace)
 	}
+	m, err := readManifest(filepath.Join(root, ".synchub", "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(m.Items) != 1 || m.Items[0].Path != "/workspace/nested/a.txt" || m.Items[0].RemoteVersion == nil || *m.Items[0].RemoteVersion != 1 {
+		t.Fatalf("manifest items = %#v", m.Items)
+	}
 }
 
 func TestRunSyncPullAppliesDeleteEvents(t *testing.T) {
@@ -823,6 +830,19 @@ func TestRunSyncPullAppliesDeleteEvents(t *testing.T) {
 	targetPath := filepath.Join(root, "obsolete.txt")
 	if err := os.WriteFile(targetPath, []byte("remove me"), 0o644); err != nil {
 		t.Fatalf("write obsolete file: %v", err)
+	}
+	remoteVersion := int64(1)
+	manifestPath := filepath.Join(root, ".synchub", "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Now().UTC(),
+		Items: []manifest.Entry{
+			{Path: "/workspace/obsolete.txt", RelativePath: "obsolete.txt", Size: int64(len("remove me")), SHA256: testSHA([]byte("remove me")), RemoteVersion: &remoteVersion},
+		},
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
 	}
 	acked := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -911,6 +931,13 @@ func TestRunSyncPullAppliesDeleteEvents(t *testing.T) {
 	if workspace.LastAppliedChangeID != 3 {
 		t.Fatalf("last applied change id = %d", workspace.LastAppliedChangeID)
 	}
+	m, err := readManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(m.Items) != 0 {
+		t.Fatalf("manifest items = %#v, want empty", m.Items)
+	}
 }
 
 func TestRunSyncPullAppliesMoveEvents(t *testing.T) {
@@ -919,6 +946,19 @@ func TestRunSyncPullAppliesMoveEvents(t *testing.T) {
 	newPath := filepath.Join(root, "renamed.txt")
 	if err := os.WriteFile(oldPath, []byte("move me"), 0o644); err != nil {
 		t.Fatalf("write old file: %v", err)
+	}
+	remoteVersion := int64(2)
+	manifestPath := filepath.Join(root, ".synchub", "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Now().UTC(),
+		Items: []manifest.Entry{
+			{Path: "/workspace/old.txt", RelativePath: "old.txt", Size: int64(len("move me")), SHA256: testSHA([]byte("move me")), RemoteVersion: &remoteVersion},
+		},
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
 	}
 	acked := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1002,6 +1042,13 @@ func TestRunSyncPullAppliesMoveEvents(t *testing.T) {
 	}
 	if !acked {
 		t.Fatal("move change was not acked")
+	}
+	m, err := readManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(m.Items) != 1 || m.Items[0].Path != "/workspace/renamed.txt" || m.Items[0].RemoteVersion == nil || *m.Items[0].RemoteVersion != 3 {
+		t.Fatalf("manifest items = %#v", m.Items)
 	}
 }
 
