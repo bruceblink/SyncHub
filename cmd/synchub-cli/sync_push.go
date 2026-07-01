@@ -23,6 +23,7 @@ var syncPushNow = time.Now
 
 type pushManifestResult struct {
 	conflictKept bool
+	version      int64
 }
 
 func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -62,14 +63,25 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	createdDirs := map[string]struct{}{}
 	uploaded := 0
 	conflictKept := 0
-	for _, item := range m.Items {
+	manifestChanged := false
+	for i, item := range m.Items {
 		result, err := pushManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, item, createdDirs)
 		if err != nil {
 			return err
 		}
 		uploaded++
+		if result.version > 0 && (m.Items[i].RemoteVersion == nil || *m.Items[i].RemoteVersion != result.version) {
+			version := result.version
+			m.Items[i].RemoteVersion = &version
+			manifestChanged = true
+		}
 		if result.conflictKept {
 			conflictKept++
+		}
+	}
+	if manifestChanged {
+		if err := writeManifest(localManifestPath, m); err != nil {
+			return err
 		}
 	}
 	fmt.Fprintf(stdout, "uploaded: %d files\n", uploaded)
@@ -80,25 +92,26 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 }
 
 func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace workspaceConfig, item manifest.Entry, createdDirs map[string]struct{}) (pushManifestResult, error) {
-	if err := uploadManifestEntry(ctx, apiClient, accessToken, root, item, createdDirs); err != nil {
+	version, err := uploadManifestEntry(ctx, apiClient, accessToken, root, item, createdDirs)
+	if err != nil {
 		if !isAPIErrorCode(err, "FILE_CONFLICT") {
 			return pushManifestResult{}, err
 		}
 		conflictItem := item
 		conflictItem.Path = conflictRemotePath(item.Path, conflictDeviceLabel(workspace), syncPushNow().UTC())
 		conflictItem.RemoteVersion = nil
-		if err := uploadManifestEntry(ctx, apiClient, accessToken, root, conflictItem, createdDirs); err != nil {
+		if _, err := uploadManifestEntry(ctx, apiClient, accessToken, root, conflictItem, createdDirs); err != nil {
 			return pushManifestResult{}, fmt.Errorf("upload conflict copy for %s: %w", item.Path, err)
 		}
 		return pushManifestResult{conflictKept: true}, nil
 	}
-	return pushManifestResult{}, nil
+	return pushManifestResult{version: version}, nil
 }
 
-func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, item manifest.Entry, createdDirs map[string]struct{}) error {
+func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, item manifest.Entry, createdDirs map[string]struct{}) (int64, error) {
 	localPath := filepath.Join(root, filepath.FromSlash(item.RelativePath))
 	if err := ensureRemoteDirectories(ctx, apiClient, accessToken, item.Path, createdDirs); err != nil {
-		return err
+		return 0, err
 	}
 	session, err := apiClient.InitUpload(ctx, accessToken, client.InitUploadRequest{
 		Path:        item.Path,
@@ -107,13 +120,16 @@ func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessTo
 		BaseVersion: item.RemoteVersion,
 	}, uploadIdempotencyKey(item))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := uploadFileChunks(ctx, apiClient, accessToken, session.UploadID, localPath, session.ChunkSize); err != nil {
-		return err
+		return 0, err
 	}
-	_, err = apiClient.CommitUpload(ctx, accessToken, session.UploadID)
-	return err
+	commit, err := apiClient.CommitUpload(ctx, accessToken, session.UploadID)
+	if err != nil {
+		return 0, err
+	}
+	return commit.Version, nil
 }
 
 func conflictRemotePath(remotePath, device string, timestamp time.Time) string {

@@ -86,3 +86,10 @@ func readManifest(path string) (manifest.Manifest, error) {
 	}
 	return m, nil
 }
+
+func writeManifest(path string, m manifest.Manifest) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("manifest path is required")
+	}
+	return writeJSONFile(path, m, 0o600)
+}

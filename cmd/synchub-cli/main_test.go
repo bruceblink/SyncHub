@@ -415,7 +415,8 @@ func TestRunSyncPushUploadsManifestFiles(t *testing.T) {
 	}, 0o600); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+	manifestPath := filepath.Join(root, ".synchub", "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest.Manifest{
 		Version:     1,
 		Root:        root,
 		RemotePath:  "/workspace",
@@ -456,6 +457,13 @@ func TestRunSyncPushUploadsManifestFiles(t *testing.T) {
 	}
 	if !committed {
 		t.Fatal("upload was not committed")
+	}
+	updatedManifest, err := readManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read updated manifest: %v", err)
+	}
+	if len(updatedManifest.Items) != 1 || updatedManifest.Items[0].RemoteVersion == nil || *updatedManifest.Items[0].RemoteVersion != 1 {
+		t.Fatalf("updated manifest = %#v", updatedManifest.Items)
 	}
 }
 
@@ -515,7 +523,8 @@ func TestRunSyncPushSendsManifestRemoteVersion(t *testing.T) {
 	}, 0o600); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+	manifestPath := filepath.Join(root, ".synchub", "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest.Manifest{
 		Version:     1,
 		Root:        root,
 		RemotePath:  "/workspace",
@@ -550,6 +559,13 @@ func TestRunSyncPushSendsManifestRemoteVersion(t *testing.T) {
 	}
 	if !baseVersionSeen {
 		t.Fatal("base version was not sent")
+	}
+	updatedManifest, err := readManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read updated manifest: %v", err)
+	}
+	if len(updatedManifest.Items) != 1 || updatedManifest.Items[0].RemoteVersion == nil || *updatedManifest.Items[0].RemoteVersion != 8 {
+		t.Fatalf("updated manifest = %#v", updatedManifest.Items)
 	}
 }
 
@@ -643,7 +659,8 @@ func TestRunSyncPushKeepsConflictCopy(t *testing.T) {
 	}, 0o600); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+	manifestPath := filepath.Join(root, ".synchub", "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest.Manifest{
 		Version:     1,
 		Root:        root,
 		RemotePath:  "/workspace",
@@ -682,6 +699,13 @@ func TestRunSyncPushKeepsConflictCopy(t *testing.T) {
 	}
 	if !conflictCommitted {
 		t.Fatal("conflict copy was not committed")
+	}
+	updatedManifest, err := readManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read updated manifest: %v", err)
+	}
+	if len(updatedManifest.Items) != 1 || updatedManifest.Items[0].RemoteVersion == nil || *updatedManifest.Items[0].RemoteVersion != remoteVersion {
+		t.Fatalf("updated manifest = %#v", updatedManifest.Items)
 	}
 }
 
