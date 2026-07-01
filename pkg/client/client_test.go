@@ -81,6 +81,54 @@ func TestCreateDirectory(t *testing.T) {
 	}
 }
 
+func TestGetFileByPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files/by-path" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("path"); got != "/workspace/a b.txt" {
+			t.Fatalf("path = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"a b.txt","path":"/workspace/a b.txt","node_type":"file","version":3}}`))
+	}))
+	defer server.Close()
+
+	node, err := New(server.URL).GetFileByPath(context.Background(), "access-token", "/workspace/a b.txt")
+	if err != nil {
+		t.Fatalf("get file by path: %v", err)
+	}
+	if node.ID != "file_1" || node.Path != "/workspace/a b.txt" || node.Version != 3 {
+		t.Fatalf("unexpected node: %#v", node)
+	}
+}
+
+func TestDeleteFile(t *testing.T) {
+	deleted := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/files/file_1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		deleted = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{}}`))
+	}))
+	defer server.Close()
+
+	if err := New(server.URL).DeleteFile(context.Background(), "access-token", "file_1"); err != nil {
+		t.Fatalf("delete file: %v", err)
+	}
+	if !deleted {
+		t.Fatal("file was not deleted")
+	}
+}
+
 func TestInitUpload(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/uploads" {

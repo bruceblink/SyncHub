@@ -62,29 +62,48 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	apiClient := client.New(serverURL)
 	createdDirs := map[string]struct{}{}
 	uploaded := 0
+	deleted := 0
 	conflictKept := 0
 	manifestChanged := false
-	for i, item := range m.Items {
+	keptItems := make([]manifest.Entry, 0, len(m.Items))
+	for _, item := range m.Items {
+		exists, err := manifestEntryLocalFileExists(root, item)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if err := deleteManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, item); err != nil {
+				return err
+			}
+			deleted++
+			manifestChanged = true
+			continue
+		}
 		result, err := pushManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, item, createdDirs)
 		if err != nil {
 			return err
 		}
 		uploaded++
-		if result.version > 0 && (m.Items[i].RemoteVersion == nil || *m.Items[i].RemoteVersion != result.version) {
+		if result.version > 0 && (item.RemoteVersion == nil || *item.RemoteVersion != result.version) {
 			version := result.version
-			m.Items[i].RemoteVersion = &version
+			item.RemoteVersion = &version
 			manifestChanged = true
 		}
 		if result.conflictKept {
 			conflictKept++
 		}
+		keptItems = append(keptItems, item)
 	}
 	if manifestChanged {
+		m.Items = keptItems
 		if err := writeManifest(localManifestPath, m); err != nil {
 			return err
 		}
 	}
 	fmt.Fprintf(stdout, "uploaded: %d files\n", uploaded)
+	if deleted > 0 {
+		fmt.Fprintf(stdout, "deleted: %d files\n", deleted)
+	}
 	if conflictKept > 0 {
 		fmt.Fprintf(stdout, "conflicts kept: %d\n", conflictKept)
 	}
@@ -106,6 +125,35 @@ func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToke
 		return pushManifestResult{conflictKept: true}, nil
 	}
 	return pushManifestResult{version: version}, nil
+}
+
+func manifestEntryLocalFileExists(root string, item manifest.Entry) (bool, error) {
+	localPath := filepath.Join(root, filepath.FromSlash(item.RelativePath))
+	if err := ensureLocalPathInsideRoot(root, localPath); err != nil {
+		return false, err
+	}
+	info, err := os.Stat(localPath)
+	if err == nil {
+		return info.Mode().IsRegular(), nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
+}
+
+func deleteManifestEntry(ctx context.Context, apiClient *client.Client, accessToken string, item manifest.Entry) error {
+	node, err := apiClient.GetFileByPath(ctx, accessToken, item.Path)
+	if err != nil {
+		if isAPIErrorCode(err, "NOT_FOUND") {
+			return nil
+		}
+		return err
+	}
+	if err := apiClient.DeleteFile(ctx, accessToken, node.ID); err != nil && !isAPIErrorCode(err, "NOT_FOUND") {
+		return err
+	}
+	return nil
 }
 
 func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, item manifest.Entry, createdDirs map[string]struct{}) (int64, error) {

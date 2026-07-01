@@ -164,6 +164,24 @@ func (c *Client) CreateDirectory(ctx context.Context, accessToken, path string) 
 	return data, err
 }
 
+func (c *Client) GetFileByPath(ctx context.Context, accessToken, path string) (FileNode, error) {
+	var data FileNode
+	values := url.Values{}
+	values.Set("path", path)
+	err := c.getJSONAuth(ctx, "/api/v1/files/by-path?"+values.Encode(), accessToken, &data)
+	return data, err
+}
+
+func (c *Client) DeleteFile(ctx context.Context, accessToken, fileID string) error {
+	path := fmt.Sprintf("/api/v1/files/%s", url.PathEscape(fileID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.endpoint(path), nil)
+	if err != nil {
+		return err
+	}
+	setBearerToken(req, accessToken)
+	return c.doJSON(req, nil)
+}
+
 func (c *Client) InitUpload(ctx context.Context, accessToken string, req InitUploadRequest, idempotencyKey string) (UploadSession, error) {
 	var data UploadSession
 	headers := map[string]string{}
