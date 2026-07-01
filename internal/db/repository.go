@@ -188,6 +188,57 @@ func (r *Repository) ListFileVersions(ctx context.Context, userID, fileID string
 	return versions, wrapDBErr(rows.Err())
 }
 
+func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.FileNode{}, 0, wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	node, err := r.getFileByIDTx(ctx, tx, userID, fileID)
+	if err != nil {
+		return domain.FileNode{}, 0, err
+	}
+	if node.NodeType != domain.NodeTypeFile {
+		return domain.FileNode{}, 0, domain.E(domain.CodeInvalidArgument, "only files can be restored", nil)
+	}
+
+	var source domain.FileVersion
+	err = tx.QueryRow(ctx, `
+		select id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id, created_at
+		from file_versions
+		where user_id = $1 and file_id = $2 and version = $3
+	`, userID, fileID, version).Scan(fileVersionScan(&source)...)
+	if err != nil {
+		return domain.FileNode{}, 0, wrapNotFound(err, "file version not found")
+	}
+
+	newVersion := node.Version + 1
+	versionID := uuid.NewString()
+	_, err = tx.Exec(ctx, `
+		insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id)
+		values ($1,$2,$3,$4,$5,$6,$7,$8)
+	`, versionID, fileID, userID, newVersion, source.Size, source.SHA256, source.StorageKey, source.CreatedByDeviceID)
+	if err != nil {
+		return domain.FileNode{}, 0, wrapDBErr(err)
+	}
+	var restored domain.FileNode
+	err = tx.QueryRow(ctx, `
+		update file_nodes
+		set current_version_id = $3, size = $4, sha256 = $5, storage_key = $6, version = $7, updated_at = now()
+		where user_id = $1 and id = $2 and deleted_at is null
+		returning id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+	`, userID, fileID, versionID, source.Size, source.SHA256, source.StorageKey, newVersion).Scan(fileNodeScan(&restored)...)
+	if err != nil {
+		return domain.FileNode{}, 0, wrapDBErr(err)
+	}
+	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil)
+	if err != nil {
+		return domain.FileNode{}, 0, err
+	}
+	return restored, changeID, wrapDBErr(tx.Commit(ctx))
+}
+
 func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error) {
 	old, err := r.GetFileByID(ctx, userID, fileID)
 	if err != nil {
@@ -592,6 +643,17 @@ func (r *Repository) getDevice(ctx context.Context, userID, deviceID string) (do
 		where user_id = $1 and id = $2
 	`, userID, deviceID).Scan(deviceScan(&device)...)
 	return device, wrapNotFound(err, "device not found")
+}
+
+func (r *Repository) getFileByIDTx(ctx context.Context, tx pgx.Tx, userID, fileID string) (domain.FileNode, error) {
+	var node domain.FileNode
+	err := tx.QueryRow(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes
+		where user_id = $1 and id = $2 and deleted_at is null
+		for update
+	`, userID, fileID).Scan(fileNodeScan(&node)...)
+	return node, wrapNotFound(err, "file not found")
 }
 
 func (r *Repository) getFileByPathTx(ctx context.Context, tx pgx.Tx, userID, path string) (domain.FileNode, error) {

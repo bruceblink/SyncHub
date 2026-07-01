@@ -21,6 +21,7 @@ type Repository interface {
 	GetFileByPath(ctx context.Context, userID, path string) (domain.FileNode, error)
 	ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error)
 	ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error)
+	RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error)
 	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error)
 	DeleteFile(ctx context.Context, userID, fileID string) error
 	CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error)
@@ -95,6 +96,23 @@ func (s *Service) Versions(ctx context.Context, userID, fileID string, limit int
 		return nil, domain.E(domain.CodeInvalidArgument, "file versions are only available for files", nil)
 	}
 	return s.repo.ListFileVersions(ctx, userID, fileID, limit)
+}
+
+func (s *Service) RestoreVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
+	if strings.TrimSpace(fileID) == "" {
+		return domain.FileNode{}, 0, domain.E(domain.CodeInvalidArgument, "file id is required", nil)
+	}
+	if version <= 0 {
+		return domain.FileNode{}, 0, domain.E(domain.CodeInvalidArgument, "version must be positive", nil)
+	}
+	node, err := s.repo.GetFileByID(ctx, userID, fileID)
+	if err != nil {
+		return domain.FileNode{}, 0, err
+	}
+	if node.NodeType != domain.NodeTypeFile {
+		return domain.FileNode{}, 0, domain.E(domain.CodeInvalidArgument, "only files can be restored", nil)
+	}
+	return s.repo.RestoreFileVersion(ctx, userID, fileID, version)
 }
 
 func (s *Service) Move(ctx context.Context, userID, fileID, newPath string) (domain.FileNode, error) {

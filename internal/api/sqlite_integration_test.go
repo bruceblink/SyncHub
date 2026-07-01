@@ -365,6 +365,189 @@ func TestSQLiteFileVersionHistory(t *testing.T) {
 	}
 }
 
+func TestSQLiteRestoreFileVersion(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
+	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
+	syncService := syncsvc.NewService(repo)
+	server := NewWithSync(authService, fileService, syncService, repo)
+
+	registerResp := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"email":    "restore@example.com",
+		"password": "password123",
+	})
+	if registerResp.Code != http.StatusCreated {
+		t.Fatalf("register status = %d body = %s", registerResp.Code, registerResp.Body.String())
+	}
+	var registerBody struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, registerResp, &registerBody)
+	token := registerBody.Data.Tokens.AccessToken
+
+	deviceResp := doJSON(t, server, http.MethodPost, "/api/v1/devices", token, map[string]any{
+		"name":     "restore-device",
+		"platform": "test",
+	})
+	if deviceResp.Code != http.StatusCreated {
+		t.Fatalf("register device status = %d body = %s", deviceResp.Code, deviceResp.Body.String())
+	}
+	var deviceBody struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	decodeBody(t, deviceResp, &deviceBody)
+
+	createDirResp := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/workspace"})
+	if createDirResp.Code != http.StatusCreated {
+		t.Fatalf("create directory status = %d body = %s", createDirResp.Code, createDirResp.Body.String())
+	}
+
+	first := []byte("first version")
+	firstSHA := sha256.Sum256(first)
+	firstUpload := doJSON(t, server, http.MethodPost, "/api/v1/uploads", token, map[string]any{
+		"path":       "/workspace/restore.txt",
+		"size":       len(first),
+		"sha256":     hex.EncodeToString(firstSHA[:]),
+		"chunk_size": len(first),
+	})
+	if firstUpload.Code != http.StatusCreated {
+		t.Fatalf("first upload status = %d body = %s", firstUpload.Code, firstUpload.Body.String())
+	}
+	var firstUploadBody struct {
+		Data struct {
+			UploadID string `json:"upload_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, firstUpload, &firstUploadBody)
+	putChunk(t, server, token, firstUploadBody.Data.UploadID, first, hex.EncodeToString(firstSHA[:]))
+	firstCommit := doJSON(t, server, http.MethodPost, "/api/v1/uploads/"+firstUploadBody.Data.UploadID+"/commit", token, map[string]any{})
+	if firstCommit.Code != http.StatusOK {
+		t.Fatalf("first commit status = %d body = %s", firstCommit.Code, firstCommit.Body.String())
+	}
+	var firstCommitBody struct {
+		Data struct {
+			FileID  string `json:"file_id"`
+			Version int64  `json:"version"`
+		} `json:"data"`
+	}
+	decodeBody(t, firstCommit, &firstCommitBody)
+
+	second := []byte("second version")
+	secondSHA := sha256.Sum256(second)
+	secondUpload := doJSON(t, server, http.MethodPost, "/api/v1/uploads", token, map[string]any{
+		"path":         "/workspace/restore.txt",
+		"size":         len(second),
+		"sha256":       hex.EncodeToString(secondSHA[:]),
+		"chunk_size":   len(second),
+		"base_version": firstCommitBody.Data.Version,
+	})
+	if secondUpload.Code != http.StatusCreated {
+		t.Fatalf("second upload status = %d body = %s", secondUpload.Code, secondUpload.Body.String())
+	}
+	var secondUploadBody struct {
+		Data struct {
+			UploadID string `json:"upload_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, secondUpload, &secondUploadBody)
+	putChunk(t, server, token, secondUploadBody.Data.UploadID, second, hex.EncodeToString(secondSHA[:]))
+	secondCommit := doJSON(t, server, http.MethodPost, "/api/v1/uploads/"+secondUploadBody.Data.UploadID+"/commit", token, map[string]any{})
+	if secondCommit.Code != http.StatusOK {
+		t.Fatalf("second commit status = %d body = %s", secondCommit.Code, secondCommit.Body.String())
+	}
+
+	restoreResp := doJSON(t, server, http.MethodPost, "/api/v1/files/"+firstCommitBody.Data.FileID+"/versions/1/restore", token, map[string]any{})
+	if restoreResp.Code != http.StatusOK {
+		t.Fatalf("restore status = %d body = %s", restoreResp.Code, restoreResp.Body.String())
+	}
+	var restoreBody struct {
+		Data struct {
+			File struct {
+				ID      string `json:"id"`
+				Version int64  `json:"version"`
+				Size    int64  `json:"size"`
+				SHA256  string `json:"sha256"`
+			} `json:"file"`
+			ChangeID int64 `json:"change_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, restoreResp, &restoreBody)
+	if restoreBody.Data.File.ID != firstCommitBody.Data.FileID || restoreBody.Data.File.Version != 3 || restoreBody.Data.ChangeID == 0 {
+		t.Fatalf("restore body = %#v", restoreBody.Data)
+	}
+	if restoreBody.Data.File.SHA256 != hex.EncodeToString(firstSHA[:]) || restoreBody.Data.File.Size != int64(len(first)) {
+		t.Fatalf("restored file metadata = %#v", restoreBody.Data.File)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+firstCommitBody.Data.FileID+"/content", nil)
+	downloadReq.Header.Set("Authorization", "Bearer "+token)
+	downloadRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(downloadRec, downloadReq)
+	if downloadRec.Code != http.StatusOK {
+		t.Fatalf("download status = %d body = %s", downloadRec.Code, downloadRec.Body.String())
+	}
+	if got := downloadRec.Body.String(); got != string(first) {
+		t.Fatalf("download body = %q, want %q", got, string(first))
+	}
+
+	versionsResp := doJSON(t, server, http.MethodGet, "/api/v1/files/"+firstCommitBody.Data.FileID+"/versions?limit=10", token, nil)
+	if versionsResp.Code != http.StatusOK {
+		t.Fatalf("versions status = %d body = %s", versionsResp.Code, versionsResp.Body.String())
+	}
+	var versionsBody struct {
+		Data struct {
+			Items []struct {
+				Version int64  `json:"version"`
+				SHA256  string `json:"sha256"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	decodeBody(t, versionsResp, &versionsBody)
+	if len(versionsBody.Data.Items) != 3 {
+		t.Fatalf("versions = %#v, want three", versionsBody.Data.Items)
+	}
+	if versionsBody.Data.Items[0].Version != 3 || versionsBody.Data.Items[0].SHA256 != hex.EncodeToString(firstSHA[:]) {
+		t.Fatalf("restored version item = %#v", versionsBody.Data.Items[0])
+	}
+
+	changesReq := httptest.NewRequest(http.MethodGet, "/api/v1/sync/changes?device_id="+deviceBody.Data.ID+"&after_change_id=0&limit=20", nil)
+	changesReq.Header.Set("Authorization", "Bearer "+token)
+	changesRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(changesRec, changesReq)
+	if changesRec.Code != http.StatusOK {
+		t.Fatalf("changes status = %d body = %s", changesRec.Code, changesRec.Body.String())
+	}
+	var changesBody struct {
+		Data struct {
+			Items []struct {
+				EventType string `json:"event_type"`
+				Path      string `json:"path"`
+				Version   *int64 `json:"version"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	decodeBody(t, changesRec, &changesBody)
+	if len(changesBody.Data.Items) == 0 {
+		t.Fatalf("changes missing restore event: %#v", changesBody.Data.Items)
+	}
+	last := changesBody.Data.Items[len(changesBody.Data.Items)-1]
+	if last.EventType != "restore" || last.Path != "/workspace/restore.txt" || last.Version == nil || *last.Version != 3 {
+		t.Fatalf("last change = %#v", last)
+	}
+}
+
 func TestSQLiteUploadInitIdempotencyKey(t *testing.T) {
 	ctx := context.Background()
 	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

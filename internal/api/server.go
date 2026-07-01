@@ -69,6 +69,7 @@ func (s *Server) routes() {
 	protected.Use(s.requireAuth())
 	protected.GET("/files/:id", s.getFile)
 	protected.GET("/files/:id/versions", s.listFileVersions)
+	protected.POST("/files/:id/versions/:version/restore", s.restoreFileVersion)
 	protected.GET("/files/by-path", s.getFileByPath)
 	protected.GET("/files", s.listFiles)
 	protected.POST("/files/directories", s.createDirectory)
@@ -205,6 +206,20 @@ func (s *Server) listFileVersions(c *gin.Context) {
 		items = append(items, fileVersionDTO(version))
 	}
 	ok(c, gin.H{"items": items})
+}
+
+func (s *Server) restoreFileVersion(c *gin.Context) {
+	version, err := strconv.ParseInt(c.Param("version"), 10, 64)
+	if err != nil || version <= 0 {
+		fail(c, domain.E(domain.CodeInvalidArgument, "invalid version", err))
+		return
+	}
+	node, changeID, err := s.files.RestoreVersion(c.Request.Context(), userID(c), c.Param("id"), version)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, gin.H{"file": fileDTO(node), "change_id": changeID})
 }
 
 func (s *Server) createDirectory(c *gin.Context) {

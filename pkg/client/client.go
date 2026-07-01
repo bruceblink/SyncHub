@@ -89,6 +89,11 @@ type CommitUploadData struct {
 	ChangeID int64  `json:"change_id"`
 }
 
+type RestoreFileVersionData struct {
+	File     FileNode `json:"file"`
+	ChangeID int64    `json:"change_id"`
+}
+
 type Device struct {
 	ID                  string     `json:"id"`
 	Name                string     `json:"name"`
@@ -196,6 +201,13 @@ func (c *Client) ListFileVersions(ctx context.Context, accessToken, fileID strin
 		path += "?" + encoded
 	}
 	err := c.getJSONAuth(ctx, path, accessToken, &data)
+	return data, err
+}
+
+func (c *Client) RestoreFileVersion(ctx context.Context, accessToken, fileID string, version int64) (RestoreFileVersionData, error) {
+	var data RestoreFileVersionData
+	path := fmt.Sprintf("/api/v1/files/%s/versions/%d/restore", url.PathEscape(fileID), version)
+	err := c.postJSONAuth(ctx, path, accessToken, map[string]any{}, nil, &data)
 	return data, err
 }
 

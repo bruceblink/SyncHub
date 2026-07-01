@@ -224,6 +224,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileVersionListResponse"
+  /api/v1/files/{id}/versions/{version}/restore:
+    post:
+      tags: [File]
+      summary: Restore file to a historical version
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Restored file metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileRestoreResponse"
   /api/v1/files/directories:
     post:
       tags: [File]
@@ -628,6 +647,18 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/FileVersion"
+    FileRestoreResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                file:
+                  $ref: "#/components/schemas/FileNode"
+                change_id:
+                  type: integer
     UploadInitRequest:
       type: object
       required: [path, size, sha256]

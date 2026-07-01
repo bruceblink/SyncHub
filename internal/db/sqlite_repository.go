@@ -241,6 +241,60 @@ func (r *SQLiteRepository) ListFileVersions(ctx context.Context, userID, fileID 
 	return versions, wrapSQLiteDBErr(rows.Err())
 }
 
+func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return domain.FileNode{}, 0, wrapSQLiteDBErr(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	node, err := r.getFileByIDTx(ctx, tx, userID, fileID)
+	if err != nil {
+		return domain.FileNode{}, 0, err
+	}
+	if node.NodeType != domain.NodeTypeFile {
+		return domain.FileNode{}, 0, domain.E(domain.CodeInvalidArgument, "only files can be restored", nil)
+	}
+
+	var source domain.FileVersion
+	err = tx.QueryRowContext(ctx, `
+		select id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id, created_at
+		from file_versions
+		where user_id = ? and file_id = ? and version = ?
+	`, userID, fileID, version).Scan(fileVersionScan(&source)...)
+	if err != nil {
+		return domain.FileNode{}, 0, wrapSQLiteNotFound(err, "file version not found")
+	}
+
+	now := time.Now().UTC()
+	newVersion := node.Version + 1
+	versionID := uuid.NewString()
+	_, err = tx.ExecContext(ctx, `
+		insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id, created_at)
+		values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, versionID, fileID, userID, newVersion, source.Size, source.SHA256, source.StorageKey, source.CreatedByDeviceID, now)
+	if err != nil {
+		return domain.FileNode{}, 0, wrapSQLiteDBErr(err)
+	}
+	_, err = tx.ExecContext(ctx, `
+		update file_nodes
+		set current_version_id = ?, size = ?, sha256 = ?, storage_key = ?, version = ?, updated_at = ?
+		where user_id = ? and id = ? and deleted_at is null
+	`, versionID, source.Size, source.SHA256, source.StorageKey, newVersion, now, userID, fileID)
+	if err != nil {
+		return domain.FileNode{}, 0, wrapSQLiteDBErr(err)
+	}
+	restored, err := r.getFileByIDTx(ctx, tx, userID, fileID)
+	if err != nil {
+		return domain.FileNode{}, 0, err
+	}
+	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil)
+	if err != nil {
+		return domain.FileNode{}, 0, err
+	}
+	return restored, changeID, wrapSQLiteDBErr(tx.Commit())
+}
+
 func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error) {
 	old, err := r.GetFileByID(ctx, userID, fileID)
 	if err != nil {
@@ -701,6 +755,16 @@ func (r *SQLiteRepository) getDevice(ctx context.Context, userID, deviceID strin
 		where user_id = ? and id = ?
 	`, userID, deviceID).Scan(deviceScan(&device)...)
 	return device, wrapSQLiteNotFound(err, "device not found")
+}
+
+func (r *SQLiteRepository) getFileByIDTx(ctx context.Context, tx *sql.Tx, userID, fileID string) (domain.FileNode, error) {
+	var node domain.FileNode
+	err := tx.QueryRowContext(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes
+		where user_id = ? and id = ? and deleted_at is null
+	`, userID, fileID).Scan(fileNodeScan(&node)...)
+	return node, wrapSQLiteNotFound(err, "file not found")
 }
 
 func (r *SQLiteRepository) getFileByPathTx(ctx context.Context, tx *sql.Tx, userID, path string) (domain.FileNode, error) {

@@ -134,6 +134,28 @@ func TestListFileVersions(t *testing.T) {
 	}
 }
 
+func TestRestoreFileVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/files/file_1/versions/2/restore" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file":{"id":"file_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":6,"sha256":"sha2","version":4,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:03:00Z"},"change_id":9}}`))
+	}))
+	defer server.Close()
+
+	restored, err := New(server.URL).RestoreFileVersion(context.Background(), "access-token", "file_1", 2)
+	if err != nil {
+		t.Fatalf("restore file version: %v", err)
+	}
+	if restored.File.ID != "file_1" || restored.File.Version != 4 || restored.ChangeID != 9 {
+		t.Fatalf("unexpected restore data: %#v", restored)
+	}
+}
+
 func TestDeleteFile(t *testing.T) {
 	deleted := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
