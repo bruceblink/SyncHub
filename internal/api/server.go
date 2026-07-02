@@ -70,6 +70,8 @@ func (s *Server) routes() {
 	protected.GET("/files/:id", s.getFile)
 	protected.GET("/files/:id/versions", s.listFileVersions)
 	protected.POST("/files/:id/versions/:version/restore", s.restoreFileVersion)
+	protected.POST("/files/:id/versions/:version/pin", s.pinFileVersion)
+	protected.DELETE("/files/:id/versions/:version/pin", s.unpinFileVersion)
 	protected.GET("/files/by-path", s.getFileByPath)
 	protected.GET("/files", s.listFiles)
 	protected.POST("/files/directories", s.createDirectory)
@@ -209,9 +211,9 @@ func (s *Server) listFileVersions(c *gin.Context) {
 }
 
 func (s *Server) restoreFileVersion(c *gin.Context) {
-	version, err := strconv.ParseInt(c.Param("version"), 10, 64)
-	if err != nil || version <= 0 {
-		fail(c, domain.E(domain.CodeInvalidArgument, "invalid version", err))
+	version, err := parsePositiveInt64Param(c, "version")
+	if err != nil {
+		fail(c, err)
 		return
 	}
 	node, changeID, err := s.files.RestoreVersion(c.Request.Context(), userID(c), c.Param("id"), version)
@@ -220,6 +222,34 @@ func (s *Server) restoreFileVersion(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"file": fileDTO(node), "change_id": changeID})
+}
+
+func (s *Server) pinFileVersion(c *gin.Context) {
+	version, err := parsePositiveInt64Param(c, "version")
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	pinned, err := s.files.PinVersion(c.Request.Context(), userID(c), c.Param("id"), version)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, fileVersionDTO(pinned))
+}
+
+func (s *Server) unpinFileVersion(c *gin.Context) {
+	version, err := parsePositiveInt64Param(c, "version")
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	unpinned, err := s.files.UnpinVersion(c.Request.Context(), userID(c), c.Param("id"), version)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, fileVersionDTO(unpinned))
 }
 
 func (s *Server) createDirectory(c *gin.Context) {
@@ -576,6 +606,14 @@ func parseInt64Query(c *gin.Context, name string, fallback int64) (int64, error)
 	return parsed, nil
 }
 
+func parsePositiveInt64Param(c *gin.Context, name string) (int64, error) {
+	parsed, err := strconv.ParseInt(c.Param(name), 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0, domain.E(domain.CodeInvalidArgument, "invalid "+name, err)
+	}
+	return parsed, nil
+}
+
 func userDTO(user domain.User) gin.H {
 	return gin.H{"id": user.ID, "email": user.Email, "status": user.Status}
 }
@@ -585,7 +623,7 @@ func fileDTO(node domain.FileNode) gin.H {
 }
 
 func fileVersionDTO(version domain.FileVersion) gin.H {
-	return gin.H{"id": version.ID, "file_id": version.FileID, "version": version.Version, "size": version.Size, "sha256": version.SHA256, "created_at": version.CreatedAt}
+	return gin.H{"id": version.ID, "file_id": version.FileID, "version": version.Version, "size": version.Size, "sha256": version.SHA256, "pinned_at": version.PinnedAt, "created_at": version.CreatedAt}
 }
 
 func uploadDTO(session domain.UploadSession, chunks []domain.UploadChunk) gin.H {

@@ -21,6 +21,8 @@ type Repository interface {
 	GetFileByPath(ctx context.Context, userID, path string) (domain.FileNode, error)
 	ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error)
 	ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error)
+	PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
+	UnpinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
 	RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error)
 	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error)
 	DeleteFile(ctx context.Context, userID, fileID string) error
@@ -113,6 +115,20 @@ func (s *Service) RestoreVersion(ctx context.Context, userID, fileID string, ver
 		return domain.FileNode{}, 0, domain.E(domain.CodeInvalidArgument, "only files can be restored", nil)
 	}
 	return s.repo.RestoreFileVersion(ctx, userID, fileID, version)
+}
+
+func (s *Service) PinVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {
+	if err := s.requireVersionTarget(ctx, userID, fileID, version, "only file versions can be pinned"); err != nil {
+		return domain.FileVersion{}, err
+	}
+	return s.repo.PinFileVersion(ctx, userID, fileID, version)
+}
+
+func (s *Service) UnpinVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {
+	if err := s.requireVersionTarget(ctx, userID, fileID, version, "only file versions can be unpinned"); err != nil {
+		return domain.FileVersion{}, err
+	}
+	return s.repo.UnpinFileVersion(ctx, userID, fileID, version)
 }
 
 func (s *Service) Move(ctx context.Context, userID, fileID, newPath string) (domain.FileNode, error) {
@@ -261,6 +277,23 @@ func (s *Service) Download(ctx context.Context, userID, fileID string, br *stora
 	}
 	rc, info, err := s.store.Read(ctx, *node.StorageKey, br)
 	return rc, info, node, err
+}
+
+func (s *Service) requireVersionTarget(ctx context.Context, userID, fileID string, version int64, directoryMessage string) error {
+	if strings.TrimSpace(fileID) == "" {
+		return domain.E(domain.CodeInvalidArgument, "file id is required", nil)
+	}
+	if version <= 0 {
+		return domain.E(domain.CodeInvalidArgument, "version must be positive", nil)
+	}
+	node, err := s.repo.GetFileByID(ctx, userID, fileID)
+	if err != nil {
+		return err
+	}
+	if node.NodeType != domain.NodeTypeFile {
+		return domain.E(domain.CodeInvalidArgument, directoryMessage, nil)
+	}
+	return nil
 }
 
 func objectKey(userID, sha256sum string) string {

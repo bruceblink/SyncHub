@@ -48,12 +48,13 @@ type FileNode struct {
 }
 
 type FileVersion struct {
-	ID        string    `json:"id"`
-	FileID    string    `json:"file_id"`
-	Version   int64     `json:"version"`
-	Size      int64     `json:"size"`
-	SHA256    string    `json:"sha256"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string     `json:"id"`
+	FileID    string     `json:"file_id"`
+	Version   int64      `json:"version"`
+	Size      int64      `json:"size"`
+	SHA256    string     `json:"sha256"`
+	PinnedAt  *time.Time `json:"pinned_at"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type FileVersionList struct {
@@ -209,6 +210,24 @@ func (c *Client) RestoreFileVersion(ctx context.Context, accessToken, fileID str
 	path := fmt.Sprintf("/api/v1/files/%s/versions/%d/restore", url.PathEscape(fileID), version)
 	err := c.postJSONAuth(ctx, path, accessToken, map[string]any{}, nil, &data)
 	return data, err
+}
+
+func (c *Client) PinFileVersion(ctx context.Context, accessToken, fileID string, version int64) (FileVersion, error) {
+	var data FileVersion
+	path := fmt.Sprintf("/api/v1/files/%s/versions/%d/pin", url.PathEscape(fileID), version)
+	err := c.postJSONAuth(ctx, path, accessToken, map[string]any{}, nil, &data)
+	return data, err
+}
+
+func (c *Client) UnpinFileVersion(ctx context.Context, accessToken, fileID string, version int64) (FileVersion, error) {
+	var data FileVersion
+	path := fmt.Sprintf("/api/v1/files/%s/versions/%d/pin", url.PathEscape(fileID), version)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.endpoint(path), nil)
+	if err != nil {
+		return data, err
+	}
+	setBearerToken(req, accessToken)
+	return data, c.doJSON(req, &data)
 }
 
 func (c *Client) DeleteFile(ctx context.Context, accessToken, fileID string) error {

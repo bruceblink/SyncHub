@@ -118,7 +118,7 @@ func TestListFileVersions(t *testing.T) {
 			t.Fatalf("limit = %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"ver_2","file_id":"file_1","version":2,"size":6,"sha256":"sha2","created_at":"2026-06-30T00:02:00Z"},{"id":"ver_1","file_id":"file_1","version":1,"size":5,"sha256":"sha1","created_at":"2026-06-30T00:01:00Z"}]}}`))
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"ver_2","file_id":"file_1","version":2,"size":6,"sha256":"sha2","pinned_at":"2026-06-30T00:03:00Z","created_at":"2026-06-30T00:02:00Z"},{"id":"ver_1","file_id":"file_1","version":1,"size":5,"sha256":"sha1","pinned_at":null,"created_at":"2026-06-30T00:01:00Z"}]}}`))
 	}))
 	defer server.Close()
 
@@ -131,6 +131,9 @@ func TestListFileVersions(t *testing.T) {
 	}
 	if versions.Items[0].ID != "ver_2" || versions.Items[0].Version != 2 || versions.Items[0].SHA256 != "sha2" {
 		t.Fatalf("unexpected first version: %#v", versions.Items[0])
+	}
+	if versions.Items[0].PinnedAt == nil || versions.Items[1].PinnedAt != nil {
+		t.Fatalf("unexpected pinned state: %#v", versions.Items)
 	}
 }
 
@@ -153,6 +156,53 @@ func TestRestoreFileVersion(t *testing.T) {
 	}
 	if restored.File.ID != "file_1" || restored.File.Version != 4 || restored.ChangeID != 9 {
 		t.Fatalf("unexpected restore data: %#v", restored)
+	}
+}
+
+func TestPinAndUnpinFileVersion(t *testing.T) {
+	requests := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{method: http.MethodPost, path: "/api/v1/files/file_1/versions/1/pin", body: `{"code":0,"message":"ok","data":{"id":"ver_1","file_id":"file_1","version":1,"size":5,"sha256":"sha1","pinned_at":"2026-06-30T00:03:00Z","created_at":"2026-06-30T00:01:00Z"}}`},
+		{method: http.MethodDelete, path: "/api/v1/files/file_1/versions/1/pin", body: `{"code":0,"message":"ok","data":{"id":"ver_1","file_id":"file_1","version":1,"size":5,"sha256":"sha1","pinned_at":null,"created_at":"2026-06-30T00:01:00Z"}}`},
+	}
+	index := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if index >= len(requests) {
+			t.Fatalf("unexpected extra request = %s %s", r.Method, r.URL.Path)
+		}
+		expected := requests[index]
+		index++
+		if r.Method != expected.method || r.URL.Path != expected.path {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(expected.body))
+	}))
+	defer server.Close()
+
+	client := New(server.URL)
+	pinned, err := client.PinFileVersion(context.Background(), "access-token", "file_1", 1)
+	if err != nil {
+		t.Fatalf("pin file version: %v", err)
+	}
+	if pinned.ID != "ver_1" || pinned.PinnedAt == nil {
+		t.Fatalf("unexpected pinned version: %#v", pinned)
+	}
+	unpinned, err := client.UnpinFileVersion(context.Background(), "access-token", "file_1", 1)
+	if err != nil {
+		t.Fatalf("unpin file version: %v", err)
+	}
+	if unpinned.ID != "ver_1" || unpinned.PinnedAt != nil {
+		t.Fatalf("unexpected unpinned version: %#v", unpinned)
+	}
+	if index != len(requests) {
+		t.Fatalf("request count = %d, want %d", index, len(requests))
 	}
 }
 

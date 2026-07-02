@@ -365,6 +365,129 @@ func TestSQLiteFileVersionHistory(t *testing.T) {
 	}
 }
 
+func TestSQLitePinFileVersion(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
+	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
+	server := New(authService, fileService, repo)
+
+	registerResp := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"email":    "pin-version@example.com",
+		"password": "password123",
+	})
+	if registerResp.Code != http.StatusCreated {
+		t.Fatalf("register status = %d body = %s", registerResp.Code, registerResp.Body.String())
+	}
+	var registerBody struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, registerResp, &registerBody)
+	token := registerBody.Data.Tokens.AccessToken
+
+	createDirResp := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/workspace"})
+	if createDirResp.Code != http.StatusCreated {
+		t.Fatalf("create directory status = %d body = %s", createDirResp.Code, createDirResp.Body.String())
+	}
+
+	content := []byte("pin me")
+	sum := sha256.Sum256(content)
+	uploadResp := doJSON(t, server, http.MethodPost, "/api/v1/uploads", token, map[string]any{
+		"path":       "/workspace/pin.txt",
+		"size":       len(content),
+		"sha256":     hex.EncodeToString(sum[:]),
+		"chunk_size": len(content),
+	})
+	if uploadResp.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d body = %s", uploadResp.Code, uploadResp.Body.String())
+	}
+	var uploadBody struct {
+		Data struct {
+			UploadID string `json:"upload_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, uploadResp, &uploadBody)
+	putChunk(t, server, token, uploadBody.Data.UploadID, content, hex.EncodeToString(sum[:]))
+	commitResp := doJSON(t, server, http.MethodPost, "/api/v1/uploads/"+uploadBody.Data.UploadID+"/commit", token, map[string]any{})
+	if commitResp.Code != http.StatusOK {
+		t.Fatalf("commit status = %d body = %s", commitResp.Code, commitResp.Body.String())
+	}
+	var commitBody struct {
+		Data struct {
+			FileID  string `json:"file_id"`
+			Version int64  `json:"version"`
+		} `json:"data"`
+	}
+	decodeBody(t, commitResp, &commitBody)
+
+	pinResp := doJSON(t, server, http.MethodPost, "/api/v1/files/"+commitBody.Data.FileID+"/versions/1/pin", token, map[string]any{})
+	if pinResp.Code != http.StatusOK {
+		t.Fatalf("pin status = %d body = %s", pinResp.Code, pinResp.Body.String())
+	}
+	var pinBody struct {
+		Data struct {
+			ID       string     `json:"id"`
+			Version  int64      `json:"version"`
+			PinnedAt *time.Time `json:"pinned_at"`
+		} `json:"data"`
+	}
+	decodeBody(t, pinResp, &pinBody)
+	if pinBody.Data.ID == "" || pinBody.Data.Version != 1 || pinBody.Data.PinnedAt == nil {
+		t.Fatalf("pin body = %#v", pinBody.Data)
+	}
+
+	versionsResp := doJSON(t, server, http.MethodGet, "/api/v1/files/"+commitBody.Data.FileID+"/versions?limit=10", token, nil)
+	if versionsResp.Code != http.StatusOK {
+		t.Fatalf("versions status = %d body = %s", versionsResp.Code, versionsResp.Body.String())
+	}
+	var versionsBody struct {
+		Data struct {
+			Items []struct {
+				Version  int64      `json:"version"`
+				PinnedAt *time.Time `json:"pinned_at"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	decodeBody(t, versionsResp, &versionsBody)
+	if len(versionsBody.Data.Items) != 1 || versionsBody.Data.Items[0].Version != 1 || versionsBody.Data.Items[0].PinnedAt == nil {
+		t.Fatalf("versions after pin = %#v", versionsBody.Data.Items)
+	}
+
+	unpinResp := doJSON(t, server, http.MethodDelete, "/api/v1/files/"+commitBody.Data.FileID+"/versions/1/pin", token, nil)
+	if unpinResp.Code != http.StatusOK {
+		t.Fatalf("unpin status = %d body = %s", unpinResp.Code, unpinResp.Body.String())
+	}
+	var unpinBody struct {
+		Data struct {
+			ID       string     `json:"id"`
+			Version  int64      `json:"version"`
+			PinnedAt *time.Time `json:"pinned_at"`
+		} `json:"data"`
+	}
+	decodeBody(t, unpinResp, &unpinBody)
+	if unpinBody.Data.ID == "" || unpinBody.Data.Version != 1 || unpinBody.Data.PinnedAt != nil {
+		t.Fatalf("unpin body = %#v", unpinBody.Data)
+	}
+
+	versionsResp = doJSON(t, server, http.MethodGet, "/api/v1/files/"+commitBody.Data.FileID+"/versions?limit=10", token, nil)
+	if versionsResp.Code != http.StatusOK {
+		t.Fatalf("versions after unpin status = %d body = %s", versionsResp.Code, versionsResp.Body.String())
+	}
+	decodeBody(t, versionsResp, &versionsBody)
+	if len(versionsBody.Data.Items) != 1 || versionsBody.Data.Items[0].PinnedAt != nil {
+		t.Fatalf("versions after unpin = %#v", versionsBody.Data.Items)
+	}
+}
+
 func TestSQLiteRestoreFileVersion(t *testing.T) {
 	ctx := context.Background()
 	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

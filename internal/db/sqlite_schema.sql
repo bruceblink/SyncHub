@@ -48,6 +48,7 @@ create table if not exists file_versions (
     sha256 text not null,
     storage_key text not null,
     created_by_device_id text,
+    pinned_at datetime,
     created_at datetime not null default current_timestamp,
     unique (file_id, version)
 );

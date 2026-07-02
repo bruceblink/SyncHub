@@ -46,6 +46,7 @@ type FileVersion struct {
 	SHA256            string
 	StorageKey        string
 	CreatedByDeviceID *string
+	PinnedAt          *time.Time
 	CreatedAt         time.Time
 }
 

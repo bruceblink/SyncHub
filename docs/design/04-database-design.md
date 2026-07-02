@@ -100,6 +100,7 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 | sha256 | text | 内容 hash |
 | storage_key | text | storage 对象指针 |
 | created_by_device_id | uuid nullable | 来源设备 |
+| pinned_at | timestamptz nullable | 手动 pin 时间 |
 | created_at | timestamptz | 创建时间 |
 
 约束：

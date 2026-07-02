@@ -165,7 +165,7 @@ func (r *Repository) ListFileVersions(ctx context.Context, userID, fileID string
 		limit = 100
 	}
 	rows, err := r.pool.Query(ctx, `
-		select v.id, v.file_id, v.user_id, v.version, v.size, v.sha256, v.storage_key, v.created_by_device_id, v.created_at
+		select v.id, v.file_id, v.user_id, v.version, v.size, v.sha256, v.storage_key, v.created_by_device_id, v.pinned_at, v.created_at
 		from file_versions v
 		join file_nodes n on n.id = v.file_id and n.user_id = v.user_id
 		where v.user_id = $1 and v.file_id = $2 and n.deleted_at is null
@@ -188,6 +188,34 @@ func (r *Repository) ListFileVersions(ctx context.Context, userID, fileID string
 	return versions, wrapDBErr(rows.Err())
 }
 
+func (r *Repository) PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {
+	var pinned domain.FileVersion
+	err := r.pool.QueryRow(ctx, `
+		update file_versions v
+		set pinned_at = coalesce(v.pinned_at, now())
+		from file_nodes n
+		where v.user_id = $1 and v.file_id = $2 and v.version = $3
+			and n.id = v.file_id and n.user_id = v.user_id
+			and n.node_type = $4 and n.deleted_at is null
+		returning v.id, v.file_id, v.user_id, v.version, v.size, v.sha256, v.storage_key, v.created_by_device_id, v.pinned_at, v.created_at
+	`, userID, fileID, version, domain.NodeTypeFile).Scan(fileVersionScan(&pinned)...)
+	return pinned, wrapNotFound(err, "file version not found")
+}
+
+func (r *Repository) UnpinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {
+	var unpinned domain.FileVersion
+	err := r.pool.QueryRow(ctx, `
+		update file_versions v
+		set pinned_at = null
+		from file_nodes n
+		where v.user_id = $1 and v.file_id = $2 and v.version = $3
+			and n.id = v.file_id and n.user_id = v.user_id
+			and n.node_type = $4 and n.deleted_at is null
+		returning v.id, v.file_id, v.user_id, v.version, v.size, v.sha256, v.storage_key, v.created_by_device_id, v.pinned_at, v.created_at
+	`, userID, fileID, version, domain.NodeTypeFile).Scan(fileVersionScan(&unpinned)...)
+	return unpinned, wrapNotFound(err, "file version not found")
+}
+
 func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -205,7 +233,7 @@ func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID stri
 
 	var source domain.FileVersion
 	err = tx.QueryRow(ctx, `
-		select id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id, created_at
+		select id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id, pinned_at, created_at
 		from file_versions
 		where user_id = $1 and file_id = $2 and version = $3
 	`, userID, fileID, version).Scan(fileVersionScan(&source)...)
@@ -687,7 +715,7 @@ func fileNodeScan(n *domain.FileNode) []any {
 }
 
 func fileVersionScan(v *domain.FileVersion) []any {
-	return []any{&v.ID, &v.FileID, &v.UserID, &v.Version, &v.Size, &v.SHA256, &v.StorageKey, &v.CreatedByDeviceID, &v.CreatedAt}
+	return []any{&v.ID, &v.FileID, &v.UserID, &v.Version, &v.Size, &v.SHA256, &v.StorageKey, &v.CreatedByDeviceID, &v.PinnedAt, &v.CreatedAt}
 }
 
 func uploadSessionScan(s *domain.UploadSession) []any {

@@ -46,6 +46,10 @@ func OpenSQLite(ctx context.Context, databaseURL string) (*SQLiteRepository, err
 		_ = conn.Close()
 		return nil, err
 	}
+	if err := ensureSQLiteSchemaUpgrades(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
 	if err := conn.PingContext(ctx); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -218,7 +222,7 @@ func (r *SQLiteRepository) ListFileVersions(ctx context.Context, userID, fileID 
 		limit = 100
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		select v.id, v.file_id, v.user_id, v.version, v.size, v.sha256, v.storage_key, v.created_by_device_id, v.created_at
+		select v.id, v.file_id, v.user_id, v.version, v.size, v.sha256, v.storage_key, v.created_by_device_id, v.pinned_at, v.created_at
 		from file_versions v
 		join file_nodes n on n.id = v.file_id and n.user_id = v.user_id
 		where v.user_id = ? and v.file_id = ? and n.deleted_at is null
@@ -241,6 +245,46 @@ func (r *SQLiteRepository) ListFileVersions(ctx context.Context, userID, fileID 
 	return versions, wrapSQLiteDBErr(rows.Err())
 }
 
+func (r *SQLiteRepository) PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {
+	_, err := r.db.ExecContext(ctx, `
+		update file_versions
+		set pinned_at = coalesce(pinned_at, ?)
+		where user_id = ? and file_id = ? and version = ?
+			and exists (
+				select 1
+				from file_nodes n
+				where n.id = file_versions.file_id
+					and n.user_id = file_versions.user_id
+					and n.node_type = ?
+					and n.deleted_at is null
+			)
+	`, time.Now().UTC(), userID, fileID, version, domain.NodeTypeFile)
+	if err != nil {
+		return domain.FileVersion{}, wrapSQLiteDBErr(err)
+	}
+	return r.getFileVersion(ctx, userID, fileID, version)
+}
+
+func (r *SQLiteRepository) UnpinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {
+	_, err := r.db.ExecContext(ctx, `
+		update file_versions
+		set pinned_at = null
+		where user_id = ? and file_id = ? and version = ?
+			and exists (
+				select 1
+				from file_nodes n
+				where n.id = file_versions.file_id
+					and n.user_id = file_versions.user_id
+					and n.node_type = ?
+					and n.deleted_at is null
+			)
+	`, userID, fileID, version, domain.NodeTypeFile)
+	if err != nil {
+		return domain.FileVersion{}, wrapSQLiteDBErr(err)
+	}
+	return r.getFileVersion(ctx, userID, fileID, version)
+}
+
 func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -258,7 +302,7 @@ func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileI
 
 	var source domain.FileVersion
 	err = tx.QueryRowContext(ctx, `
-		select id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id, created_at
+		select id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id, pinned_at, created_at
 		from file_versions
 		where user_id = ? and file_id = ? and version = ?
 	`, userID, fileID, version).Scan(fileVersionScan(&source)...)
@@ -757,6 +801,18 @@ func (r *SQLiteRepository) getDevice(ctx context.Context, userID, deviceID strin
 	return device, wrapSQLiteNotFound(err, "device not found")
 }
 
+func (r *SQLiteRepository) getFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {
+	var fileVersion domain.FileVersion
+	err := r.db.QueryRowContext(ctx, `
+		select v.id, v.file_id, v.user_id, v.version, v.size, v.sha256, v.storage_key, v.created_by_device_id, v.pinned_at, v.created_at
+		from file_versions v
+		join file_nodes n on n.id = v.file_id and n.user_id = v.user_id
+		where v.user_id = ? and v.file_id = ? and v.version = ?
+			and n.node_type = ? and n.deleted_at is null
+	`, userID, fileID, version, domain.NodeTypeFile).Scan(fileVersionScan(&fileVersion)...)
+	return fileVersion, wrapSQLiteNotFound(err, "file version not found")
+}
+
 func (r *SQLiteRepository) getFileByIDTx(ctx context.Context, tx *sql.Tx, userID, fileID string) (domain.FileNode, error) {
 	var node domain.FileNode
 	err := tx.QueryRowContext(ctx, `
@@ -796,6 +852,44 @@ func (r *SQLiteRepository) createChangeEvent(ctx context.Context, tx *sql.Tx, us
 	}
 	id, err := result.LastInsertId()
 	return id, wrapSQLiteDBErr(err)
+}
+
+func ensureSQLiteSchemaUpgrades(ctx context.Context, conn *sql.DB) error {
+	hasPinnedAt, err := sqliteColumnExists(ctx, conn, "file_versions", "pinned_at")
+	if err != nil {
+		return err
+	}
+	if hasPinnedAt {
+		return nil
+	}
+	_, err = conn.ExecContext(ctx, "alter table file_versions add column pinned_at datetime")
+	return err
+}
+
+func sqliteColumnExists(ctx context.Context, conn *sql.DB, table, column string) (bool, error) {
+	rows, err := conn.QueryContext(ctx, "pragma table_info("+table+")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func ensureSQLiteDir(databaseURL string) error {

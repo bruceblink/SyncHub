@@ -243,6 +243,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileRestoreResponse"
+  /api/v1/files/{id}/versions/{version}/pin:
+    post:
+      tags: [File]
+      summary: Pin file version
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Pinned file version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileVersionResponse"
+    delete:
+      tags: [File]
+      summary: Unpin file version
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Unpinned file version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileVersionResponse"
   /api/v1/files/directories:
     post:
       tags: [File]
@@ -613,6 +650,10 @@ components:
           type: integer
         sha256:
           type: string
+        pinned_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -647,6 +688,13 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/FileVersion"
+    FileVersionResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FileVersion"
     FileRestoreResponse:
       allOf:
         - $ref: "#/components/schemas/APIResponse"

@@ -190,6 +190,16 @@ func (r *downloadFileRepo) ListFileVersions(ctx context.Context, userID, fileID 
 	return nil, errNotImplemented()
 }
 
+func (r *downloadFileRepo) PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {
+	_, _, _, _ = ctx, userID, fileID, version
+	return domain.FileVersion{}, errNotImplemented()
+}
+
+func (r *downloadFileRepo) UnpinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {
+	_, _, _, _ = ctx, userID, fileID, version
+	return domain.FileVersion{}, errNotImplemented()
+}
+
 func (r *downloadFileRepo) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
 	_, _, _, _ = ctx, userID, fileID, version
 	return domain.FileNode{}, 0, errNotImplemented()
