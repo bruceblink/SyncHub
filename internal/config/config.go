@@ -17,9 +17,15 @@ type Config struct {
 	UploadChunkSize       int64
 	UploadSessionTTL      time.Duration
 	UploadCleanupInterval time.Duration
+	VersionRetention      VersionRetentionPolicy
 	AccessTokenTTL        time.Duration
 	RefreshTokenTTL       time.Duration
 	LogLevel              string
+}
+
+type VersionRetentionPolicy struct {
+	MinVersions int64
+	MaxAge      time.Duration
 }
 
 func Load() Config {
@@ -42,9 +48,13 @@ func Load() Config {
 		UploadChunkSize:       getEnvInt64("UPLOAD_CHUNK_SIZE", 4*1024*1024),
 		UploadSessionTTL:      time.Duration(getEnvInt64("UPLOAD_SESSION_TTL_SECONDS", 24*60*60)) * time.Second,
 		UploadCleanupInterval: time.Duration(getEnvInt64("UPLOAD_CLEANUP_INTERVAL_SECONDS", 60*60)) * time.Second,
-		AccessTokenTTL:        time.Duration(getEnvInt64("ACCESS_TOKEN_TTL_SECONDS", 15*60)) * time.Second,
-		RefreshTokenTTL:       time.Duration(getEnvInt64("REFRESH_TOKEN_TTL_SECONDS", 30*24*60*60)) * time.Second,
-		LogLevel:              getEnv("LOG_LEVEL", "info"),
+		VersionRetention: VersionRetentionPolicy{
+			MinVersions: getEnvInt64("VERSION_RETENTION_MIN_VERSIONS", 20),
+			MaxAge:      time.Duration(getEnvInt64("VERSION_RETENTION_MAX_AGE_DAYS", 30)) * 24 * time.Hour,
+		},
+		AccessTokenTTL:  time.Duration(getEnvInt64("ACCESS_TOKEN_TTL_SECONDS", 15*60)) * time.Second,
+		RefreshTokenTTL: time.Duration(getEnvInt64("REFRESH_TOKEN_TTL_SECONDS", 30*24*60*60)) * time.Second,
+		LogLevel:        getEnv("LOG_LEVEL", "info"),
 	}
 }
 

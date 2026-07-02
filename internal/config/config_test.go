@@ -1,11 +1,16 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadDefaultsToSQLite(t *testing.T) {
 	t.Setenv("DATABASE_DRIVER", "")
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("UPLOAD_CLEANUP_INTERVAL_SECONDS", "")
+	t.Setenv("VERSION_RETENTION_MIN_VERSIONS", "")
+	t.Setenv("VERSION_RETENTION_MAX_AGE_DAYS", "")
 
 	cfg := Load()
 	if cfg.DatabaseDriver != "sqlite" {
@@ -20,6 +25,12 @@ func TestLoadDefaultsToSQLite(t *testing.T) {
 	if cfg.UploadCleanupInterval <= 0 {
 		t.Fatalf("upload cleanup interval = %s, want positive duration", cfg.UploadCleanupInterval)
 	}
+	if cfg.VersionRetention.MinVersions != 20 {
+		t.Fatalf("version retention min versions = %d, want 20", cfg.VersionRetention.MinVersions)
+	}
+	if cfg.VersionRetention.MaxAge != 30*24*time.Hour {
+		t.Fatalf("version retention max age = %s, want 720h", cfg.VersionRetention.MaxAge)
+	}
 }
 
 func TestLoadInfersPostgresFromURL(t *testing.T) {
@@ -29,5 +40,18 @@ func TestLoadInfersPostgresFromURL(t *testing.T) {
 	cfg := Load()
 	if cfg.DatabaseDriver != "postgres" {
 		t.Fatalf("database driver = %q, want postgres", cfg.DatabaseDriver)
+	}
+}
+
+func TestLoadVersionRetentionOverrides(t *testing.T) {
+	t.Setenv("VERSION_RETENTION_MIN_VERSIONS", "7")
+	t.Setenv("VERSION_RETENTION_MAX_AGE_DAYS", "14")
+
+	cfg := Load()
+	if cfg.VersionRetention.MinVersions != 7 {
+		t.Fatalf("version retention min versions = %d, want 7", cfg.VersionRetention.MinVersions)
+	}
+	if cfg.VersionRetention.MaxAge != 14*24*time.Hour {
+		t.Fatalf("version retention max age = %s, want 336h", cfg.VersionRetention.MaxAge)
 	}
 }

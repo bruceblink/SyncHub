@@ -31,6 +31,8 @@ go run ./cmd/synchub-cli sync status --path .
 - `STORAGE_BACKEND=local`
 - `LOCAL_STORAGE_ROOT=./.data/storage`
 - `UPLOAD_CLEANUP_INTERVAL_SECONDS=3600`
+- `VERSION_RETENTION_MIN_VERSIONS=20`
+- `VERSION_RETENTION_MAX_AGE_DAYS=30`
 - `LOG_LEVEL=debug`
 
 ## Migration
