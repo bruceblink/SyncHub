@@ -14,6 +14,10 @@ type ObjectInfo struct {
 	Size int64
 }
 
+type ReadinessChecker interface {
+	Ping(ctx context.Context) error
+}
+
 type Storage interface {
 	PutChunk(ctx context.Context, key string, r io.Reader, checksum string) error
 	Compose(ctx context.Context, targetKey string, chunkKeys []string) error

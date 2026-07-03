@@ -20,11 +20,12 @@ type Pinger interface {
 }
 
 type Server struct {
-	router *gin.Engine
-	auth   *authsvc.Service
-	files  *filesvc.Service
-	sync   *syncsvc.Service
-	db     Pinger
+	router  *gin.Engine
+	auth    *authsvc.Service
+	files   *filesvc.Service
+	sync    *syncsvc.Service
+	db      Pinger
+	storage storage.ReadinessChecker
 }
 
 func New(auth *authsvc.Service, files *filesvc.Service, db Pinger) *Server {
@@ -32,10 +33,14 @@ func New(auth *authsvc.Service, files *filesvc.Service, db Pinger) *Server {
 }
 
 func NewWithSync(auth *authsvc.Service, files *filesvc.Service, sync *syncsvc.Service, db Pinger) *Server {
+	return NewWithSyncAndStorage(auth, files, sync, db, nil)
+}
+
+func NewWithSyncAndStorage(auth *authsvc.Service, files *filesvc.Service, sync *syncsvc.Service, db Pinger, store storage.ReadinessChecker) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	s := &Server{router: r, auth: auth, files: files, sync: sync, db: db}
+	s := &Server{router: r, auth: auth, files: files, sync: sync, db: db, storage: store}
 	s.routes()
 	return s
 }
@@ -50,6 +55,12 @@ func (s *Server) routes() {
 		if s.db != nil {
 			if err := s.db.Ping(c.Request.Context()); err != nil {
 				fail(c, domain.E(domain.CodeInternal, "database is not ready", err))
+				return
+			}
+		}
+		if s.storage != nil {
+			if err := s.storage.Ping(c.Request.Context()); err != nil {
+				fail(c, domain.E(domain.CodeInternal, "storage is not ready", err))
 				return
 			}
 		}

@@ -19,6 +19,35 @@ func NewLocal(root string) *Local {
 	return &Local{root: root}
 }
 
+func (s *Local) Ping(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	if err := os.MkdirAll(s.root, 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(s.root, ".readyz-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := os.Remove(name); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
 func (s *Local) PutChunk(ctx context.Context, key string, r io.Reader, checksum string) error {
 	target, err := s.resolve(key)
 	if err != nil {

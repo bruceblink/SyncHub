@@ -36,7 +36,7 @@ func main() {
 	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL)
 	syncService := syncsvc.NewService(repo)
 	workerService := workersvc.NewService(repo, store)
-	apiServer := api.NewWithSync(authService, fileService, syncService, repo)
+	apiServer := api.NewWithSyncAndStorage(authService, fileService, syncService, repo, store)
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	defer stopWorker()
