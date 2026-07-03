@@ -30,6 +30,8 @@ func runFile(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runFileDelete(ctx, args[1:], stdout, stderr)
 	case "move":
 		return runFileMove(ctx, args[1:], stdout, stderr)
+	case "mkdir":
+		return runFileMkdir(ctx, args[1:], stdout, stderr)
 	case "versions":
 		return runFileVersions(ctx, args[1:], stdout, stderr)
 	case "restore":
@@ -142,6 +144,35 @@ func runFileMove(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	fmt.Fprintf(stdout, "moved: %s -> %s\n", node.Path, moved.Path)
 	fmt.Fprintf(stdout, "id: %s\n", moved.ID)
 	fmt.Fprintf(stdout, "version: %d\n", moved.Version)
+	return nil
+}
+
+func runFileMkdir(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("file mkdir", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	remotePath := fs.String("remote-path", "", "remote directory path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	remote, err := normalizeRemotePath(*remotePath)
+	if err != nil {
+		return err
+	}
+
+	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
+	if err != nil {
+		return err
+	}
+	node, err := session.apiClient.CreateDirectoryWithDevice(ctx, session.accessToken, remote, session.workspace.DeviceID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "created directory: %s\n", node.Path)
+	fmt.Fprintf(stdout, "id: %s\n", node.ID)
+	fmt.Fprintf(stdout, "version: %d\n", node.Version)
 	return nil
 }
 
