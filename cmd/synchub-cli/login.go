@@ -63,6 +63,32 @@ func runRegister(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	return writeAuthConfig(stdout, *configPath, apiClient, data, "registered as")
 }
 
+func runLogout(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", defaultConfigPath(), "config file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := readConfig(*configPath)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.Tokens.RefreshToken) == "" {
+		return errors.New("refresh token is missing; run synchub-cli login again")
+	}
+	if err := client.New(cfg.ServerURL).Logout(ctx, cfg.Tokens.RefreshToken); err != nil {
+		return err
+	}
+	if err := os.Remove(*configPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	fmt.Fprintln(stdout, "logged out")
+	fmt.Fprintf(stdout, "config removed: %s\n", *configPath)
+	return nil
+}
+
 func writeAuthConfig(stdout io.Writer, configPath string, apiClient *client.Client, data client.LoginData, successPrefix string) error {
 	now := time.Now().UTC()
 	cfg := cliConfig{

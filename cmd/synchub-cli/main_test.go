@@ -101,6 +101,56 @@ func TestRunRegisterWritesConfig(t *testing.T) {
 	}
 }
 
+func TestRunLogoutRevokesRefreshTokenAndRemovesConfig(t *testing.T) {
+	var sawLogout bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/auth/logout" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		var req struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode logout request: %v", err)
+		}
+		if req.RefreshToken != "refresh" {
+			t.Fatalf("refresh token = %q", req.RefreshToken)
+		}
+		sawLogout = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{}}`))
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfig(configPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"logout",
+		"--config", configPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if !sawLogout {
+		t.Fatal("logout endpoint was not called")
+	}
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Fatalf("config still exists or stat failed: %v", err)
+	}
+	want := "logged out\nconfig removed: " + configPath + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestDefaultServerURLMatchesAPIDefault(t *testing.T) {
 	if defaultServerURL != "http://localhost:8765" {
 		t.Fatalf("default server url = %q, want http://localhost:8765", defaultServerURL)

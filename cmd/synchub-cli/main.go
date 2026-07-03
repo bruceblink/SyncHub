@@ -27,6 +27,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runRegister(ctx, args[1:], stdout, stderr)
 	case "login":
 		return runLogin(ctx, args[1:], stdout, stderr)
+	case "logout":
+		return runLogout(ctx, args[1:], stdout, stderr)
 	case "workspace":
 		return runWorkspace(args[1:], stdout, stderr)
 	case "manifest":

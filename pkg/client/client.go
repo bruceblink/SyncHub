@@ -192,6 +192,12 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (TokenPair, e
 	return data, err
 }
 
+func (c *Client) Logout(ctx context.Context, refreshToken string) error {
+	return c.postJSON(ctx, "/api/v1/auth/logout", map[string]string{
+		"refresh_token": refreshToken,
+	}, nil)
+}
+
 func (c *Client) CreateDirectory(ctx context.Context, accessToken, path string) (FileNode, error) {
 	var data FileNode
 	err := c.postJSONAuth(ctx, "/api/v1/files/directories", accessToken, map[string]string{

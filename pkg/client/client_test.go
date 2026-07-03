@@ -57,6 +57,30 @@ func TestRefresh(t *testing.T) {
 	}
 }
 
+func TestLogout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/auth/logout" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		var req struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode logout request: %v", err)
+		}
+		if req.RefreshToken != "refresh" {
+			t.Fatalf("refresh token = %q", req.RefreshToken)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{}}`))
+	}))
+	defer server.Close()
+
+	if err := New(server.URL).Logout(context.Background(), "refresh"); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+}
+
 func TestRegister(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/auth/register" {
