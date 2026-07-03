@@ -95,6 +95,37 @@ func TestRequestLogIncludesTraceAndStatus(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointExportsRequestCounters(t *testing.T) {
+	server := New(nil, nil, nil)
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	healthRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(healthRec, healthReq)
+	if healthRec.Code != http.StatusOK {
+		t.Fatalf("health status = %d body = %s", healthRec.Code, healthRec.Body.String())
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(metricsRec, metricsReq)
+	if metricsRec.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d body = %s", metricsRec.Code, metricsRec.Body.String())
+	}
+	if got := metricsRec.Header().Get("Content-Type"); got != "text/plain; version=0.0.4; charset=utf-8" {
+		t.Fatalf("metrics content type = %q", got)
+	}
+	body := metricsRec.Body.String()
+	if !strings.Contains(body, `synchub_http_requests_total{method="GET",path="/healthz",status="200"} 1`) {
+		t.Fatalf("metrics missing health counter: %s", body)
+	}
+	if strings.Contains(body, `path="/metrics"`) {
+		t.Fatalf("metrics endpoint should not count itself: %s", body)
+	}
+	if !strings.Contains(body, `synchub_http_request_duration_seconds_total{method="GET",path="/healthz",status="200"}`) {
+		t.Fatalf("metrics missing duration counter: %s", body)
+	}
+}
+
 func TestReadyzFailsWhenStorageIsNotReady(t *testing.T) {
 	store := &fakeReadinessChecker{err: errors.New("storage unavailable")}
 	server := NewWithSyncAndStorage(nil, nil, nil, &fakePinger{}, store)

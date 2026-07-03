@@ -31,6 +31,7 @@ type Server struct {
 	sync    *syncsvc.Service
 	db      Pinger
 	storage storage.ReadinessChecker
+	metrics *requestMetrics
 }
 
 func New(auth *authsvc.Service, files *filesvc.Service, db Pinger) *Server {
@@ -44,10 +45,12 @@ func NewWithSync(auth *authsvc.Service, files *filesvc.Service, sync *syncsvc.Se
 func NewWithSyncAndStorage(auth *authsvc.Service, files *filesvc.Service, sync *syncsvc.Service, db Pinger, store storage.ReadinessChecker) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	metrics := newRequestMetrics()
 	r.Use(gin.Recovery())
 	r.Use(traceMiddleware())
+	r.Use(requestMetricsMiddleware(metrics))
 	r.Use(requestLogMiddleware())
-	s := &Server{router: r, auth: auth, files: files, sync: sync, db: db, storage: store}
+	s := &Server{router: r, auth: auth, files: files, sync: sync, db: db, storage: store, metrics: metrics}
 	s.routes()
 	return s
 }
@@ -112,6 +115,7 @@ func (s *Server) routes() {
 		}
 		ok(c, gin.H{"status": "ready"})
 	})
+	s.router.GET("/metrics", s.metricsHandler)
 	s.router.GET("/swagger", swaggerRedirect)
 	s.router.GET("/swagger/", swaggerUI)
 	s.router.GET("/swagger/openapi.yaml", swaggerSpec)

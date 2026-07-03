@@ -58,6 +58,7 @@ Useful endpoints:
 
 - `GET /healthz`
 - `GET /readyz`
+- `GET /metrics`
 - `GET /swagger/`
 - `GET /swagger/openapi.yaml`
 
