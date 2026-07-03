@@ -13,6 +13,7 @@ const (
 	ChangeCreated = "created"
 	ChangeUpdated = "updated"
 	ChangeDeleted = "deleted"
+	ChangeMoved   = "moved"
 )
 
 type Snapshot map[string]manifest.Entry
@@ -91,7 +92,18 @@ func SnapshotFromManifest(m manifest.Manifest) Snapshot {
 
 func Diff(previous, current Snapshot) []Change {
 	changes := make([]Change, 0)
+	moves := detectMoves(previous, current)
+	movedFrom := make(map[string]struct{}, len(moves))
+	movedTo := make(map[string]struct{}, len(moves))
+	for _, move := range moves {
+		movedFrom[move.fromRelativePath] = struct{}{}
+		movedTo[move.toRelativePath] = struct{}{}
+		changes = append(changes, change(ChangeMoved, move.toRelativePath, &move.before, &move.after))
+	}
 	for relativePath, after := range current {
+		if _, ok := movedTo[relativePath]; ok {
+			continue
+		}
 		before, ok := previous[relativePath]
 		switch {
 		case !ok:
@@ -101,6 +113,9 @@ func Diff(previous, current Snapshot) []Change {
 		}
 	}
 	for relativePath, before := range previous {
+		if _, ok := movedFrom[relativePath]; ok {
+			continue
+		}
 		if _, ok := current[relativePath]; !ok {
 			changes = append(changes, change(ChangeDeleted, relativePath, &before, nil))
 		}
@@ -112,6 +127,56 @@ func Diff(previous, current Snapshot) []Change {
 		return changes[i].RelativePath < changes[j].RelativePath
 	})
 	return changes
+}
+
+type moveCandidate struct {
+	fromRelativePath string
+	toRelativePath   string
+	before           manifest.Entry
+	after            manifest.Entry
+}
+
+type contentKey struct {
+	sha256 string
+	size   int64
+}
+
+func detectMoves(previous, current Snapshot) []moveCandidate {
+	removed := map[contentKey][]manifest.Entry{}
+	for relativePath, before := range previous {
+		if _, ok := current[relativePath]; ok {
+			continue
+		}
+		removed[contentKey{sha256: before.SHA256, size: before.Size}] = append(removed[contentKey{sha256: before.SHA256, size: before.Size}], before)
+	}
+
+	added := map[contentKey][]manifest.Entry{}
+	for relativePath, after := range current {
+		if _, ok := previous[relativePath]; ok {
+			continue
+		}
+		added[contentKey{sha256: after.SHA256, size: after.Size}] = append(added[contentKey{sha256: after.SHA256, size: after.Size}], after)
+	}
+
+	moves := []moveCandidate{}
+	for k, removedCandidates := range removed {
+		if len(removedCandidates) != 1 {
+			continue
+		}
+		addedCandidates := added[k]
+		if len(addedCandidates) != 1 {
+			continue
+		}
+		before := removedCandidates[0]
+		after := addedCandidates[0]
+		moves = append(moves, moveCandidate{
+			fromRelativePath: before.RelativePath,
+			toRelativePath:   after.RelativePath,
+			before:           before,
+			after:            after,
+		})
+	}
+	return moves
 }
 
 func contentChanged(before, after manifest.Entry) bool {

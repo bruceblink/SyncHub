@@ -41,6 +41,47 @@ func TestDiffDetectsCreateUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestDiffDetectsUniqueMove(t *testing.T) {
+	previous := Snapshot{
+		"old.txt":  entry("/workspace/old.txt", "old.txt", "move me"),
+		"same.txt": entry("/workspace/same.txt", "same.txt", "same"),
+	}
+	current := Snapshot{
+		"renamed.txt": entry("/workspace/renamed.txt", "renamed.txt", "move me"),
+		"same.txt":    entry("/workspace/same.txt", "same.txt", "same"),
+	}
+
+	changes := Diff(previous, current)
+	if len(changes) != 1 {
+		t.Fatalf("changes = %d, want 1: %#v", len(changes), changes)
+	}
+	assertChange(t, changes[0], ChangeMoved, "renamed.txt")
+	if changes[0].Before == nil || changes[0].Before.RelativePath != "old.txt" {
+		t.Fatalf("move before = %#v, want old.txt", changes[0].Before)
+	}
+	if changes[0].After == nil || changes[0].After.RelativePath != "renamed.txt" {
+		t.Fatalf("move after = %#v, want renamed.txt", changes[0].After)
+	}
+}
+
+func TestDiffDoesNotGuessAmbiguousMoves(t *testing.T) {
+	previous := Snapshot{
+		"old.txt": entry("/workspace/old.txt", "old.txt", "same"),
+	}
+	current := Snapshot{
+		"new-a.txt": entry("/workspace/new-a.txt", "new-a.txt", "same"),
+		"new-b.txt": entry("/workspace/new-b.txt", "new-b.txt", "same"),
+	}
+
+	changes := Diff(previous, current)
+	if len(changes) != 3 {
+		t.Fatalf("changes = %d, want 3: %#v", len(changes), changes)
+	}
+	assertChange(t, changes[0], ChangeCreated, "new-a.txt")
+	assertChange(t, changes[1], ChangeCreated, "new-b.txt")
+	assertChange(t, changes[2], ChangeDeleted, "old.txt")
+}
+
 func TestPollerDetectsWorkspaceChanges(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "delete.txt"), "delete")

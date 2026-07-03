@@ -70,6 +70,10 @@ func scanManifestChanges(ctx context.Context, root, remotePath, manifestPath str
 
 func printWatchChanges(stdout io.Writer, changes []watch.Change) {
 	for _, change := range changes {
+		if change.Type == watch.ChangeMoved && change.Before != nil && change.After != nil {
+			fmt.Fprintf(stdout, "%s %s -> %s\n", change.Type, change.Before.RelativePath, change.After.RelativePath)
+			continue
+		}
 		fmt.Fprintf(stdout, "%s %s\n", change.Type, displayWatchPath(change))
 	}
 	fmt.Fprintf(stdout, "changes: %d\n", len(changes))

@@ -180,4 +180,5 @@ func printSyncStatusChanges(stdout io.Writer, changes []watch.Change) {
 	fmt.Fprintf(stdout, "created: %d\n", counts[watch.ChangeCreated])
 	fmt.Fprintf(stdout, "updated: %d\n", counts[watch.ChangeUpdated])
 	fmt.Fprintf(stdout, "deleted: %d\n", counts[watch.ChangeDeleted])
+	fmt.Fprintf(stdout, "moved: %d\n", counts[watch.ChangeMoved])
 }
