@@ -36,6 +36,7 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	manifestPath := fs.String("manifest", "", "manifest file path")
 	deviceName := fs.String("device-name", "", "device name")
 	devicePlatform := fs.String("platform", runtime.GOOS, "device platform")
+	dryRun := fs.Bool("dry-run", false, "preview local push changes without contacting the server")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -65,15 +66,6 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if m.Root != "" && filepath.Clean(m.Root) != filepath.Clean(root) {
 		return fmt.Errorf("manifest root %s does not match workspace root %s", m.Root, root)
 	}
-	loginConfig, err := readConfigWithRefresh(ctx, *configPath)
-	if err != nil {
-		return err
-	}
-	serverURL := workspace.ServerURL
-	if strings.TrimSpace(serverURL) == "" {
-		serverURL = loginConfig.ServerURL
-	}
-	apiClient := client.New(serverURL)
 	currentManifest, err := manifest.Scan(ctx, root, workspace.RemotePath)
 	if err != nil {
 		return err
@@ -93,6 +85,24 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
+	if *dryRun {
+		plan, err := planPushPreview(m, currentManifest, currentPaths, previousEntries, plannedMoves)
+		if err != nil {
+			return err
+		}
+		printPushPreview(stdout, plan)
+		return nil
+	}
+
+	loginConfig, err := readConfigWithRefresh(ctx, *configPath)
+	if err != nil {
+		return err
+	}
+	serverURL := workspace.ServerURL
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = loginConfig.ServerURL
+	}
+	apiClient := client.New(serverURL)
 
 	createdDirs := map[string]struct{}{}
 	uploaded := 0
@@ -196,6 +206,75 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		fmt.Fprintf(stdout, "conflicts kept: %d\n", conflictKept)
 	}
 	return nil
+}
+
+type pushPreviewPlan struct {
+	uploads []pushUploadPreview
+	deletes []manifest.Entry
+	moves   []pushMovePlan
+}
+
+type pushUploadPreview struct {
+	action string
+	item   manifest.Entry
+}
+
+func planPushPreview(previous, current manifest.Manifest, currentPaths map[string]struct{}, previousEntries map[string]manifest.Entry, plannedMoves []pushMovePlan) (pushPreviewPlan, error) {
+	plan := pushPreviewPlan{moves: plannedMoves}
+	moveSources := make(map[string]struct{}, len(plannedMoves))
+	moveTargets := make(map[string]struct{}, len(plannedMoves))
+	for _, move := range plannedMoves {
+		moveSources[move.sourcePath] = struct{}{}
+		moveTargets[move.targetPath] = struct{}{}
+	}
+	for _, item := range previous.Items {
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			return pushPreviewPlan{}, err
+		}
+		if _, ok := moveSources[path]; ok {
+			continue
+		}
+		if _, ok := currentPaths[path]; !ok {
+			plan.deletes = append(plan.deletes, item)
+		}
+	}
+	for _, item := range current.Items {
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			return pushPreviewPlan{}, err
+		}
+		if _, ok := moveTargets[path]; ok {
+			continue
+		}
+		previousItem, existed := previousEntries[path]
+		if existed && previousItem.RemoteVersion != nil && !manifestContentChanged(previousItem, item) {
+			continue
+		}
+		action := "create"
+		if existed && previousItem.RemoteVersion != nil {
+			action = "update"
+		}
+		plan.uploads = append(plan.uploads, pushUploadPreview{action: action, item: item})
+	}
+	return plan, nil
+}
+
+func printPushPreview(stdout io.Writer, plan pushPreviewPlan) {
+	fmt.Fprintln(stdout, "dry run: true")
+	fmt.Fprintf(stdout, "changes: %d\n", len(plan.uploads)+len(plan.deletes)+len(plan.moves))
+	for _, move := range plan.moves {
+		fmt.Fprintf(stdout, "move %s -> %s base_version=%s\n", move.sourcePath, move.targetPath, versionString(move.from.RemoteVersion))
+	}
+	for _, item := range plan.deletes {
+		fmt.Fprintf(stdout, "delete %s base_version=%s\n", item.Path, versionString(item.RemoteVersion))
+	}
+	for _, upload := range plan.uploads {
+		fmt.Fprintf(stdout, "%s %s size=%d base_version=%s\n", upload.action, upload.item.Path, upload.item.Size, versionString(upload.item.RemoteVersion))
+	}
+	fmt.Fprintf(stdout, "uploaded: %d files\n", len(plan.uploads))
+	fmt.Fprintf(stdout, "deleted: %d files\n", len(plan.deletes))
+	fmt.Fprintf(stdout, "moved: %d files\n", len(plan.moves))
 }
 
 func ensureWorkspacePushDevice(ctx context.Context, apiClient *client.Client, accessToken, root, workspacePath string, workspace *workspaceConfig, deviceName, platform string) error {
