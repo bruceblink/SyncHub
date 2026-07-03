@@ -432,6 +432,8 @@ func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
 		"device platform: windows",
 		"last applied change: 7",
 		"files: 1",
+		"remote tracked: 0",
+		"local only: 1",
 		"last scan: 2026-06-30T01:02:03Z",
 		"pending changes: 0",
 	} {
@@ -450,13 +452,14 @@ func TestRunSyncStatusShowsPendingLocalChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "modified.txt"), []byte("new"), 0o644); err != nil {
 		t.Fatalf("write modified file: %v", err)
 	}
+	remoteVersion := int64(2)
 	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
 		Version:     1,
 		Root:        root,
 		RemotePath:  "/workspace",
 		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
 		Items: []manifest.Entry{
-			{Path: "/workspace/deleted.txt", RelativePath: "deleted.txt", Size: int64(len("old")), SHA256: testSHA([]byte("old"))},
+			{Path: "/workspace/deleted.txt", RelativePath: "deleted.txt", Size: int64(len("old")), SHA256: testSHA([]byte("old")), RemoteVersion: &remoteVersion},
 			{Path: "/workspace/modified.txt", RelativePath: "modified.txt", Size: int64(len("old")), SHA256: testSHA([]byte("old"))},
 		},
 	}, 0o600); err != nil {
@@ -470,6 +473,8 @@ func TestRunSyncStatusShowsPendingLocalChanges(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
+		"remote tracked: 1",
+		"local only: 1",
 		"pending changes: 3",
 		"created: 1",
 		"updated: 1",

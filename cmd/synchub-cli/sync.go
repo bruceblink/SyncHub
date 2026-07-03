@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bruceblink/SyncHub/internal/manifest"
 	"github.com/bruceblink/SyncHub/internal/watch"
 	"github.com/bruceblink/SyncHub/pkg/client"
 )
@@ -162,6 +163,9 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 	}
 	fmt.Fprintf(stdout, "manifest: %s\n", localManifestPath)
 	fmt.Fprintf(stdout, "files: %d\n", len(m.Items))
+	remoteTracked, localOnly := manifestRemoteVersionSummary(m.Items)
+	fmt.Fprintf(stdout, "remote tracked: %d\n", remoteTracked)
+	fmt.Fprintf(stdout, "local only: %d\n", localOnly)
 	fmt.Fprintf(stdout, "last scan: %s\n", m.GeneratedAt.Format(time.RFC3339))
 	changes, err := scanManifestChanges(ctx, root, workspace.RemotePath, localManifestPath)
 	if err != nil {
@@ -181,4 +185,15 @@ func printSyncStatusChanges(stdout io.Writer, changes []watch.Change) {
 	fmt.Fprintf(stdout, "updated: %d\n", counts[watch.ChangeUpdated])
 	fmt.Fprintf(stdout, "deleted: %d\n", counts[watch.ChangeDeleted])
 	fmt.Fprintf(stdout, "moved: %d\n", counts[watch.ChangeMoved])
+}
+
+func manifestRemoteVersionSummary(items []manifest.Entry) (remoteTracked, localOnly int) {
+	for _, item := range items {
+		if item.RemoteVersion == nil {
+			localOnly++
+			continue
+		}
+		remoteTracked++
+	}
+	return remoteTracked, localOnly
 }
