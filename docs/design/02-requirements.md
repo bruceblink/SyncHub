@@ -4,7 +4,7 @@
 
 - 在多台机器之间同步工作区文件的开发者。
 - 需要同步 Codex、Claude Code、Cursor、VS Code、Obsidian 等工具配置和会话上下文的重度工具用户。
-- 希望通过 WebDAV 或 HTTP API 接入私有同步服务的个人或小团队。
+- 希望通过 HTTP API / CLI 接入私有同步服务的个人开发者。
 
 ## Phase 1 功能需求
 
@@ -25,13 +25,16 @@
 - 冲突检测与冲突文件命名策略。
 - 同步游标和设备同步状态。
 
-## Phase 3+ 功能需求
+## Phase 3 功能需求
 
 - 文件版本历史查询与恢复。
-- WebDAV adapter。
 - CLI 操作：login、sync、status、pull、push。
-- 稳定同步协议与 Agent SDK，供任意 GUI、Web、移动端或第三方客户端适配。
+
+## Later 功能需求
+
+- WebDAV adapter。
 - S3 / OSS / MinIO storage backend。
+- 稳定同步协议与 Agent SDK，供任意 GUI、Web、移动端或第三方客户端适配。
 - 团队空间与共享目录。
 
 ## 非功能需求

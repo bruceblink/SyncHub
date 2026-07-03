@@ -65,11 +65,14 @@
 职责：
 
 - SQLite 开发库初始化和 schema bootstrap。
+- repository 实现。
+- transaction helper。
+
+Later：
+
 - PostgreSQL / MySQL adapter 的连接初始化。
 - migration 运行入口或 migration 工具集成。
 - sqlc 生成 query 的封装（大型关系型数据库 adapter 阶段）。
-- repository 实现和数据库方言隔离。
-- transaction helper。
 
 Repository 边界：
 
@@ -86,9 +89,12 @@ Repository 边界：
 
 - Storage interface。
 - Local FS backend。
-- S3-compatible backend 扩展。
 - staging object、commit object、delete object。
 - streaming read / write。
+
+Later：
+
+- S3-compatible backend 扩展。
 
 建议 interface：
 
@@ -127,15 +133,19 @@ type Storage interface {
 
 - 清理过期 upload session。
 - 清理 staging object。
-- 清理孤儿对象。
-- 后续版本保留策略任务。
+- 最小版本保留策略任务。
+
+Later：
+
+- 孤儿对象扫描。
+- 队列化异步任务。
 
 ### pkg/client
 
 职责：
 
 - 可选的 Go API client。
-- 供 Agent、CLI 或外部 Go 集成复用。
+- 供 CLI / Agent-style commands 复用。
 - 只暴露稳定 API，不暴露 internal 包。
 
 ## 依赖方向

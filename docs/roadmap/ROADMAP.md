@@ -15,17 +15,17 @@ SyncHub 主技术栈确定为 Go + Gin。
 
 - Language: Go stable
 - Web: Gin
-- DB: SQLite for development first; PostgreSQL / MySQL adapters later
-- Migration: embedded SQLite bootstrap first; golang-migrate 或 goose for larger relational databases later
+- DB: SQLite for current MVP; PostgreSQL / MySQL adapters later only if SQLite limits are proven
+- Migration: embedded SQLite bootstrap first; external migration tools are deferred
 - Auth: JWT access token + refresh token
-- Storage: Local FS first，S3 / OSS / MinIO compatible storage later
+- Storage: Local FS for current MVP; S3 / OSS / MinIO compatible storage is deferred
 - API schema: OpenAPI
 - Observability: slog / zap + OpenTelemetry + metrics
 - Packaging: Docker / Docker Compose
 
 ## 总体目标
 
-先做一个可靠的单用户 / 多设备同步闭环，再逐步扩展 WebDAV、版本恢复、团队空间和云对象存储。
+先做一个可靠的个人开发者工作区同步闭环：单用户、多设备、SQLite、Local FS、CLI / Agent。
 
 优先级顺序：
 
@@ -33,7 +33,15 @@ SyncHub 主技术栈确定为 Go + Gin。
 2. 元数据、版本和变更日志正确。
 3. Agent 能稳定增量同步。
 4. 冲突不会静默覆盖用户文件。
-5. 再补 WebDAV、客户端适配层、团队能力。
+5. Docker Compose 本地部署和恢复流程稳定。
+
+当前阶段明确不做：
+
+- WebDAV adapter。
+- S3 / OSS / MinIO storage backend。
+- 团队空间、共享目录和复杂权限模型。
+- Agent SDK、第三方客户端适配层、Web / desktop / mobile 客户端规划。
+- PostgreSQL / MySQL 生产级 adapter，除非 SQLite 单机闭环已经稳定且出现明确瓶颈。
 
 ## Phase 0: Go 工程基础
 
@@ -57,10 +65,10 @@ SyncHub 主技术栈确定为 Go + Gin。
   - `internal/worker`
   - `pkg/client`
   - `migrations`
-- 引入基础依赖：gin、SQLite driver、jwt、argon2、uuid、OpenTelemetry；后续再补 pgx / MySQL driver / sqlc。
+- 引入基础依赖：gin、SQLite driver、jwt、argon2、uuid、OpenTelemetry。
 - 建立配置加载：环境变量 + typed config。
 - 建立错误模型：domain error -> API error response。
-- 建立本地 SQLite 开发数据库；后续建立 Docker Compose：PostgreSQL / MySQL + API。
+- 建立本地 SQLite 开发数据库和 Docker Compose API 部署。
 - 建立 CI 命令：fmt、vet、test。
 
 验收标准：
@@ -79,7 +87,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 任务：
 
 - users、refresh_tokens migration。
-- SQLite repository wrapper；后续为 PostgreSQL / MySQL 增加 sqlc queries。
+- SQLite repository wrapper。
 - 注册、登录、refresh、logout API。
 - Argon2id password hash。
 - JWT access token 和 refresh token。
@@ -97,7 +105,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 任务：
 
 - file_nodes、file_versions、change_events migration。
-- SQLite repository wrapper；后续为 PostgreSQL / MySQL 增加 sqlc queries。
+- SQLite repository wrapper。
 - 目录创建、列表、按路径查询、移动、删除 API。
 - path normalization。
 - 用户级数据隔离。
@@ -243,9 +251,9 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 删除 / 恢复都会产生 change event。
 - 清理任务不会删除当前版本和 pinned version。
 
-## Phase 4: WebDAV Adapter
+## Later: WebDAV Adapter
 
-目标：让系统能被支持 WebDAV 的客户端挂载或访问。
+目标：让系统能被支持 WebDAV 的客户端挂载或访问。该方向只作为长期扩展记录，不进入当前开发队列。
 
 任务：
 
@@ -262,9 +270,9 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 上传、下载、重命名、删除可用。
 - WebDAV 写入同样生成版本和 change event。
 
-## Phase 5: 云存储与后台任务
+## Later: 云存储与后台任务
 
-目标：支持更接近生产部署的对象存储和异步任务。
+目标：支持更接近生产部署的对象存储和异步任务。当前 MVP 只保留 Local FS 和进程内轻量 worker。
 
 任务：
 
@@ -281,9 +289,9 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 后台任务可重复执行且幂等。
 - readyz 能检查 DB 和 storage。
 
-## Phase 6: Client Adapter
+## Later: Client Adapter
 
-目标：在稳定 API 和 Agent 能力之上，支持任意客户端形态接入。GUI 不是核心路线，不绑定特定框架。
+目标：在稳定 CLI / Agent 能力之上，再考虑任意客户端形态接入。GUI 不是当前路线。
 
 任务：
 

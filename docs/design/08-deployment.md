@@ -8,7 +8,7 @@ Phase 1 使用 Docker Compose 部署：
 - SQLite database file for development
 - `local-storage` volume
 
-Phase 2 起按需要增加：
+Later 按明确需求再评估：
 
 - `redis`
 - `synchub-worker`
@@ -34,6 +34,9 @@ Phase 2 起按需要增加：
 - `UPLOAD_CLEANUP_INTERVAL_SECONDS`
 - `VERSION_RETENTION_MIN_VERSIONS`，默认 `20`
 - `VERSION_RETENTION_MAX_AGE_DAYS`，默认 `30`
+
+Later adapter 配置：
+
 - `REDIS_URL`
 - `S3_ENDPOINT`
 - `S3_BUCKET`
@@ -43,7 +46,7 @@ Phase 2 起按需要增加：
 
 ## 数据卷
 
-- SQLite 开发数据库文件必须持久化；生产级 PostgreSQL / MySQL 数据卷必须持久化。
+- SQLite 开发数据库文件必须持久化。
 - Local FS storage root 必须持久化。
 - staging storage 可以和 object storage 放在同一 volume，但需要后台清理策略。
 

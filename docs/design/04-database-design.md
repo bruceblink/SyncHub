@@ -4,7 +4,7 @@
 
 开发阶段默认使用 SQLite，让本地运行、测试和单机 MVP 不依赖外部数据库服务。数据库访问必须经过 repository 边界，业务层不直接绑定具体 SQL 方言。
 
-后续按部署规模增加 PostgreSQL / MySQL adapter。PostgreSQL 侧优先使用 pgx + sqlc；MySQL 侧优先使用 database/sql 或 sqlc 支持的 MySQL 查询。正式 migration 工具可使用 golang-migrate 或 goose。
+PostgreSQL / MySQL adapter 暂不进入当前开发队列。只有 SQLite 单机同步闭环稳定且出现明确部署瓶颈时，再评估 pgx / sqlc、database/sql 或独立 migration 工具。
 
 ## sqlc 与 GORM 取舍
 

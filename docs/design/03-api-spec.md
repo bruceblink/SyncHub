@@ -232,9 +232,9 @@ Request:
 }
 ```
 
-## WebDAV
+## Later: WebDAV
 
-WebDAV adapter 后续映射到相同 file service：
+WebDAV adapter 只作为长期扩展记录，不属于当前 MVP。后续如恢复该方向，再映射到相同 file service：
 
 - `PROPFIND` -> list / metadata
 - `GET` -> download

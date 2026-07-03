@@ -4,9 +4,12 @@
 
 - Go stable
 - SQLite local database
+- Docker / Docker Compose
+
+Later：
+
 - sqlc（PostgreSQL / MySQL adapter 阶段）
 - golang-migrate 或 goose（PostgreSQL / MySQL adapter 阶段）
-- Docker / Docker Compose
 
 ## 推荐命令
 
@@ -46,11 +49,11 @@ migrate create -ext sql -dir migrations <name>
 migrate -path migrations -database "$DATABASE_URL" up
 ```
 
-PostgreSQL / MySQL adapter 阶段再启用独立 migration 工具。如果改用 goose，需要在项目 README 和 CI 中统一命令。
+PostgreSQL / MySQL adapter 阶段再启用独立 migration 工具。如果改用 goose，需要在项目 README 和 CI 中统一命令。当前 MVP 只维护 SQLite bootstrap 和已有迁移脚本。
 
 ## SQL 生成
 
-PostgreSQL / MySQL adapter 优先使用 sqlc：
+PostgreSQL / MySQL adapter 是 Later。恢复该方向时再启用 sqlc：
 
 ```bash
 sqlc generate
