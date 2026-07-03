@@ -85,6 +85,7 @@ go run ./cmd/synchub-agent --path .
 ```
 
 For a single agent sync cycle, add `--once`.
+Use `--device-name`, `--platform`, and `--limit` to control device registration and pull batch size.
 
 For a containerized local server:
 

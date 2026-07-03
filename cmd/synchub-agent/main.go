@@ -24,6 +24,9 @@ type agentOptions struct {
 	ManifestPath        string
 	CLIPath             string
 	Interval            time.Duration
+	DeviceName          string
+	DevicePlatform      string
+	Limit               int
 	Once                bool
 }
 
@@ -81,12 +84,18 @@ func parseOptions(args []string, stderr io.Writer) (agentOptions, error) {
 	fs.StringVar(&opts.ManifestPath, "manifest", "", "manifest file path")
 	fs.StringVar(&opts.CLIPath, "cli", "", "synchub-cli executable path")
 	fs.DurationVar(&opts.Interval, "interval", defaultAgentInterval, "sync interval")
+	fs.StringVar(&opts.DeviceName, "device-name", "", "device name")
+	fs.StringVar(&opts.DevicePlatform, "platform", "", "device platform")
+	fs.IntVar(&opts.Limit, "limit", 500, "maximum changes to pull per sync cycle")
 	fs.BoolVar(&opts.Once, "once", false, "run one sync cycle and exit")
 	if err := fs.Parse(args); err != nil {
 		return agentOptions{}, err
 	}
 	if opts.Interval <= 0 {
 		return agentOptions{}, errors.New("sync interval must be positive")
+	}
+	if opts.Limit <= 0 {
+		return agentOptions{}, errors.New("limit must be positive")
 	}
 	if strings.TrimSpace(opts.RootPath) == "" {
 		return agentOptions{}, errors.New("workspace path is required")
@@ -134,6 +143,13 @@ func buildSyncOnceArgs(opts agentOptions) []string {
 	if strings.TrimSpace(opts.ManifestPath) != "" {
 		args = append(args, "--manifest", opts.ManifestPath)
 	}
+	if strings.TrimSpace(opts.DeviceName) != "" {
+		args = append(args, "--device-name", opts.DeviceName)
+	}
+	if strings.TrimSpace(opts.DevicePlatform) != "" {
+		args = append(args, "--platform", opts.DevicePlatform)
+	}
+	args = append(args, "--limit", fmt.Sprintf("%d", opts.Limit))
 	return args
 }
 

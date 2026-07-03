@@ -28,6 +28,9 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 		"--manifest", "manifest.json",
 		"--cli", "synchub-cli-test",
 		"--interval", "5s",
+		"--device-name", "laptop",
+		"--platform", "windows",
+		"--limit", "20",
 		"--once",
 	}, &stdout, &bytes.Buffer{}, runner)
 	if err != nil {
@@ -36,11 +39,14 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 	if stdout.String() != "synced\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if !got.Once || got.RootPath != "." || got.ConfigPath != "login.json" || got.WorkspaceConfigPath != "workspace.json" || got.ManifestPath != "manifest.json" || got.CLIPath != "synchub-cli-test" {
+	if !got.Once || got.RootPath != "." || got.ConfigPath != "login.json" || got.WorkspaceConfigPath != "workspace.json" || got.ManifestPath != "manifest.json" || got.CLIPath != "synchub-cli-test" || got.DeviceName != "laptop" || got.DevicePlatform != "windows" {
 		t.Fatalf("options = %#v", got)
 	}
 	if got.Interval != 5*time.Second {
 		t.Fatalf("interval = %s, want 5s", got.Interval)
+	}
+	if got.Limit != 20 {
+		t.Fatalf("limit = %d, want 20", got.Limit)
 	}
 }
 
@@ -61,12 +67,22 @@ func TestParseOptionsRejectsInvalidInterval(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsInvalidLimit(t *testing.T) {
+	_, err := parseOptions([]string{"--limit", "0"}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected invalid limit error")
+	}
+}
+
 func TestBuildSyncOnceArgs(t *testing.T) {
 	got := buildSyncOnceArgs(agentOptions{
 		RootPath:            "workspace",
 		ConfigPath:          "login.json",
 		WorkspaceConfigPath: "workspace.json",
 		ManifestPath:        "manifest.json",
+		DeviceName:          "laptop",
+		DevicePlatform:      "windows",
+		Limit:               20,
 	})
 	want := []string{
 		"sync", "once",
@@ -74,6 +90,9 @@ func TestBuildSyncOnceArgs(t *testing.T) {
 		"--config", "login.json",
 		"--workspace-config", "workspace.json",
 		"--manifest", "manifest.json",
+		"--device-name", "laptop",
+		"--platform", "windows",
+		"--limit", "20",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %#v, want %#v", got, want)
@@ -81,8 +100,8 @@ func TestBuildSyncOnceArgs(t *testing.T) {
 }
 
 func TestBuildSyncOnceArgsOmitsEmptyOptionalPaths(t *testing.T) {
-	got := buildSyncOnceArgs(agentOptions{RootPath: "workspace", ConfigPath: "login.json"})
-	want := []string{"sync", "once", "--path", "workspace", "--config", "login.json"}
+	got := buildSyncOnceArgs(agentOptions{RootPath: "workspace", ConfigPath: "login.json", Limit: 500})
+	want := []string{"sync", "once", "--path", "workspace", "--config", "login.json", "--limit", "500"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %#v, want %#v", got, want)
 	}
