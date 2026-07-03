@@ -9,6 +9,7 @@ import (
 
 type Repository interface {
 	CreateDevice(ctx context.Context, userID, name, platform string) (domain.Device, error)
+	ListDevices(ctx context.Context, userID string, limit int32) ([]domain.Device, error)
 	HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error)
 	ListChanges(ctx context.Context, userID, deviceID string, afterChangeID int64, limit int32) ([]domain.ChangeEvent, error)
 	AckDevice(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error)
@@ -31,6 +32,13 @@ func (s *Service) RegisterDevice(ctx context.Context, userID, name, platform str
 		return domain.Device{}, domain.E(domain.CodeInvalidArgument, "name and platform are required", nil)
 	}
 	return s.repo.CreateDevice(ctx, userID, name, platform)
+}
+
+func (s *Service) Devices(ctx context.Context, userID string, limit int32) ([]domain.Device, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	return s.repo.ListDevices(ctx, userID, limit)
 }
 
 func (s *Service) Heartbeat(ctx context.Context, userID, deviceID string) (domain.Device, error) {

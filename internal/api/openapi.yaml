@@ -479,6 +479,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/CommitResponse"
   /api/v1/devices:
+    get:
+      tags: [Sync]
+      summary: List devices
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+      responses:
+        "200":
+          description: User devices.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceListResponse"
     post:
       tags: [Sync]
       summary: Register device
@@ -909,6 +926,18 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/Device"
+    DeviceListResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Device"
     ChangeEvent:
       type: object
       properties:

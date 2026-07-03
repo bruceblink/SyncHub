@@ -111,6 +111,10 @@ type Device struct {
 	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
+type DeviceList struct {
+	Items []Device `json:"items"`
+}
+
 type ChangeEvent struct {
 	ID             int64     `json:"id"`
 	FileID         string    `json:"file_id"`
@@ -417,6 +421,20 @@ func (c *Client) RegisterDevice(ctx context.Context, accessToken, name, platform
 		"name":     name,
 		"platform": platform,
 	}, nil, &data)
+	return data, err
+}
+
+func (c *Client) ListDevices(ctx context.Context, accessToken string, limit int32) (DeviceList, error) {
+	var data DeviceList
+	values := url.Values{}
+	if limit > 0 {
+		values.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	path := "/api/v1/devices"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	err := c.getJSONAuth(ctx, path, accessToken, &data)
 	return data, err
 }
 

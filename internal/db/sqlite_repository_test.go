@@ -278,6 +278,52 @@ func TestSQLiteSyncConflictRepository(t *testing.T) {
 	}
 }
 
+func TestSQLiteListDevices(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "devices@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	otherUser, err := repo.CreateUser(ctx, "other-devices@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	first, err := repo.CreateDevice(ctx, user.ID, "first", "windows")
+	if err != nil {
+		t.Fatalf("create first device: %v", err)
+	}
+	second, err := repo.CreateDevice(ctx, user.ID, "second", "linux")
+	if err != nil {
+		t.Fatalf("create second device: %v", err)
+	}
+	if _, err := repo.CreateDevice(ctx, otherUser.ID, "other", "linux"); err != nil {
+		t.Fatalf("create other device: %v", err)
+	}
+	if _, err := repo.HeartbeatDevice(ctx, user.ID, first.ID); err != nil {
+		t.Fatalf("heartbeat first device: %v", err)
+	}
+
+	devices, err := repo.ListDevices(ctx, user.ID, 10)
+	if err != nil {
+		t.Fatalf("list devices: %v", err)
+	}
+	if len(devices) != 2 {
+		t.Fatalf("devices = %#v, want two", devices)
+	}
+	if devices[0].ID != first.ID || devices[0].LastSeenAt == nil {
+		t.Fatalf("first listed device = %#v, want heartbeat device first", devices[0])
+	}
+	if devices[1].ID != second.ID {
+		t.Fatalf("second listed device = %#v, want second device", devices[1])
+	}
+}
+
 func TestSQLiteMoveDirectoryCascadesDescendantPaths(t *testing.T) {
 	ctx := context.Background()
 	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

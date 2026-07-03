@@ -604,6 +604,11 @@ func TestDeviceAndChangeMethods(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"laptop","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/devices":
+			if got := r.URL.Query().Get("limit"); got != "25" {
+				t.Fatalf("device limit = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"dev_1","name":"laptop","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"},{"id":"dev_2","name":"desktop","platform":"linux","last_seen_at":"2026-06-30T00:02:00Z","last_applied_change_id":8,"created_at":"2026-06-30T00:01:00Z","updated_at":"2026-06-30T00:02:00Z"}]}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices/dev_1/heartbeat":
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"laptop","platform":"windows","last_seen_at":"2026-06-30T00:01:00Z","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/changes":
@@ -642,6 +647,14 @@ func TestDeviceAndChangeMethods(t *testing.T) {
 	}
 	if device.ID != "dev_1" || device.Name != "laptop" {
 		t.Fatalf("unexpected device: %#v", device)
+	}
+
+	devices, err := apiClient.ListDevices(context.Background(), "access-token", 25)
+	if err != nil {
+		t.Fatalf("list devices: %v", err)
+	}
+	if len(devices.Items) != 2 || devices.Items[1].ID != "dev_2" || devices.Items[1].LastSeenAt == nil {
+		t.Fatalf("unexpected devices: %#v", devices.Items)
 	}
 
 	heartbeat, err := apiClient.HeartbeatDevice(context.Background(), "access-token", "dev_1")

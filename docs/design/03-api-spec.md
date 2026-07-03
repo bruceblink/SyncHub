@@ -246,6 +246,12 @@ Request:
 }
 ```
 
+### 设备列表
+
+`GET /api/v1/devices?limit=100`
+
+返回当前用户已注册设备及其 `last_seen_at`、`last_applied_change_id`，用于排查多设备同步游标和最近在线状态。
+
 ### 心跳
 
 `POST /api/v1/devices/{device_id}/heartbeat`

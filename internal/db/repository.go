@@ -656,6 +656,33 @@ func (r *Repository) CreateDevice(ctx context.Context, userID, name, platform st
 	return device, wrapDBErr(err)
 }
 
+func (r *Repository) ListDevices(ctx context.Context, userID string, limit int32) ([]domain.Device, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, `
+		select id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+		from devices
+		where user_id = $1
+		order by updated_at desc, id desc
+		limit $2
+	`, userID, limit)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer rows.Close()
+
+	devices := make([]domain.Device, 0)
+	for rows.Next() {
+		var device domain.Device
+		if err := rows.Scan(deviceScan(&device)...); err != nil {
+			return nil, wrapDBErr(err)
+		}
+		devices = append(devices, device)
+	}
+	return devices, wrapDBErr(rows.Err())
+}
+
 func (r *Repository) HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
 	var device domain.Device
 	err := r.pool.QueryRow(ctx, `

@@ -147,6 +147,7 @@ func (s *Server) routes() {
 	protected.PUT("/uploads/:id/chunks/:index", s.putChunk)
 	protected.GET("/uploads/:id", s.uploadStatus)
 	protected.POST("/uploads/:id/commit", s.commitUpload)
+	protected.GET("/devices", s.listDevices)
 	protected.POST("/devices", s.registerDevice)
 	protected.POST("/devices/:id/heartbeat", s.heartbeatDevice)
 	protected.GET("/sync/changes", s.listChanges)
@@ -491,6 +492,28 @@ func (s *Server) registerDevice(c *gin.Context) {
 		return
 	}
 	created(c, deviceDTO(device))
+}
+
+func (s *Server) listDevices(c *gin.Context) {
+	if s.sync == nil {
+		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
+		return
+	}
+	limit64, err := parseInt64Query(c, "limit", 100)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	devices, err := s.sync.Devices(c.Request.Context(), userID(c), int32(limit64))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	items := make([]any, 0, len(devices))
+	for _, device := range devices {
+		items = append(items, deviceDTO(device))
+	}
+	ok(c, gin.H{"items": items})
 }
 
 func (s *Server) heartbeatDevice(c *gin.Context) {

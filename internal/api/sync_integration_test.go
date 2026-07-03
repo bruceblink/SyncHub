@@ -66,6 +66,42 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 	if deviceBody.Data.ID == "" {
 		t.Fatal("device response missing id")
 	}
+	secondDeviceResp := doJSON(t, server, http.MethodPost, "/api/v1/devices", token, map[string]any{
+		"name":     "desktop",
+		"platform": "linux",
+	})
+	if secondDeviceResp.Code != http.StatusCreated {
+		t.Fatalf("register second device status = %d body = %s", secondDeviceResp.Code, secondDeviceResp.Body.String())
+	}
+
+	devicesReq := httptest.NewRequest(http.MethodGet, "/api/v1/devices?limit=10", nil)
+	devicesReq.Header.Set("Authorization", "Bearer "+token)
+	devicesRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(devicesRec, devicesReq)
+	if devicesRec.Code != http.StatusOK {
+		t.Fatalf("devices status = %d body = %s", devicesRec.Code, devicesRec.Body.String())
+	}
+	var devicesBody struct {
+		Data struct {
+			Items []struct {
+				ID                  string `json:"id"`
+				Name                string `json:"name"`
+				Platform            string `json:"platform"`
+				LastAppliedChangeID int64  `json:"last_applied_change_id"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	decodeBody(t, devicesRec, &devicesBody)
+	if len(devicesBody.Data.Items) != 2 {
+		t.Fatalf("devices = %#v, want two", devicesBody.Data.Items)
+	}
+	seenDevices := map[string]string{}
+	for _, item := range devicesBody.Data.Items {
+		seenDevices[item.ID] = item.Name + "/" + item.Platform
+	}
+	if seenDevices[deviceBody.Data.ID] != "work-laptop/windows" {
+		t.Fatalf("registered device missing from list: %#v", devicesBody.Data.Items)
+	}
 
 	createDirResp := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/workspace"})
 	if createDirResp.Code != http.StatusCreated {
