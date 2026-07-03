@@ -52,7 +52,7 @@ func Load() Config {
 		CleanupBatchLimit:     int32(getEnvInt64("CLEANUP_BATCH_LIMIT", 1000)),
 		VersionRetention: VersionRetentionPolicy{
 			MinVersions: getEnvInt64("VERSION_RETENTION_MIN_VERSIONS", 20),
-			MaxAge:      time.Duration(getEnvInt64("VERSION_RETENTION_MAX_AGE_DAYS", 30)) * 24 * time.Hour,
+			MaxAge:      time.Duration(getEnvNonNegativeInt64("VERSION_RETENTION_MAX_AGE_DAYS", 30)) * 24 * time.Hour,
 		},
 		AccessTokenTTL:  time.Duration(getEnvInt64("ACCESS_TOKEN_TTL_SECONDS", 15*60)) * time.Second,
 		RefreshTokenTTL: time.Duration(getEnvInt64("REFRESH_TOKEN_TTL_SECONDS", 30*24*60*60)) * time.Second,
@@ -82,6 +82,18 @@ func getEnvInt64(key string, fallback int64) int64 {
 	}
 	v, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
+}
+
+func getEnvNonNegativeInt64(key string, fallback int64) int64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v < 0 {
 		return fallback
 	}
 	return v

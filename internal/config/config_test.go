@@ -63,3 +63,12 @@ func TestLoadVersionRetentionOverrides(t *testing.T) {
 		t.Fatalf("version retention max age = %s, want 336h", cfg.VersionRetention.MaxAge)
 	}
 }
+
+func TestLoadVersionRetentionMaxAgeCanDisableCleanup(t *testing.T) {
+	t.Setenv("VERSION_RETENTION_MAX_AGE_DAYS", "0")
+
+	cfg := Load()
+	if cfg.VersionRetention.MaxAge != 0 {
+		t.Fatalf("version retention max age = %s, want disabled", cfg.VersionRetention.MaxAge)
+	}
+}

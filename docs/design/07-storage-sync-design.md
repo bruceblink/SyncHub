@@ -70,5 +70,6 @@ Phase 1 不做内容级合并。Phase 2 使用 keep-both 默认策略：
 - 保留最近 30 天内的版本。
 - 手动 pin 的版本不自动清理。
 - 可通过 `VERSION_RETENTION_MIN_VERSIONS` 和 `VERSION_RETENTION_MAX_AGE_DAYS` 调整。
+- `VERSION_RETENTION_MAX_AGE_DAYS=0` 表示禁用版本历史自动清理。
 
 Phase 3 的 worker 会清理过期历史版本记录，但不会删除当前版本、pinned version 和每个文件最新保留窗口内的版本。
