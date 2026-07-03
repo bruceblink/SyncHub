@@ -82,6 +82,23 @@ func TestSQLiteTwoDeviceSyncFlow(t *testing.T) {
 		"--platform", "test",
 	)
 	assertFileContent(t, filepath.Join(deviceOneRoot, "shared.txt"), "from device two")
+
+	if err := os.Remove(filepath.Join(deviceTwoRoot, "shared.txt")); err != nil {
+		t.Fatalf("delete device two file: %v", err)
+	}
+	runCLI(t, "sync", "once",
+		"--path", deviceTwoRoot,
+		"--config", deviceTwoConfig,
+		"--device-name", "device-two",
+		"--platform", "test",
+	)
+	runCLI(t, "sync", "once",
+		"--path", deviceOneRoot,
+		"--config", deviceOneConfig,
+		"--device-name", "device-one",
+		"--platform", "test",
+	)
+	assertFileMissing(t, filepath.Join(deviceOneRoot, "shared.txt"))
 }
 
 func newSQLiteCLITestServer(t *testing.T) *httptest.Server {
@@ -118,5 +135,12 @@ func assertFileContent(t *testing.T, path, want string) {
 	}
 	if string(raw) != want {
 		t.Fatalf("%s = %q, want %q", path, string(raw), want)
+	}
+}
+
+func assertFileMissing(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("%s exists or stat failed: %v", path, err)
 	}
 }
