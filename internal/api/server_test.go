@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,6 +56,42 @@ func TestReadyzChecksDatabaseAndStorage(t *testing.T) {
 	}
 	if store.calls != 1 {
 		t.Fatalf("storage ping calls = %d, want 1", store.calls)
+	}
+}
+
+func TestRequestLogIncludesTraceAndStatus(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+
+	server := New(nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("X-Trace-ID", "trace-log")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	var entry map[string]any
+	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+		t.Fatalf("decode request log: %v; raw = %s", err, logs.String())
+	}
+	if entry["msg"] != "api request" {
+		t.Fatalf("log msg = %v, want api request", entry["msg"])
+	}
+	if entry["method"] != http.MethodGet {
+		t.Fatalf("method = %v, want GET", entry["method"])
+	}
+	if entry["path"] != "/healthz" {
+		t.Fatalf("path = %v, want /healthz", entry["path"])
+	}
+	if entry["status"] != float64(http.StatusOK) {
+		t.Fatalf("status = %v, want 200", entry["status"])
+	}
+	if entry["trace_id"] != "trace-log" {
+		t.Fatalf("trace_id = %v, want trace-log", entry["trace_id"])
+	}
+	if _, ok := entry["duration_ms"]; !ok {
+		t.Fatalf("duration_ms missing from log: %#v", entry)
 	}
 }
 

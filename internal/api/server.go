@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	authsvc "github.com/bruceblink/SyncHub/internal/auth"
 	"github.com/bruceblink/SyncHub/internal/domain"
@@ -44,6 +46,7 @@ func NewWithSyncAndStorage(auth *authsvc.Service, files *filesvc.Service, sync *
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(traceMiddleware())
+	r.Use(requestLogMiddleware())
 	s := &Server{router: r, auth: auth, files: files, sync: sync, db: db, storage: store}
 	s.routes()
 	return s
@@ -66,6 +69,30 @@ func traceMiddleware() gin.HandlerFunc {
 		c.Header("X-Trace-ID", traceID)
 		c.Next()
 	}
+}
+
+func requestLogMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		started := time.Now()
+		c.Next()
+		slog.InfoContext(c.Request.Context(), "api request",
+			"method", c.Request.Method,
+			"path", requestLogPath(c),
+			"status", c.Writer.Status(),
+			"duration_ms", time.Since(started).Milliseconds(),
+			"trace_id", traceID(c),
+		)
+	}
+}
+
+func requestLogPath(c *gin.Context) string {
+	if path := c.FullPath(); path != "" {
+		return path
+	}
+	if c.Request != nil && c.Request.URL != nil {
+		return c.Request.URL.Path
+	}
+	return ""
 }
 
 func (s *Server) routes() {
