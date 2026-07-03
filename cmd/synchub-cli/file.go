@@ -19,6 +19,8 @@ func runFile(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return errors.New("file command is required")
 	}
 	switch args[0] {
+	case "list":
+		return runFileList(ctx, args[1:], stdout, stderr)
 	case "versions":
 		return runFileVersions(ctx, args[1:], stdout, stderr)
 	case "restore":
@@ -34,6 +36,36 @@ func runFile(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		printFileUsage(stderr)
 		return fmt.Errorf("unknown file command: %s", args[0])
 	}
+}
+
+func runFileList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("file list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	parentID := fs.String("parent-id", "", "remote parent directory id")
+	pageSize := fs.Int("page-size", 100, "maximum files to list")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *pageSize <= 0 {
+		return errors.New("page size must be positive")
+	}
+	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
+	if err != nil {
+		return err
+	}
+	var parent *string
+	if trimmed := strings.TrimSpace(*parentID); trimmed != "" {
+		parent = &trimmed
+	}
+	files, err := session.apiClient.ListFiles(ctx, session.accessToken, parent, int32(*pageSize))
+	if err != nil {
+		return err
+	}
+	printFileList(stdout, files.Items)
+	return nil
 }
 
 func runFileVersions(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -203,6 +235,17 @@ func parseFileVersionFlag(raw string) (int64, error) {
 		return 0, errors.New("version must be a positive integer")
 	}
 	return version, nil
+}
+
+func printFileList(stdout io.Writer, files []client.FileNode) {
+	fmt.Fprintf(stdout, "files: %d\n", len(files))
+	for _, file := range files {
+		name := file.Name
+		if file.NodeType == "directory" {
+			name += "/"
+		}
+		fmt.Fprintf(stdout, "%s %s size=%d version=%d id=%s\n", file.NodeType, name, file.Size, file.Version, file.ID)
+	}
 }
 
 func printFileVersions(stdout io.Writer, remotePath, fileID string, versions []client.FileVersion) {

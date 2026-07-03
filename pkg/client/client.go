@@ -47,6 +47,10 @@ type FileNode struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type FileList struct {
+	Items []FileNode `json:"items"`
+}
+
 type FileVersion struct {
 	ID        string     `json:"id"`
 	FileID    string     `json:"file_id"`
@@ -220,6 +224,23 @@ func (c *Client) GetFileByPath(ctx context.Context, accessToken, path string) (F
 	values := url.Values{}
 	values.Set("path", path)
 	err := c.getJSONAuth(ctx, "/api/v1/files/by-path?"+values.Encode(), accessToken, &data)
+	return data, err
+}
+
+func (c *Client) ListFiles(ctx context.Context, accessToken string, parentID *string, pageSize int32) (FileList, error) {
+	var data FileList
+	values := url.Values{}
+	if parentID != nil && strings.TrimSpace(*parentID) != "" {
+		values.Set("parent_id", *parentID)
+	}
+	if pageSize > 0 {
+		values.Set("page_size", fmt.Sprintf("%d", pageSize))
+	}
+	path := "/api/v1/files"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	err := c.getJSONAuth(ctx, path, accessToken, &data)
 	return data, err
 }
 

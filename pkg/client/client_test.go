@@ -217,6 +217,41 @@ func TestGetFileByPath(t *testing.T) {
 	}
 }
 
+func TestListFiles(t *testing.T) {
+	parentID := "dir_1"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("parent_id"); got != parentID {
+			t.Fatalf("parent_id = %q", got)
+		}
+		if got := r.URL.Query().Get("page_size"); got != "20" {
+			t.Fatalf("page_size = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"dir_2","parent_id":"dir_1","name":"docs","path":"/workspace/docs","node_type":"directory","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"},{"id":"file_1","parent_id":"dir_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":5,"sha256":"sha1","version":2,"created_at":"2026-06-30T00:01:00Z","updated_at":"2026-06-30T00:02:00Z"}]}}`))
+	}))
+	defer server.Close()
+
+	files, err := New(server.URL).ListFiles(context.Background(), "access-token", &parentID, 20)
+	if err != nil {
+		t.Fatalf("list files: %v", err)
+	}
+	if len(files.Items) != 2 {
+		t.Fatalf("file count = %d", len(files.Items))
+	}
+	if files.Items[0].ID != "dir_2" || files.Items[0].NodeType != "directory" || files.Items[0].ParentID == nil || *files.Items[0].ParentID != parentID {
+		t.Fatalf("unexpected first item: %#v", files.Items[0])
+	}
+	if files.Items[1].ID != "file_1" || files.Items[1].Size != 5 || files.Items[1].SHA256 == nil || *files.Items[1].SHA256 != "sha1" {
+		t.Fatalf("unexpected second item: %#v", files.Items[1])
+	}
+}
+
 func TestListFileVersions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files/file_1/versions" {
