@@ -21,3 +21,11 @@
 ```
 
 脚本会输出生成的 zip 路径。恢复时先停止 API，将 zip 中的 `synchub.db` 和 `storage` 放回同一个数据目录，再启动服务。
+
+也可以使用恢复脚本。默认不会覆盖已有数据目录：
+
+```powershell
+.\scripts\restore-local.ps1 -BackupPath .backups\synchub-local-YYYYMMDD-HHMMSS.zip -DataDir .data
+```
+
+如果确认要替换现有 `.data`，添加 `-Force`。
