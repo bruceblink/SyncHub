@@ -292,10 +292,14 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 		if err != nil || !ok {
 			return pullApplyResult{}, err
 		}
+		conflictKept, err := keepLocalConflictIfChanged(localPath, event.Path, workspace, previousEntries)
+		if err != nil {
+			return pullApplyResult{}, err
+		}
 		if err := os.RemoveAll(localPath); err != nil {
 			return pullApplyResult{}, err
 		}
-		return pullApplyResult{deleted: 1}, nil
+		return pullApplyResult{deleted: 1, conflictKept: boolToInt(conflictKept)}, nil
 	case "move":
 		if event.OldPath == nil {
 			return pullApplyResult{}, errors.New("move event is missing old_path")
