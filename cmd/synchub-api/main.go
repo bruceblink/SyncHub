@@ -46,13 +46,13 @@ func main() {
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	defer stopWorker()
-	go workerService.RunUploadSessionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, 1000, func(err error) {
+	go workerService.RunUploadSessionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.CleanupBatchLimit, func(err error) {
 		slog.Error("upload session cleanup failed", "error", err)
 	})
-	go workerService.RunUploadChunkCleanupLoop(workerCtx, cfg.UploadCleanupInterval, 1000, func(err error) {
+	go workerService.RunUploadChunkCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.CleanupBatchLimit, func(err error) {
 		slog.Error("upload chunk cleanup failed", "error", err)
 	})
-	go workerService.RunFileVersionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.VersionRetention.MinVersions, cfg.VersionRetention.MaxAge, 1000, func(err error) {
+	go workerService.RunFileVersionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.VersionRetention.MinVersions, cfg.VersionRetention.MaxAge, cfg.CleanupBatchLimit, func(err error) {
 		slog.Error("file version cleanup failed", "error", err)
 	})
 

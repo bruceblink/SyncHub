@@ -17,6 +17,7 @@ type Config struct {
 	UploadChunkSize       int64
 	UploadSessionTTL      time.Duration
 	UploadCleanupInterval time.Duration
+	CleanupBatchLimit     int32
 	VersionRetention      VersionRetentionPolicy
 	AccessTokenTTL        time.Duration
 	RefreshTokenTTL       time.Duration
@@ -48,6 +49,7 @@ func Load() Config {
 		UploadChunkSize:       getEnvInt64("UPLOAD_CHUNK_SIZE", 4*1024*1024),
 		UploadSessionTTL:      time.Duration(getEnvInt64("UPLOAD_SESSION_TTL_SECONDS", 24*60*60)) * time.Second,
 		UploadCleanupInterval: time.Duration(getEnvInt64("UPLOAD_CLEANUP_INTERVAL_SECONDS", 60*60)) * time.Second,
+		CleanupBatchLimit:     int32(getEnvInt64("CLEANUP_BATCH_LIMIT", 1000)),
 		VersionRetention: VersionRetentionPolicy{
 			MinVersions: getEnvInt64("VERSION_RETENTION_MIN_VERSIONS", 20),
 			MaxAge:      time.Duration(getEnvInt64("VERSION_RETENTION_MAX_AGE_DAYS", 30)) * 24 * time.Hour,
