@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +34,30 @@ func TestScan(t *testing.T) {
 	}
 	if m.Items[1].RelativePath != "nested/b.txt" || m.Items[1].Path != "/workspace/nested/b.txt" {
 		t.Fatalf("second item = %#v", m.Items[1])
+	}
+}
+
+func TestScanHonorsSynchubIgnore(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".synchubignore"), "# local build artifacts\n*.tmp\nbuild/\nlogs/*.log\n")
+	writeFile(t, filepath.Join(root, "keep.txt"), "keep")
+	writeFile(t, filepath.Join(root, "scratch.tmp"), "temporary")
+	writeFile(t, filepath.Join(root, "build", "app.bin"), "binary")
+	writeFile(t, filepath.Join(root, "logs", "debug.log"), "log")
+	writeFile(t, filepath.Join(root, "logs", "keep.txt"), "keep log note")
+	writeFile(t, filepath.Join(root, "nested", "scratch.tmp"), "nested temporary")
+
+	m, err := Scan(context.Background(), root, "/workspace")
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	got := make([]string, 0, len(m.Items))
+	for _, item := range m.Items {
+		got = append(got, item.RelativePath)
+	}
+	want := []string{"keep.txt", "logs/keep.txt"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("items = %v, want %v", got, want)
 	}
 }
 
