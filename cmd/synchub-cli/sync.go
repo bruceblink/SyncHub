@@ -201,10 +201,26 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return err
 	}
 	printSyncStatusChanges(stdout, changes)
+	if err := printSyncStatusTrash(stdout, root); err != nil {
+		return err
+	}
 	if *showConflicts {
 		if err := printSyncStatusConflicts(ctx, stdout, workspace, *loginConfigPath, *conflictLimit); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func printSyncStatusTrash(stdout io.Writer, root string) error {
+	entries, err := listTrashEntries(root, 0)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "trash entries: %d\n", len(entries))
+	if len(entries) > 0 {
+		entry := entries[0]
+		fmt.Fprintf(stdout, "latest trash: %s %s\n", entry.Batch, entry.Path)
 	}
 	return nil
 }

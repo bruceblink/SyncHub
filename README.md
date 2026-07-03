@@ -85,6 +85,7 @@ go run ./cmd/synchub-cli sync devices --path .
 
 Use `sync once --dry-run` before applying changes if you want to inspect the local push plan and incoming change feed.
 Use `sync trash` to inspect local files moved aside after remote delete events.
+`sync status` also shows a local trash summary when these files exist.
 
 Run the agent loop for an initialized workspace:
 

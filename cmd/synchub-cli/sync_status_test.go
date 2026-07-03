@@ -65,6 +65,49 @@ func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
 		"local only: 1",
 		"last scan: 2026-06-30T01:02:03Z",
 		"pending changes: 0",
+		"trash entries: 0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunSyncStatusShowsLocalTrashSummary(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	oldBatch := filepath.Join(root, ".synchub", "trash", "20260701T010000.000000000Z")
+	if err := os.MkdirAll(oldBatch, 0o755); err != nil {
+		t.Fatalf("mkdir old trash batch: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(oldBatch, "old.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("write old trash file: %v", err)
+	}
+	newBatch := filepath.Join(root, ".synchub", "trash", "20260702T010000.000000000Z")
+	if err := os.MkdirAll(newBatch, 0o755); err != nil {
+		t.Fatalf("mkdir new trash batch: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(newBatch, "new.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("write new trash file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"trash entries: 2",
+		"latest trash: 20260702T010000.000000000Z new.txt",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
