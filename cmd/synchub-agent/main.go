@@ -17,6 +17,8 @@ import (
 
 const defaultAgentInterval = 30 * time.Second
 
+var agentNow = time.Now
+
 type agentOptions struct {
 	RootPath            string
 	ConfigPath          string
@@ -59,9 +61,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 
 	fmt.Fprintf(stdout, "agent started: %s\n", opts.RootPath)
 	fmt.Fprintf(stdout, "sync interval: %s\n", opts.Interval)
-	if err := runner(ctx, opts, stdout, stderr); err != nil {
-		fmt.Fprintf(stderr, "sync failed: %v\n", err)
-	}
+	runSyncCycle(ctx, opts, stdout, stderr, runner)
 
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
@@ -70,11 +70,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := runner(ctx, opts, stdout, stderr); err != nil {
-				fmt.Fprintf(stderr, "sync failed: %v\n", err)
-			}
+			runSyncCycle(ctx, opts, stdout, stderr, runner)
 		}
 	}
+}
+
+func runSyncCycle(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) {
+	if err := runner(ctx, opts, stdout, stderr); err != nil {
+		fmt.Fprintf(stderr, "sync failed: %v\n", err)
+		return
+	}
+	fmt.Fprintf(stdout, "sync completed: %s\n", agentNow().UTC().Format(time.RFC3339))
 }
 
 func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error) {

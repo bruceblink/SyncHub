@@ -61,6 +61,39 @@ func TestRunOnceReturnsSyncError(t *testing.T) {
 	}
 }
 
+func TestRunSyncCycleShowsCompletionTime(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	var stdout bytes.Buffer
+	runSyncCycle(context.Background(), agentOptions{}, &stdout, &bytes.Buffer{}, func(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
+		_, _ = stdout.Write([]byte("synced\n"))
+		return nil
+	})
+
+	want := "synced\nsync completed: 2026-07-04T01:02:03Z\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunSyncCycleReportsErrorWithoutCompletion(t *testing.T) {
+	wantErr := errors.New("sync failed")
+	var stdout, stderr bytes.Buffer
+	runSyncCycle(context.Background(), agentOptions{}, &stdout, &stderr, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		return wantErr
+	})
+
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	want := "sync failed: sync failed\n"
+	if stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
 func TestRunHelpPrintsUsage(t *testing.T) {
 	var stdout bytes.Buffer
 	called := false
