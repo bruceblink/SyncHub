@@ -12,6 +12,7 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -33,13 +34,19 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	configPath := fs.String("config", defaultConfigPath(), "login config file path")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	manifestPath := fs.String("manifest", "", "manifest file path")
+	deviceName := fs.String("device-name", "", "device name")
+	devicePlatform := fs.String("platform", runtime.GOOS, "device platform")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	root, workspace, localManifestPath, err := loadWorkspaceAndManifestPath(*rootPath, *workspaceConfigPath, *manifestPath)
+	root, workspace, workspacePath, err := loadWorkspace(*rootPath, *workspaceConfigPath)
 	if err != nil {
 		return err
+	}
+	localManifestPath := *manifestPath
+	if strings.TrimSpace(localManifestPath) == "" {
+		localManifestPath = filepath.Join(root, ".synchub", "manifest.json")
 	}
 	m, err := readManifest(localManifestPath)
 	if err != nil {
@@ -64,6 +71,7 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if strings.TrimSpace(serverURL) == "" {
 		serverURL = loginConfig.ServerURL
 	}
+	apiClient := client.New(serverURL)
 	currentManifest, err := manifest.Scan(ctx, root, workspace.RemotePath)
 	if err != nil {
 		return err
@@ -84,7 +92,6 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 
-	apiClient := client.New(serverURL)
 	createdDirs := map[string]struct{}{}
 	uploaded := 0
 	deleted := 0
@@ -138,6 +145,11 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		if existed && previousItem.RemoteVersion != nil && !manifestContentChanged(previousItem, item) {
 			continue
 		}
+		if strings.TrimSpace(workspace.DeviceID) == "" {
+			if err := ensureWorkspacePushDevice(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspacePath, &workspace, *deviceName, *devicePlatform); err != nil {
+				return err
+			}
+		}
 		result, err := pushManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, item, createdDirs)
 		if err != nil {
 			return err
@@ -166,6 +178,20 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	if conflictKept > 0 {
 		fmt.Fprintf(stdout, "conflicts kept: %d\n", conflictKept)
+	}
+	return nil
+}
+
+func ensureWorkspacePushDevice(ctx context.Context, apiClient *client.Client, accessToken, root, workspacePath string, workspace *workspaceConfig, deviceName, platform string) error {
+	if strings.TrimSpace(workspace.DeviceID) != "" {
+		return nil
+	}
+	changed, err := ensureWorkspaceDevice(ctx, apiClient, accessToken, root, workspace, deviceName, platform)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return writeWorkspaceConfig(workspacePath, *workspace)
 	}
 	return nil
 }

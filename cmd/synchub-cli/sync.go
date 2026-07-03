@@ -143,6 +143,12 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fmt.Fprintf(stdout, "user: %s\n", workspace.UserEmail)
 	if workspace.DeviceID != "" {
 		fmt.Fprintf(stdout, "device: %s\n", workspace.DeviceID)
+		if strings.TrimSpace(workspace.DeviceName) != "" {
+			fmt.Fprintf(stdout, "device name: %s\n", workspace.DeviceName)
+		}
+		if strings.TrimSpace(workspace.DevicePlatform) != "" {
+			fmt.Fprintf(stdout, "device platform: %s\n", workspace.DevicePlatform)
+		}
 		fmt.Fprintf(stdout, "last applied change: %d\n", workspace.LastAppliedChangeID)
 	}
 	m, err := readManifest(localManifestPath)

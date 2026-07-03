@@ -352,7 +352,20 @@ func TestRunManifestScanRequiresWorkspace(t *testing.T) {
 
 func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
 	root := t.TempDir()
-	writeTestWorkspaceConfig(t, root)
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:             1,
+		Root:                root,
+		RemotePath:          "/workspace",
+		ServerURL:           "http://localhost:8765",
+		UserID:              "u1",
+		UserEmail:           "user@example.com",
+		DeviceID:            "dev_1",
+		DeviceName:          "laptop",
+		DevicePlatform:      "windows",
+		LastAppliedChangeID: 7,
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
+	})
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
@@ -378,6 +391,10 @@ func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
 		"workspace: " + root,
 		"remote path: /workspace",
 		"user: user@example.com",
+		"device: dev_1",
+		"device name: laptop",
+		"device platform: windows",
+		"last applied change: 7",
 		"files: 1",
 		"last scan: 2026-06-30T01:02:03Z",
 		"pending changes: 0",
@@ -1052,12 +1069,27 @@ func TestRunSyncPushDiscoversNewLocalFiles(t *testing.T) {
 		t.Fatalf("write new file: %v", err)
 	}
 	committed := false
+	registeredDevice := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer access" {
 			t.Fatalf("authorization = %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices":
+			var req struct {
+				Name     string `json:"name"`
+				Platform string `json:"platform"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode device request: %v", err)
+			}
+			if req.Name != "push-device" || req.Platform != "test-os" {
+				t.Fatalf("device request = %#v", req)
+			}
+			registeredDevice = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"push-device","platform":"test-os","last_applied_change_id":4,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/directories":
 			var req struct {
 				Path string `json:"path"`
@@ -1076,6 +1108,9 @@ func TestRunSyncPushDiscoversNewLocalFiles(t *testing.T) {
 			}
 			if req.Path != "/workspace/new.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) {
 				t.Fatalf("unexpected init upload request: %#v", req)
+			}
+			if req.DeviceID != "dev_1" {
+				t.Fatalf("device id = %q, want dev_1", req.DeviceID)
 			}
 			if req.BaseVersion != nil {
 				t.Fatalf("base version = %#v, want nil", req.BaseVersion)
@@ -1125,6 +1160,8 @@ func TestRunSyncPushDiscoversNewLocalFiles(t *testing.T) {
 		"push",
 		"--path", root,
 		"--config", loginConfigPath,
+		"--device-name", "push-device",
+		"--platform", "test-os",
 	}, &stdout, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("sync push: %v", err)
@@ -1134,6 +1171,20 @@ func TestRunSyncPushDiscoversNewLocalFiles(t *testing.T) {
 	}
 	if !committed {
 		t.Fatal("upload was not committed")
+	}
+	if !registeredDevice {
+		t.Fatal("device was not registered")
+	}
+	var workspace workspaceConfig
+	workspaceRaw, err := os.ReadFile(filepath.Join(root, ".synchub", "workspace.json"))
+	if err != nil {
+		t.Fatalf("read workspace config: %v", err)
+	}
+	if err := json.Unmarshal(workspaceRaw, &workspace); err != nil {
+		t.Fatalf("decode workspace config: %v", err)
+	}
+	if workspace.DeviceID != "dev_1" || workspace.DeviceName != "push-device" || workspace.DevicePlatform != "test-os" || workspace.LastAppliedChangeID != 4 {
+		t.Fatalf("workspace device = %#v", workspace)
 	}
 	updatedManifest, err := readManifest(manifestPath)
 	if err != nil {
@@ -1484,6 +1535,7 @@ func TestRunSyncPushSendsManifestRemoteVersion(t *testing.T) {
 		ServerURL:  server.URL,
 		UserID:     "u1",
 		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
 	}, 0o600); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
@@ -2463,14 +2515,19 @@ func writeTestWorkspaceConfig(t *testing.T, root string) {
 
 func writeTestWorkspaceConfigWithServer(t *testing.T, root, serverURL string) {
 	t.Helper()
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
 		Version:    1,
 		Root:       root,
 		RemotePath: "/workspace",
 		ServerURL:  serverURL,
 		UserID:     "u1",
 		UserEmail:  "user@example.com",
-	}, 0o600); err != nil {
+	})
+}
+
+func writeTestWorkspaceConfigValue(t *testing.T, root string, cfg workspaceConfig) {
+	t.Helper()
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), cfg, 0o600); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
 }
