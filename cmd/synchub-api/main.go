@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,7 +32,11 @@ func main() {
 	}
 	defer closeRepo()
 
-	store := storage.NewLocal(cfg.LocalStorageRoot)
+	store, err := openStorage(cfg)
+	if err != nil {
+		slog.Error("configure storage", "error", err)
+		os.Exit(1)
+	}
 	authService := authsvc.NewService(repo, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL)
 	syncService := syncsvc.NewService(repo)
@@ -80,6 +85,11 @@ type repository interface {
 	workersvc.Repository
 }
 
+type storageBackend interface {
+	storage.Storage
+	storage.ReadinessChecker
+}
+
 func openRepository(ctx context.Context, cfg config.Config) (repository, func(), error) {
 	switch cfg.DatabaseDriver {
 	case "sqlite":
@@ -99,5 +109,14 @@ func openRepository(ctx context.Context, cfg config.Config) (repository, func(),
 		return db.NewRepository(pool), pool.Close, nil
 	default:
 		return nil, nil, errors.New("unsupported database driver: " + cfg.DatabaseDriver)
+	}
+}
+
+func openStorage(cfg config.Config) (storageBackend, error) {
+	switch strings.ToLower(strings.TrimSpace(cfg.StorageBackend)) {
+	case "", "local":
+		return storage.NewLocal(cfg.LocalStorageRoot), nil
+	default:
+		return nil, errors.New("unsupported storage backend: " + cfg.StorageBackend)
 	}
 }
