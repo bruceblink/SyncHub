@@ -23,6 +23,7 @@ import (
 
 func main() {
 	cfg := config.Load()
+	configureLogging(cfg.LogLevel)
 	ctx := context.Background()
 
 	repo, closeRepo, err := openRepository(ctx, cfg)
@@ -74,6 +75,27 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("api server shutdown failed", "error", err)
 		os.Exit(1)
+	}
+}
+
+func configureLogging(level string) {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: parseLogLevel(level),
+	})))
+}
+
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return slog.LevelDebug
+	case "", "info":
+		return slog.LevelInfo
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }
 
