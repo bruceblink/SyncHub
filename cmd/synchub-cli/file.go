@@ -28,6 +28,8 @@ func runFile(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runFileDownload(ctx, args[1:], stdout, stderr)
 	case "delete":
 		return runFileDelete(ctx, args[1:], stdout, stderr)
+	case "move":
+		return runFileMove(ctx, args[1:], stdout, stderr)
 	case "versions":
 		return runFileVersions(ctx, args[1:], stdout, stderr)
 	case "restore":
@@ -105,6 +107,41 @@ func runFileDelete(ctx context.Context, args []string, stdout, stderr io.Writer)
 	}
 	fmt.Fprintf(stdout, "deleted: %s\n", node.Path)
 	fmt.Fprintf(stdout, "id: %s\n", node.ID)
+	return nil
+}
+
+func runFileMove(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("file move", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	remotePath := fs.String("remote-path", "", "source remote file or directory path")
+	fileID := fs.String("file-id", "", "source remote file or directory id")
+	targetPath := fs.String("to", "", "target remote file or directory path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	target, err := normalizeRemotePath(*targetPath)
+	if err != nil {
+		return err
+	}
+
+	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
+	if err != nil {
+		return err
+	}
+	node, err := session.resolveFileNode(ctx, *fileID, *remotePath)
+	if err != nil {
+		return err
+	}
+	moved, err := session.apiClient.MoveFileWithDevice(ctx, session.accessToken, node.ID, target, session.workspace.DeviceID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "moved: %s -> %s\n", node.Path, moved.Path)
+	fmt.Fprintf(stdout, "id: %s\n", moved.ID)
+	fmt.Fprintf(stdout, "version: %d\n", moved.Version)
 	return nil
 }
 
