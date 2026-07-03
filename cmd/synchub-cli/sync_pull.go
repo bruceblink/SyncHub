@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -321,7 +322,7 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 		if err != nil || !ok {
 			return pullApplyResult{}, err
 		}
-		conflictKept, err := keepLocalConflictIfChanged(localPath, event.Path, workspace, previousEntries)
+		conflictKept, err := keepLocalDeleteConflictIfChanged(localPath, event.Path, workspace, previousEntries)
 		if err != nil {
 			return pullApplyResult{}, err
 		}
@@ -390,6 +391,87 @@ func keepLocalConflictIfChanged(localPath, remotePath string, workspace workspac
 		return false, err
 	}
 	return true, nil
+}
+
+func keepLocalDeleteConflictIfChanged(localPath, remotePath string, workspace workspaceConfig, previousEntries map[string]manifest.Entry) (bool, error) {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !info.IsDir() {
+		return keepLocalConflictIfChanged(localPath, remotePath, workspace, previousEntries)
+	}
+	changed, err := directoryHasLocalChanges(localPath, remotePath, previousEntries)
+	if err != nil || !changed {
+		return false, err
+	}
+	conflictPath := conflictLocalPath(localPath, conflictDeviceLabel(workspace), syncPushNow().UTC())
+	if err := os.MkdirAll(filepath.Dir(conflictPath), 0o755); err != nil {
+		return false, err
+	}
+	if err := os.Rename(localPath, conflictPath); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func directoryHasLocalChanges(localPath, remotePath string, previousEntries map[string]manifest.Entry) (bool, error) {
+	remotePath, err := normalizeRemotePath(remotePath)
+	if err != nil {
+		return false, err
+	}
+	err = filepath.WalkDir(localPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return errDirectoryChanged
+		}
+		relative, err := filepath.Rel(localPath, path)
+		if err != nil {
+			return err
+		}
+		childRemotePath := joinRemoteChild(remotePath, filepath.ToSlash(relative))
+		previous, ok := previousEntries[childRemotePath]
+		if !ok || previous.SHA256 == "" {
+			return errDirectoryChanged
+		}
+		currentSHA, err := localFileSHA256(path)
+		if err != nil {
+			return err
+		}
+		if currentSHA != previous.SHA256 {
+			return errDirectoryChanged
+		}
+		return nil
+	})
+	if errors.Is(err, errDirectoryChanged) {
+		return true, nil
+	}
+	return false, err
+}
+
+var errDirectoryChanged = errors.New("directory has local changes")
+
+func joinRemoteChild(remotePath, relative string) string {
+	relative = strings.TrimPrefix(strings.ReplaceAll(relative, "\\", "/"), "/")
+	if relative == "" {
+		return remotePath
+	}
+	if remotePath == "/" {
+		return "/" + relative
+	}
+	return pathpkg.Join(remotePath, relative)
 }
 
 func conflictLocalPath(localPath, device string, timestamp time.Time) string {
