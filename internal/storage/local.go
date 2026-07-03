@@ -179,8 +179,13 @@ func (s *Local) Delete(ctx context.Context, key string) error {
 
 func (s *Local) resolve(key string) (string, error) {
 	key = strings.ReplaceAll(key, "\\", "/")
-	if strings.HasPrefix(key, "/") || strings.Contains(key, "../") || key == ".." || strings.ContainsRune(key, 0) {
+	if strings.HasPrefix(key, "/") || strings.ContainsRune(key, 0) {
 		return "", errors.New("invalid storage key")
+	}
+	for _, segment := range strings.Split(key, "/") {
+		if segment == ".." {
+			return "", errors.New("invalid storage key")
+		}
 	}
 	return filepath.Join(s.root, filepath.FromSlash(key)), nil
 }
