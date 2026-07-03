@@ -785,7 +785,7 @@ func TestRunFileList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("file list: %v", err)
 	}
-	want := "files: 2\ndirectory docs/ size=0 version=1 id=dir_2\nfile a.txt size=5 version=2 id=file_1\n"
+	want := "files: 2\ndirectory docs/ path=/workspace/docs size=0 version=1 id=dir_2\nfile a.txt path=/workspace/a.txt size=5 version=2 id=file_1\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -840,7 +840,7 @@ func TestRunFileListByRemotePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("file list: %v", err)
 	}
-	want := "files: 1\nfile guide.md size=9 version=3 id=file_1\n"
+	want := "files: 1\nfile guide.md path=/workspace/docs/guide.md size=9 version=3 id=file_1\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -887,7 +887,7 @@ func TestRunFileListRootRemotePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("file list: %v", err)
 	}
-	want := "files: 1\ndirectory workspace/ size=0 version=1 id=dir_1\n"
+	want := "files: 1\ndirectory workspace/ path=/workspace size=0 version=1 id=dir_1\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}

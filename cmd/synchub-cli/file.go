@@ -273,7 +273,7 @@ func printFileList(stdout io.Writer, files []client.FileNode) {
 		if file.NodeType == "directory" {
 			name += "/"
 		}
-		fmt.Fprintf(stdout, "%s %s size=%d version=%d id=%s\n", file.NodeType, name, file.Size, file.Version, file.ID)
+		fmt.Fprintf(stdout, "%s %s path=%s size=%d version=%d id=%s\n", file.NodeType, name, file.Path, file.Size, file.Version, file.ID)
 	}
 }
 
