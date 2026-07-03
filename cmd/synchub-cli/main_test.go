@@ -550,6 +550,86 @@ func TestRunSyncStatusShowsPendingLocalMove(t *testing.T) {
 	}
 }
 
+func TestRunSyncStatusCanShowRemoteConflicts(t *testing.T) {
+	root := t.TempDir()
+	conflictsRequested := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sync/conflicts" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("resolution"); got != "pending" {
+			t.Fatalf("resolution = %q, want pending", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "10" {
+			t.Fatalf("limit = %q, want 10", got)
+		}
+		conflictsRequested = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"conf_1","path":"/workspace/a.txt","local_version":1,"remote_version":2,"resolution":"pending","created_at":"2026-06-30T00:00:00Z"}]}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	})
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+		Items: []manifest.Entry{
+			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: int64(len("alpha")), SHA256: testSHA([]byte("alpha"))},
+		},
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL:            server.URL,
+		User:                 clientUser("u1", "user@example.com"),
+		Tokens:               client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+		AccessTokenExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"status",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--show-conflicts",
+		"--conflict-limit", "10",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status conflicts: %v", err)
+	}
+	if !conflictsRequested {
+		t.Fatal("conflicts endpoint was not called")
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"pending changes: 0",
+		"remote conflicts: 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
 func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
 	root := t.TempDir()
 	writeTestWorkspaceConfig(t, root)

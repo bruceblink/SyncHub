@@ -113,21 +113,27 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fs := flag.NewFlagSet("sync status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	rootPath := fs.String("path", ".", "local workspace root")
+	loginConfigPath := fs.String("config", defaultConfigPath(), "login config file path")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	manifestPath := fs.String("manifest", "", "manifest file path")
+	showConflicts := fs.Bool("show-conflicts", false, "include pending remote conflicts")
+	conflictLimit := fs.Int("conflict-limit", 100, "maximum conflicts to fetch")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *conflictLimit <= 0 {
+		return errors.New("conflict limit must be positive")
 	}
 
 	root, err := resolveWorkspaceRoot(*rootPath)
 	if err != nil {
 		return err
 	}
-	configPath := *workspaceConfigPath
-	if strings.TrimSpace(configPath) == "" {
-		configPath = filepath.Join(root, ".synchub", "workspace.json")
+	workspacePath := *workspaceConfigPath
+	if strings.TrimSpace(workspacePath) == "" {
+		workspacePath = filepath.Join(root, ".synchub", "workspace.json")
 	}
-	workspace, err := readWorkspaceConfig(configPath)
+	workspace, err := readWorkspaceConfig(workspacePath)
 	if err != nil {
 		return err
 	}
@@ -172,6 +178,28 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return err
 	}
 	printSyncStatusChanges(stdout, changes)
+	if *showConflicts {
+		if err := printSyncStatusConflicts(ctx, stdout, workspace, *loginConfigPath, *conflictLimit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printSyncStatusConflicts(ctx context.Context, stdout io.Writer, workspace workspaceConfig, configPath string, limit int) error {
+	loginConfig, err := readConfigWithRefresh(ctx, configPath)
+	if err != nil {
+		return err
+	}
+	serverURL := workspace.ServerURL
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = loginConfig.ServerURL
+	}
+	conflicts, err := client.New(serverURL).ListSyncConflicts(ctx, loginConfig.Tokens.AccessToken, "pending", int32(limit))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "remote conflicts: %d\n", len(conflicts.Items))
 	return nil
 }
 
