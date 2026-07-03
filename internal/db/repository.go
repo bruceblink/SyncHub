@@ -432,6 +432,39 @@ func (r *Repository) ListUploadChunks(ctx context.Context, uploadID string) ([]d
 	return chunks, wrapDBErr(rows.Err())
 }
 
+func (r *Repository) ListExpiredUploadChunks(ctx context.Context, limit int32) ([]domain.ExpiredUploadChunk, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := r.pool.Query(ctx, `
+		select c.id, c.storage_key
+		from upload_chunks c
+		join upload_sessions s on s.id = c.upload_id
+		where s.status = $1
+		order by s.expires_at, c.created_at, c.id
+		limit $2
+	`, domain.UploadStatusExpired, limit)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer rows.Close()
+
+	var chunks []domain.ExpiredUploadChunk
+	for rows.Next() {
+		var chunk domain.ExpiredUploadChunk
+		if err := rows.Scan(&chunk.ID, &chunk.StorageKey); err != nil {
+			return nil, wrapDBErr(err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks, wrapDBErr(rows.Err())
+}
+
+func (r *Repository) DeleteUploadChunk(ctx context.Context, chunkID string) error {
+	_, err := r.pool.Exec(ctx, `delete from upload_chunks where id = $1`, chunkID)
+	return wrapDBErr(err)
+}
+
 func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storageKey string) (domain.FileNode, int64, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {

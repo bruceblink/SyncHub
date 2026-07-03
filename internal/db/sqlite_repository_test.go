@@ -40,6 +40,55 @@ func TestSQLiteExpireUploadSessions(t *testing.T) {
 	assertUploadStatus(t, repo, user.ID, committed.ID, domain.UploadStatusCommitted)
 }
 
+func TestSQLiteExpiredUploadChunkRepository(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "chunk-cleanup@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	now := time.Now().UTC()
+	expired := createUploadSession(t, repo, user.ID, "/expired-chunks.txt", domain.UploadStatusExpired, now.Add(-time.Hour))
+	pending := createUploadSession(t, repo, user.ID, "/pending-chunks.txt", domain.UploadStatusPending, now.Add(time.Hour))
+	expiredChunk, err := repo.PutUploadChunk(ctx, expired.ID, 0, 4, "sha-expired", "staging/user/expired/0")
+	if err != nil {
+		t.Fatalf("put expired chunk: %v", err)
+	}
+	if _, err := repo.PutUploadChunk(ctx, pending.ID, 0, 4, "sha-pending", "staging/user/pending/0"); err != nil {
+		t.Fatalf("put pending chunk: %v", err)
+	}
+
+	chunks, err := repo.ListExpiredUploadChunks(ctx, 100)
+	if err != nil {
+		t.Fatalf("list expired upload chunks: %v", err)
+	}
+	if len(chunks) != 1 || chunks[0].ID != expiredChunk.ID || chunks[0].StorageKey != expiredChunk.StorageKey {
+		t.Fatalf("expired chunks = %#v, want expired chunk %#v", chunks, expiredChunk)
+	}
+	if err := repo.DeleteUploadChunk(ctx, expiredChunk.ID); err != nil {
+		t.Fatalf("delete upload chunk: %v", err)
+	}
+	chunks, err = repo.ListExpiredUploadChunks(ctx, 100)
+	if err != nil {
+		t.Fatalf("list expired upload chunks after delete: %v", err)
+	}
+	if len(chunks) != 0 {
+		t.Fatalf("expired chunks after delete = %#v, want none", chunks)
+	}
+	pendingChunks, err := repo.ListUploadChunks(ctx, pending.ID)
+	if err != nil {
+		t.Fatalf("list pending chunks: %v", err)
+	}
+	if len(pendingChunks) != 1 {
+		t.Fatalf("pending chunks = %#v, want one", pendingChunks)
+	}
+}
+
 func TestSQLiteDeleteExpiredFileVersionsKeepsCurrentPinnedAndRecent(t *testing.T) {
 	ctx := context.Background()
 	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

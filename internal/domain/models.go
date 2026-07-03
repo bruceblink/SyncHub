@@ -77,6 +77,11 @@ type UploadChunk struct {
 	CreatedAt  time.Time
 }
 
+type ExpiredUploadChunk struct {
+	ID         string
+	StorageKey string
+}
+
 type ChangeEvent struct {
 	ID             int64
 	UserID         string

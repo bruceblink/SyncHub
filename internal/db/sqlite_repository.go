@@ -526,6 +526,39 @@ func (r *SQLiteRepository) ListUploadChunks(ctx context.Context, uploadID string
 	return chunks, wrapSQLiteDBErr(rows.Err())
 }
 
+func (r *SQLiteRepository) ListExpiredUploadChunks(ctx context.Context, limit int32) ([]domain.ExpiredUploadChunk, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		select c.id, c.storage_key
+		from upload_chunks c
+		join upload_sessions s on s.id = c.upload_id
+		where s.status = ?
+		order by s.expires_at, c.created_at, c.id
+		limit ?
+	`, domain.UploadStatusExpired, limit)
+	if err != nil {
+		return nil, wrapSQLiteDBErr(err)
+	}
+	defer rows.Close()
+
+	var chunks []domain.ExpiredUploadChunk
+	for rows.Next() {
+		var chunk domain.ExpiredUploadChunk
+		if err := rows.Scan(&chunk.ID, &chunk.StorageKey); err != nil {
+			return nil, wrapSQLiteDBErr(err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks, wrapSQLiteDBErr(rows.Err())
+}
+
+func (r *SQLiteRepository) DeleteUploadChunk(ctx context.Context, chunkID string) error {
+	_, err := r.db.ExecContext(ctx, `delete from upload_chunks where id = ?`, chunkID)
+	return wrapSQLiteDBErr(err)
+}
+
 func (r *SQLiteRepository) CommitUpload(ctx context.Context, userID, uploadID, storageKey string) (domain.FileNode, int64, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {

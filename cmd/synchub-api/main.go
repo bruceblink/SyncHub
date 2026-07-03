@@ -35,13 +35,16 @@ func main() {
 	authService := authsvc.NewService(repo, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL)
 	syncService := syncsvc.NewService(repo)
-	workerService := workersvc.NewService(repo)
+	workerService := workersvc.NewService(repo, store)
 	apiServer := api.NewWithSync(authService, fileService, syncService, repo)
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	defer stopWorker()
 	go workerService.RunUploadSessionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, 1000, func(err error) {
 		slog.Error("upload session cleanup failed", "error", err)
+	})
+	go workerService.RunUploadChunkCleanupLoop(workerCtx, cfg.UploadCleanupInterval, 1000, func(err error) {
+		slog.Error("upload chunk cleanup failed", "error", err)
 	})
 	go workerService.RunFileVersionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.VersionRetention.MinVersions, cfg.VersionRetention.MaxAge, 1000, func(err error) {
 		slog.Error("file version cleanup failed", "error", err)
