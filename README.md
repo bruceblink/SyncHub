@@ -79,10 +79,12 @@ go run ./cmd/synchub-cli workspace init --path . --remote-path /workspace
 go run ./cmd/synchub-cli sync once --path . --dry-run
 go run ./cmd/synchub-cli sync once --path .
 go run ./cmd/synchub-cli sync status --path .
+go run ./cmd/synchub-cli sync trash --path .
 go run ./cmd/synchub-cli sync devices --path .
 ```
 
 Use `sync once --dry-run` before applying changes if you want to inspect the local push plan and incoming change feed.
+Use `sync trash` to inspect local files moved aside after remote delete events.
 
 Run the agent loop for an initialized workspace:
 
