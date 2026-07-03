@@ -121,13 +121,20 @@ func TestRequestLogIncludesTraceAndStatus(t *testing.T) {
 }
 
 func TestMetricsEndpointExportsRequestCounters(t *testing.T) {
-	server := New(nil, nil, nil)
+	server := NewWithSyncAndStorage(nil, nil, nil, &fakePinger{}, &fakeReadinessChecker{err: errors.New("storage unavailable")})
 
 	healthReq := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	healthRec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(healthRec, healthReq)
 	if healthRec.Code != http.StatusOK {
 		t.Fatalf("health status = %d body = %s", healthRec.Code, healthRec.Body.String())
+	}
+
+	readyReq := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	readyRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(readyRec, readyReq)
+	if readyRec.Code != http.StatusInternalServerError {
+		t.Fatalf("ready status = %d body = %s", readyRec.Code, readyRec.Body.String())
 	}
 
 	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
@@ -142,6 +149,15 @@ func TestMetricsEndpointExportsRequestCounters(t *testing.T) {
 	body := metricsRec.Body.String()
 	if !strings.Contains(body, `synchub_http_requests_total{method="GET",path="/healthz",status="200"} 1`) {
 		t.Fatalf("metrics missing health counter: %s", body)
+	}
+	if !strings.Contains(body, `synchub_http_requests_total{method="GET",path="/readyz",status="500"} 1`) {
+		t.Fatalf("metrics missing readiness error counter: %s", body)
+	}
+	if !strings.Contains(body, `synchub_http_requests_by_status_class_total{status_class="2xx"} 1`) {
+		t.Fatalf("metrics missing 2xx status class counter: %s", body)
+	}
+	if !strings.Contains(body, `synchub_http_requests_by_status_class_total{status_class="5xx"} 1`) {
+		t.Fatalf("metrics missing 5xx status class counter: %s", body)
 	}
 	if strings.Contains(body, `path="/metrics"`) {
 		t.Fatalf("metrics endpoint should not count itself: %s", body)

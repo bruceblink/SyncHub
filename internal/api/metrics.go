@@ -91,6 +91,23 @@ func (m *requestMetrics) writePrometheus(w io.Writer) {
 			snapshot.value.count,
 		)
 	}
+	statusClassCounts := map[string]int64{}
+	for _, snapshot := range snapshots {
+		statusClassCounts[statusClass(snapshot.key.status)] += snapshot.value.count
+	}
+	statusClasses := make([]string, 0, len(statusClassCounts))
+	for statusClass := range statusClassCounts {
+		statusClasses = append(statusClasses, statusClass)
+	}
+	sort.Strings(statusClasses)
+	fmt.Fprintln(w, "# HELP synchub_http_requests_by_status_class_total Total HTTP requests grouped by status class.")
+	fmt.Fprintln(w, "# TYPE synchub_http_requests_by_status_class_total counter")
+	for _, statusClass := range statusClasses {
+		fmt.Fprintf(w, "synchub_http_requests_by_status_class_total{status_class=\"%s\"} %d\n",
+			prometheusEscape(statusClass),
+			statusClassCounts[statusClass],
+		)
+	}
 	fmt.Fprintln(w, "# HELP synchub_http_request_duration_seconds_total Total HTTP request duration in seconds.")
 	fmt.Fprintln(w, "# TYPE synchub_http_request_duration_seconds_total counter")
 	for _, snapshot := range snapshots {
@@ -111,6 +128,13 @@ func (s *Server) metricsHandler(c *gin.Context) {
 	}
 	c.Status(http.StatusOK)
 	s.metrics.writePrometheus(c.Writer)
+}
+
+func statusClass(status int) string {
+	if status < 100 || status > 599 {
+		return "unknown"
+	}
+	return strconv.Itoa(status/100) + "xx"
 }
 
 func prometheusEscape(value string) string {
