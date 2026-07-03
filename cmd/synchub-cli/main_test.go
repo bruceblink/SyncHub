@@ -1174,7 +1174,7 @@ func TestRunSyncOncePushesAndPulls(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode init upload request: %v", err)
 			}
-			if req.Path != "/workspace/once.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) {
+			if req.Path != "/workspace/once.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) || req.DeviceID != "dev_1" {
 				t.Fatalf("unexpected init upload request: %#v", req)
 			}
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_once","path":"/workspace/once.txt","chunk_size":1024,"expires_at":"2026-06-30T00:00:00Z","status":"pending","uploaded_chunks":[]}}`))
@@ -1193,6 +1193,8 @@ func TestRunSyncOncePushesAndPulls(t *testing.T) {
 			registeredDevice = true
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices/dev_1/heartbeat":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/changes":
 			listedChanges = true
 			if got := r.URL.Query().Get("device_id"); got != "dev_1" {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bruceblink/SyncHub/internal/watch"
+	"github.com/bruceblink/SyncHub/pkg/client"
 )
 
 func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -65,6 +66,9 @@ func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if strings.TrimSpace(*manifestPath) != "" {
 		commonArgs = append(commonArgs, "--manifest", *manifestPath)
 	}
+	if err := ensureSyncOnceDevice(ctx, *rootPath, *workspaceConfigPath, *configPath, *deviceName, *devicePlatform); err != nil {
+		return err
+	}
 	if err := runSyncPush(ctx, commonArgs, stdout, stderr); err != nil {
 		return err
 	}
@@ -78,6 +82,30 @@ func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	pullArgs = append(pullArgs, "--limit", fmt.Sprintf("%d", *limit))
 	return runSyncPull(ctx, pullArgs, stdout, stderr)
+}
+
+func ensureSyncOnceDevice(ctx context.Context, rootPath, workspaceConfigPath, configPath, deviceName, devicePlatform string) error {
+	root, workspace, workspacePath, err := loadWorkspace(rootPath, workspaceConfigPath)
+	if err != nil {
+		return err
+	}
+	loginConfig, err := readConfigWithRefresh(ctx, configPath)
+	if err != nil {
+		return err
+	}
+	serverURL := workspace.ServerURL
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = loginConfig.ServerURL
+	}
+	apiClient := client.New(serverURL)
+	changed, err := ensureWorkspaceDevice(ctx, apiClient, loginConfig.Tokens.AccessToken, root, &workspace, deviceName, devicePlatform)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return writeWorkspaceConfig(workspacePath, workspace)
+	}
+	return nil
 }
 
 func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer) error {
