@@ -7,6 +7,8 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/synchub-api ./cmd/synchub-api
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/synchub-cli ./cmd/synchub-cli
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/synchub-agent ./cmd/synchub-agent
 
 FROM alpine:3.22
 
@@ -15,6 +17,8 @@ RUN addgroup -S synchub && adduser -S -G synchub synchub
 WORKDIR /app
 
 COPY --from=build /out/synchub-api /usr/local/bin/synchub-api
+COPY --from=build /out/synchub-cli /usr/local/bin/synchub-cli
+COPY --from=build /out/synchub-agent /usr/local/bin/synchub-agent
 
 RUN mkdir -p /data/storage && chown -R synchub:synchub /data
 
