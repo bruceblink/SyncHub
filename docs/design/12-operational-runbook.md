@@ -32,3 +32,9 @@
 ```
 
 如果确认要替换现有 `.data`，添加 `-Force`。
+
+备份 / 恢复脚本可以用临时数据目录做本地自检：
+
+```powershell
+.\scripts\test-local-backup-restore.ps1
+```

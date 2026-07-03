@@ -29,3 +29,7 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Test local backup scripts
+        shell: pwsh
+        run: ./scripts/test-local-backup-restore.ps1
