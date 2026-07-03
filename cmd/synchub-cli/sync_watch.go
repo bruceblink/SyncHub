@@ -77,6 +77,7 @@ func printWatchChanges(stdout io.Writer, changes []watch.Change) {
 		fmt.Fprintf(stdout, "%s %s\n", change.Type, displayWatchPath(change))
 	}
 	fmt.Fprintf(stdout, "changes: %d\n", len(changes))
+	printChangeTypeCounts(stdout, changes)
 }
 
 func displayWatchPath(change watch.Change) string {

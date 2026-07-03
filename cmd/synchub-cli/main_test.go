@@ -570,7 +570,7 @@ func TestRunSyncWatchOnceShowsLocalChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync watch once: %v", err)
 	}
-	want := "created create.txt\ndeleted delete.txt\nupdated update.txt\nchanges: 3\n"
+	want := "created create.txt\ndeleted delete.txt\nupdated update.txt\nchanges: 3\ncreated: 1\nupdated: 1\ndeleted: 1\nmoved: 0\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -604,7 +604,7 @@ func TestRunSyncWatchOnceShowsLocalMove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync watch once: %v", err)
 	}
-	want := "moved old.txt -> renamed.txt\nchanges: 1\n"
+	want := "moved old.txt -> renamed.txt\nchanges: 1\ncreated: 0\nupdated: 0\ndeleted: 0\nmoved: 1\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}

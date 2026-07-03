@@ -176,11 +176,15 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 }
 
 func printSyncStatusChanges(stdout io.Writer, changes []watch.Change) {
+	fmt.Fprintf(stdout, "pending changes: %d\n", len(changes))
+	printChangeTypeCounts(stdout, changes)
+}
+
+func printChangeTypeCounts(stdout io.Writer, changes []watch.Change) {
 	counts := map[string]int{}
 	for _, change := range changes {
 		counts[change.Type]++
 	}
-	fmt.Fprintf(stdout, "pending changes: %d\n", len(changes))
 	fmt.Fprintf(stdout, "created: %d\n", counts[watch.ChangeCreated])
 	fmt.Fprintf(stdout, "updated: %d\n", counts[watch.ChangeUpdated])
 	fmt.Fprintf(stdout, "deleted: %d\n", counts[watch.ChangeDeleted])
