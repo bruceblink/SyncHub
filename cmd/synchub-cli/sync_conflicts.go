@@ -99,6 +99,10 @@ func runSyncConflictResolve(ctx context.Context, args []string, stdout, stderr i
 
 func printSyncConflicts(stdout io.Writer, conflicts []client.SyncConflict) {
 	fmt.Fprintf(stdout, "conflicts: %d\n", len(conflicts))
+	printSyncConflictItems(stdout, conflicts)
+}
+
+func printSyncConflictItems(stdout io.Writer, conflicts []client.SyncConflict) {
 	for _, conflict := range conflicts {
 		fmt.Fprintf(stdout, "%s %s local=%s remote=%s id=%s\n",
 			conflict.Resolution,

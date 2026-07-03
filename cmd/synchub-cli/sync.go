@@ -200,6 +200,7 @@ func printSyncStatusConflicts(ctx context.Context, stdout io.Writer, workspace w
 		return err
 	}
 	fmt.Fprintf(stdout, "remote conflicts: %d\n", len(conflicts.Items))
+	printSyncConflictItems(stdout, conflicts.Items)
 	return nil
 }
 

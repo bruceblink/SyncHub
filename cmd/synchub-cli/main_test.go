@@ -623,6 +623,7 @@ func TestRunSyncStatusCanShowRemoteConflicts(t *testing.T) {
 	for _, want := range []string{
 		"pending changes: 0",
 		"remote conflicts: 1",
+		"pending /workspace/a.txt local=1 remote=2 id=conf_1",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
