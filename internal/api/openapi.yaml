@@ -167,6 +167,10 @@ paths:
           in: query
           schema:
             type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
         - name: page_size
           in: query
           schema:
@@ -760,6 +764,8 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/FileNode"
+                next_cursor:
+                  type: string
     FileVersionListResponse:
       allOf:
         - $ref: "#/components/schemas/APIResponse"

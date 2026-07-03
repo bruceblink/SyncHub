@@ -48,7 +48,8 @@ type FileNode struct {
 }
 
 type FileList struct {
-	Items []FileNode `json:"items"`
+	Items      []FileNode `json:"items"`
+	NextCursor string     `json:"next_cursor"`
 }
 
 type FileVersion struct {
@@ -227,11 +228,14 @@ func (c *Client) GetFileByPath(ctx context.Context, accessToken, path string) (F
 	return data, err
 }
 
-func (c *Client) ListFiles(ctx context.Context, accessToken string, parentID *string, pageSize int32) (FileList, error) {
+func (c *Client) ListFiles(ctx context.Context, accessToken string, parentID *string, cursor string, pageSize int32) (FileList, error) {
 	var data FileList
 	values := url.Values{}
 	if parentID != nil && strings.TrimSpace(*parentID) != "" {
 		values.Set("parent_id", *parentID)
+	}
+	if strings.TrimSpace(cursor) != "" {
+		values.Set("cursor", strings.TrimSpace(cursor))
 	}
 	if pageSize > 0 {
 		values.Set("page_size", fmt.Sprintf("%d", pageSize))

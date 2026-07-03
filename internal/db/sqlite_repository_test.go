@@ -418,12 +418,12 @@ func TestSQLiteDeleteDirectoryCascadesDescendants(t *testing.T) {
 	if _, err := repo.GetFileByID(ctx, user.ID, file.ID); domain.ErrorCodeOf(err) != domain.CodeNotFound {
 		t.Fatalf("deleted child file error = %v, want not found", err)
 	}
-	children, err := repo.ListFiles(ctx, user.ID, &workspace.ID, 10)
+	children, err := repo.ListFiles(ctx, user.ID, &workspace.ID, "", 10)
 	if err != nil {
 		t.Fatalf("list workspace children: %v", err)
 	}
-	if len(children) != 0 {
-		t.Fatalf("workspace children after delete = %#v, want none", children)
+	if len(children.Items) != 0 {
+		t.Fatalf("workspace children after delete = %#v, want none", children.Items)
 	}
 
 	events, err := repo.ListChanges(ctx, user.ID, createTestDevice(t, repo, user.ID).ID, 0, 20)
@@ -436,6 +436,45 @@ func TestSQLiteDeleteDirectoryCascadesDescendants(t *testing.T) {
 	}
 	if last.SourceDeviceID == nil || *last.SourceDeviceID != deviceID {
 		t.Fatalf("source device id = %#v, want %s", last.SourceDeviceID, deviceID)
+	}
+}
+
+func TestSQLiteListFilesCursorPagination(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "list-pagination@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	workspace, err := repo.CreateDirectory(ctx, user.ID, "/workspace", "workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	docs, err := repo.CreateDirectory(ctx, user.ID, "/workspace/docs", "docs", &workspace.ID, nil)
+	if err != nil {
+		t.Fatalf("create docs: %v", err)
+	}
+	file := commitTestFile(t, repo, user.ID, "/workspace/readme.txt", "sha-readme", "objects/user/readme")
+
+	first, err := repo.ListFiles(ctx, user.ID, &workspace.ID, "", 1)
+	if err != nil {
+		t.Fatalf("list first page: %v", err)
+	}
+	if len(first.Items) != 1 || first.Items[0].ID != docs.ID || first.NextCursor != docs.ID {
+		t.Fatalf("first page = %#v, want docs with next cursor", first)
+	}
+
+	second, err := repo.ListFiles(ctx, user.ID, &workspace.ID, first.NextCursor, 1)
+	if err != nil {
+		t.Fatalf("list second page: %v", err)
+	}
+	if len(second.Items) != 1 || second.Items[0].ID != file.ID || second.NextCursor != "" {
+		t.Fatalf("second page = %#v, want file without next cursor", second)
 	}
 }
 

@@ -391,6 +391,112 @@ func TestSQLiteFileVersionHistory(t *testing.T) {
 	}
 }
 
+func TestSQLiteListFilesPagination(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
+	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
+	server := New(authService, fileService, repo)
+
+	registerResp := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"email":    "list-pagination@example.com",
+		"password": "password123",
+	})
+	if registerResp.Code != http.StatusCreated {
+		t.Fatalf("register status = %d body = %s", registerResp.Code, registerResp.Body.String())
+	}
+	var registerBody struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, registerResp, &registerBody)
+	token := registerBody.Data.Tokens.AccessToken
+
+	createDirResp := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/workspace"})
+	if createDirResp.Code != http.StatusCreated {
+		t.Fatalf("create workspace status = %d body = %s", createDirResp.Code, createDirResp.Body.String())
+	}
+	var createDirBody struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	decodeBody(t, createDirResp, &createDirBody)
+	if createDirBody.Data.ID == "" {
+		t.Fatal("workspace id is empty")
+	}
+	docsResp := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/workspace/docs"})
+	if docsResp.Code != http.StatusCreated {
+		t.Fatalf("create docs status = %d body = %s", docsResp.Code, docsResp.Body.String())
+	}
+
+	content := []byte("readme")
+	sum := sha256.Sum256(content)
+	uploadResp := doJSON(t, server, http.MethodPost, "/api/v1/uploads", token, map[string]any{
+		"path":       "/workspace/readme.txt",
+		"size":       len(content),
+		"sha256":     hex.EncodeToString(sum[:]),
+		"chunk_size": len(content),
+	})
+	if uploadResp.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d body = %s", uploadResp.Code, uploadResp.Body.String())
+	}
+	var uploadBody struct {
+		Data struct {
+			UploadID string `json:"upload_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, uploadResp, &uploadBody)
+	putChunk(t, server, token, uploadBody.Data.UploadID, content, hex.EncodeToString(sum[:]))
+	commitResp := doJSON(t, server, http.MethodPost, "/api/v1/uploads/"+uploadBody.Data.UploadID+"/commit", token, map[string]any{})
+	if commitResp.Code != http.StatusOK {
+		t.Fatalf("commit status = %d body = %s", commitResp.Code, commitResp.Body.String())
+	}
+
+	firstResp := doJSON(t, server, http.MethodGet, "/api/v1/files?parent_id="+createDirBody.Data.ID+"&page_size=1", token, nil)
+	if firstResp.Code != http.StatusOK {
+		t.Fatalf("first list status = %d body = %s", firstResp.Code, firstResp.Body.String())
+	}
+	var firstBody struct {
+		Data struct {
+			Items []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"items"`
+			NextCursor string `json:"next_cursor"`
+		} `json:"data"`
+	}
+	decodeBody(t, firstResp, &firstBody)
+	if len(firstBody.Data.Items) != 1 || firstBody.Data.Items[0].Name != "docs" || firstBody.Data.NextCursor == "" {
+		t.Fatalf("first page = %#v", firstBody.Data)
+	}
+
+	secondResp := doJSON(t, server, http.MethodGet, "/api/v1/files?parent_id="+createDirBody.Data.ID+"&cursor="+firstBody.Data.NextCursor+"&page_size=1", token, nil)
+	if secondResp.Code != http.StatusOK {
+		t.Fatalf("second list status = %d body = %s", secondResp.Code, secondResp.Body.String())
+	}
+	var secondBody struct {
+		Data struct {
+			Items []struct {
+				Name string `json:"name"`
+			} `json:"items"`
+			NextCursor string `json:"next_cursor"`
+		} `json:"data"`
+	}
+	decodeBody(t, secondResp, &secondBody)
+	if len(secondBody.Data.Items) != 1 || secondBody.Data.Items[0].Name != "readme.txt" || secondBody.Data.NextCursor != "" {
+		t.Fatalf("second page = %#v", secondBody.Data)
+	}
+}
+
 func TestSQLitePinFileVersion(t *testing.T) {
 	ctx := context.Background()
 	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

@@ -176,10 +176,11 @@ func (r *SQLiteRepository) GetFileByPath(ctx context.Context, userID, path strin
 	return node, wrapSQLiteNotFound(err, "file not found")
 }
 
-func (r *SQLiteRepository) ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error) {
+func (r *SQLiteRepository) ListFiles(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
+	queryLimit := limit + 1
 	var (
 		rows *sql.Rows
 		err  error
@@ -189,20 +190,36 @@ func (r *SQLiteRepository) ListFiles(ctx context.Context, userID string, parentI
 			select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
 			from file_nodes
 			where user_id = ? and parent_id is null and deleted_at is null
-			order by node_type, name
+				and (
+					? = ''
+					or (node_type, name, id) > (
+						select node_type, name, id
+						from file_nodes
+						where user_id = ? and id = ? and parent_id is null and deleted_at is null
+					)
+				)
+			order by node_type, name, id
 			limit ?
-		`, userID, limit)
+		`, userID, cursor, userID, cursor, queryLimit)
 	} else {
 		rows, err = r.db.QueryContext(ctx, `
 			select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
 			from file_nodes
 			where user_id = ? and parent_id = ? and deleted_at is null
-			order by node_type, name
+				and (
+					? = ''
+					or (node_type, name, id) > (
+						select node_type, name, id
+						from file_nodes
+						where user_id = ? and id = ? and parent_id = ? and deleted_at is null
+					)
+				)
+			order by node_type, name, id
 			limit ?
-		`, userID, *parentID, limit)
+		`, userID, *parentID, cursor, userID, cursor, *parentID, queryLimit)
 	}
 	if err != nil {
-		return nil, wrapSQLiteDBErr(err)
+		return domain.FileList{}, wrapSQLiteDBErr(err)
 	}
 	defer rows.Close()
 
@@ -210,11 +227,19 @@ func (r *SQLiteRepository) ListFiles(ctx context.Context, userID string, parentI
 	for rows.Next() {
 		var node domain.FileNode
 		if err := rows.Scan(fileNodeScan(&node)...); err != nil {
-			return nil, wrapSQLiteDBErr(err)
+			return domain.FileList{}, wrapSQLiteDBErr(err)
 		}
 		nodes = append(nodes, node)
 	}
-	return nodes, wrapSQLiteDBErr(rows.Err())
+	if err := rows.Err(); err != nil {
+		return domain.FileList{}, wrapSQLiteDBErr(err)
+	}
+	result := domain.FileList{Items: nodes}
+	if len(nodes) > int(limit) {
+		result.Items = nodes[:limit]
+		result.NextCursor = result.Items[len(result.Items)-1].ID
+	}
+	return result, nil
 }
 
 func (r *SQLiteRepository) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {

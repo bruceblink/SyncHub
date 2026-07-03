@@ -246,16 +246,16 @@ func (s *Server) listFiles(c *gin.Context) {
 			limit = int32(parsed)
 		}
 	}
-	nodes, err := s.files.List(c.Request.Context(), userID(c), parentID, limit)
+	result, err := s.files.List(c.Request.Context(), userID(c), parentID, c.Query("cursor"), limit)
 	if err != nil {
 		fail(c, err)
 		return
 	}
-	data := make([]any, 0, len(nodes))
-	for _, node := range nodes {
+	data := make([]any, 0, len(result.Items))
+	for _, node := range result.Items {
 		data = append(data, fileDTO(node))
 	}
-	ok(c, gin.H{"items": data})
+	ok(c, gin.H{"items": data, "next_cursor": result.NextCursor})
 }
 
 func (s *Server) listFileVersions(c *gin.Context) {

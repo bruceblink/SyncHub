@@ -95,6 +95,8 @@ Response data:
 
 `GET /api/v1/files?parent_id={id}&cursor={cursor}&page_size=100`
 
+`cursor` 使用上一页响应的 `next_cursor`；没有下一页时 `next_cursor` 为空。
+
 ### 创建目录
 
 `POST /api/v1/files/directories`

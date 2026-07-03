@@ -134,30 +134,49 @@ func (r *Repository) GetFileByPath(ctx context.Context, userID, path string) (do
 	return node, wrapNotFound(err, "file not found")
 }
 
-func (r *Repository) ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error) {
+func (r *Repository) ListFiles(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
+	queryLimit := limit + 1
 	rows, err := r.pool.Query(ctx, `
 		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
 		from file_nodes
 		where user_id = $1 and (($2::uuid is null and parent_id is null) or parent_id = $2::uuid) and deleted_at is null
-		order by node_type, name
-		limit $3
-	`, userID, parentID, limit)
+			and (
+				$3 = ''
+				or (node_type, name, id) > (
+					select node_type, name, id
+					from file_nodes
+					where user_id = $1 and id = $3::uuid
+						and (($2::uuid is null and parent_id is null) or parent_id = $2::uuid)
+						and deleted_at is null
+				)
+			)
+		order by node_type, name, id
+		limit $4
+	`, userID, parentID, cursor, queryLimit)
 	if err != nil {
-		return nil, wrapDBErr(err)
+		return domain.FileList{}, wrapDBErr(err)
 	}
 	defer rows.Close()
 	var nodes []domain.FileNode
 	for rows.Next() {
 		var node domain.FileNode
 		if err := rows.Scan(fileNodeScan(&node)...); err != nil {
-			return nil, wrapDBErr(err)
+			return domain.FileList{}, wrapDBErr(err)
 		}
 		nodes = append(nodes, node)
 	}
-	return nodes, wrapDBErr(rows.Err())
+	if err := rows.Err(); err != nil {
+		return domain.FileList{}, wrapDBErr(err)
+	}
+	result := domain.FileList{Items: nodes}
+	if len(nodes) > int(limit) {
+		result.Items = nodes[:limit]
+		result.NextCursor = result.Items[len(result.Items)-1].ID
+	}
+	return result, nil
 }
 
 func (r *Repository) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {

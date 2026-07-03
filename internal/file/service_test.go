@@ -87,9 +87,9 @@ func (r *fakeRepo) GetFileByPath(ctx context.Context, userID, path string) (doma
 	return domain.FileNode{}, domain.E(domain.CodeNotFound, "file not found", nil)
 }
 
-func (r *fakeRepo) ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error) {
-	_, _, _, _ = ctx, userID, parentID, limit
-	return nil, nil
+func (r *fakeRepo) ListFiles(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error) {
+	_, _, _, _, _ = ctx, userID, parentID, cursor, limit
+	return domain.FileList{}, nil
 }
 
 func (r *fakeRepo) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {

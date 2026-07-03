@@ -180,9 +180,9 @@ func (r *downloadFileRepo) GetFileByPath(ctx context.Context, userID, path strin
 	return r.node, nil
 }
 
-func (r *downloadFileRepo) ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error) {
-	_, _, _, _ = ctx, userID, parentID, limit
-	return nil, errNotImplemented()
+func (r *downloadFileRepo) ListFiles(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error) {
+	_, _, _, _, _ = ctx, userID, parentID, cursor, limit
+	return domain.FileList{}, errNotImplemented()
 }
 
 func (r *downloadFileRepo) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {

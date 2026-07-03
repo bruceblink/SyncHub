@@ -46,6 +46,7 @@ func runFileList(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	parentID := fs.String("parent-id", "", "remote parent directory id")
 	remotePath := fs.String("remote-path", "", "remote parent directory path")
+	cursor := fs.String("cursor", "", "page cursor returned by a previous file list")
 	pageSize := fs.Int("page-size", 100, "maximum files to list")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -64,11 +65,11 @@ func runFileList(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
-	files, err := session.apiClient.ListFiles(ctx, session.accessToken, parent, int32(*pageSize))
+	files, err := session.apiClient.ListFiles(ctx, session.accessToken, parent, *cursor, int32(*pageSize))
 	if err != nil {
 		return err
 	}
-	printFileList(stdout, files.Items)
+	printFileList(stdout, files)
 	return nil
 }
 
@@ -266,14 +267,17 @@ func parseFileVersionFlag(raw string) (int64, error) {
 	return version, nil
 }
 
-func printFileList(stdout io.Writer, files []client.FileNode) {
-	fmt.Fprintf(stdout, "files: %d\n", len(files))
-	for _, file := range files {
+func printFileList(stdout io.Writer, files client.FileList) {
+	fmt.Fprintf(stdout, "files: %d\n", len(files.Items))
+	for _, file := range files.Items {
 		name := file.Name
 		if file.NodeType == "directory" {
 			name += "/"
 		}
 		fmt.Fprintf(stdout, "%s %s path=%s size=%d version=%d id=%s\n", file.NodeType, name, file.Path, file.Size, file.Version, file.ID)
+	}
+	if strings.TrimSpace(files.NextCursor) != "" {
+		fmt.Fprintf(stdout, "next cursor: %s\n", files.NextCursor)
 	}
 }
 

@@ -229,15 +229,18 @@ func TestListFiles(t *testing.T) {
 		if got := r.URL.Query().Get("parent_id"); got != parentID {
 			t.Fatalf("parent_id = %q", got)
 		}
+		if got := r.URL.Query().Get("cursor"); got != "file_0" {
+			t.Fatalf("cursor = %q", got)
+		}
 		if got := r.URL.Query().Get("page_size"); got != "20" {
 			t.Fatalf("page_size = %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"dir_2","parent_id":"dir_1","name":"docs","path":"/workspace/docs","node_type":"directory","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"},{"id":"file_1","parent_id":"dir_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":5,"sha256":"sha1","version":2,"created_at":"2026-06-30T00:01:00Z","updated_at":"2026-06-30T00:02:00Z"}]}}`))
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"dir_2","parent_id":"dir_1","name":"docs","path":"/workspace/docs","node_type":"directory","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"},{"id":"file_1","parent_id":"dir_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":5,"sha256":"sha1","version":2,"created_at":"2026-06-30T00:01:00Z","updated_at":"2026-06-30T00:02:00Z"}],"next_cursor":"file_1"}}`))
 	}))
 	defer server.Close()
 
-	files, err := New(server.URL).ListFiles(context.Background(), "access-token", &parentID, 20)
+	files, err := New(server.URL).ListFiles(context.Background(), "access-token", &parentID, "file_0", 20)
 	if err != nil {
 		t.Fatalf("list files: %v", err)
 	}
@@ -249,6 +252,9 @@ func TestListFiles(t *testing.T) {
 	}
 	if files.Items[1].ID != "file_1" || files.Items[1].Size != 5 || files.Items[1].SHA256 == nil || *files.Items[1].SHA256 != "sha1" {
 		t.Fatalf("unexpected second item: %#v", files.Items[1])
+	}
+	if files.NextCursor != "file_1" {
+		t.Fatalf("next cursor = %q, want file_1", files.NextCursor)
 	}
 }
 

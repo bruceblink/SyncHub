@@ -19,7 +19,7 @@ type Repository interface {
 	CreateDirectory(ctx context.Context, userID, path, name string, parentID, sourceDeviceID *string) (domain.FileNode, error)
 	GetFileByID(ctx context.Context, userID, fileID string) (domain.FileNode, error)
 	GetFileByPath(ctx context.Context, userID, path string) (domain.FileNode, error)
-	ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error)
+	ListFiles(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error)
 	ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error)
 	PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
 	UnpinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
@@ -72,8 +72,8 @@ func (s *Service) GetByPath(ctx context.Context, userID, p string) (domain.FileN
 	return s.repo.GetFileByPath(ctx, userID, normalized)
 }
 
-func (s *Service) List(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error) {
-	return s.repo.ListFiles(ctx, userID, parentID, limit)
+func (s *Service) List(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error) {
+	return s.repo.ListFiles(ctx, userID, parentID, strings.TrimSpace(cursor), limit)
 }
 
 func (s *Service) Versions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {

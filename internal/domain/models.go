@@ -37,6 +37,11 @@ type FileNode struct {
 	UpdatedAt        time.Time
 }
 
+type FileList struct {
+	Items      []FileNode
+	NextCursor string
+}
+
 type FileVersion struct {
 	ID                string
 	FileID            string

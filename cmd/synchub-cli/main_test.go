@@ -836,11 +836,14 @@ func TestRunFileList(t *testing.T) {
 		if got := r.URL.Query().Get("parent_id"); got != "dir_1" {
 			t.Fatalf("parent_id = %q", got)
 		}
+		if got := r.URL.Query().Get("cursor"); got != "dir_0" {
+			t.Fatalf("cursor = %q", got)
+		}
 		if got := r.URL.Query().Get("page_size"); got != "20" {
 			t.Fatalf("page_size = %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"dir_2","parent_id":"dir_1","name":"docs","path":"/workspace/docs","node_type":"directory","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"},{"id":"file_1","parent_id":"dir_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":5,"sha256":"sha1","version":2,"created_at":"2026-06-30T00:01:00Z","updated_at":"2026-06-30T00:02:00Z"}]}}`))
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"dir_2","parent_id":"dir_1","name":"docs","path":"/workspace/docs","node_type":"directory","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"},{"id":"file_1","parent_id":"dir_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":5,"sha256":"sha1","version":2,"created_at":"2026-06-30T00:01:00Z","updated_at":"2026-06-30T00:02:00Z"}],"next_cursor":"file_1"}}`))
 	}))
 	defer server.Close()
 
@@ -861,12 +864,13 @@ func TestRunFileList(t *testing.T) {
 		"--path", root,
 		"--config", loginConfigPath,
 		"--parent-id", "dir_1",
+		"--cursor", "dir_0",
 		"--page-size", "20",
 	}, &stdout, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("file list: %v", err)
 	}
-	want := "files: 2\ndirectory docs/ path=/workspace/docs size=0 version=1 id=dir_2\nfile a.txt path=/workspace/a.txt size=5 version=2 id=file_1\n"
+	want := "files: 2\ndirectory docs/ path=/workspace/docs size=0 version=1 id=dir_2\nfile a.txt path=/workspace/a.txt size=5 version=2 id=file_1\nnext cursor: file_1\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
