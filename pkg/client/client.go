@@ -228,6 +228,13 @@ func (c *Client) GetFileByPath(ctx context.Context, accessToken, path string) (F
 	return data, err
 }
 
+func (c *Client) GetFile(ctx context.Context, accessToken, fileID string) (FileNode, error) {
+	var data FileNode
+	path := fmt.Sprintf("/api/v1/files/%s", url.PathEscape(fileID))
+	err := c.getJSONAuth(ctx, path, accessToken, &data)
+	return data, err
+}
+
 func (c *Client) ListFiles(ctx context.Context, accessToken string, parentID *string, cursor string, pageSize int32) (FileList, error) {
 	var data FileList
 	values := url.Values{}

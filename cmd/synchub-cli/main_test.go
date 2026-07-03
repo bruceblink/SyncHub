@@ -1020,6 +1020,163 @@ func TestRunFileListRejectsRemoteFilePath(t *testing.T) {
 	}
 }
 
+func TestRunFileDownloadByRemotePath(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("downloaded content")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/by-path":
+			if got := r.URL.Query().Get("path"); got != "/workspace/docs/readme.txt" {
+				t.Fatalf("path = %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"readme.txt","path":"/workspace/docs/readme.txt","node_type":"file","size":18,"sha256":"sha1","version":2,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/file_1/content":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(content)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"download",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--remote-path", "/workspace/docs/readme.txt",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file download: %v", err)
+	}
+	outputPath := filepath.Join(root, "docs", "readme.txt")
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read downloaded file: %v", err)
+	}
+	if !bytes.Equal(raw, content) {
+		t.Fatalf("downloaded content = %q, want %q", string(raw), string(content))
+	}
+	want := fmt.Sprintf("downloaded: /workspace/docs/readme.txt\noutput: %s\nbytes: %d\n", outputPath, len(content))
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunFileDownloadByFileIDToOutputDirectory(t *testing.T) {
+	root := t.TempDir()
+	outputDir := filepath.Join(root, "downloads")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("create output dir: %v", err)
+	}
+	content := []byte("by id")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/file_1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"notes.txt","path":"/archive/notes.txt","node_type":"file","size":5,"sha256":"sha1","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/file_1/content":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(content)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"download",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--file-id", "file_1",
+		"--output", outputDir,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file download: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "notes.txt")
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read downloaded file: %v", err)
+	}
+	if !bytes.Equal(raw, content) {
+		t.Fatalf("downloaded content = %q, want %q", string(raw), string(content))
+	}
+	want := fmt.Sprintf("downloaded: /archive/notes.txt\noutput: %s\nbytes: %d\n", outputPath, len(content))
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunFileDownloadRejectsDirectory(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files/by-path" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		if got := r.URL.Query().Get("path"); got != "/workspace/docs" {
+			t.Fatalf("path = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_docs","name":"docs","path":"/workspace/docs","node_type":"directory","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	err := run(context.Background(), []string{
+		"file",
+		"download",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--remote-path", "/workspace/docs",
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "remote path is not a file: /workspace/docs") {
+		t.Fatalf("error = %v, want remote path is not a file", err)
+	}
+}
+
 func TestRunFileVersionsByRemotePath(t *testing.T) {
 	root := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +24,8 @@ func runFile(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	switch args[0] {
 	case "list":
 		return runFileList(ctx, args[1:], stdout, stderr)
+	case "download":
+		return runFileDownload(ctx, args[1:], stdout, stderr)
 	case "versions":
 		return runFileVersions(ctx, args[1:], stdout, stderr)
 	case "restore":
@@ -70,6 +75,41 @@ func runFileList(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	printFileList(stdout, files)
+	return nil
+}
+
+func runFileDownload(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("file download", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	remotePath := fs.String("remote-path", "", "remote file path")
+	fileID := fs.String("file-id", "", "remote file id")
+	outputPath := fs.String("output", "", "local output file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
+	if err != nil {
+		return err
+	}
+	node, err := session.resolveDownloadFile(ctx, *fileID, *remotePath)
+	if err != nil {
+		return err
+	}
+	output, err := session.downloadOutputPath(node, *outputPath)
+	if err != nil {
+		return err
+	}
+	written, err := downloadFileToPath(ctx, session.apiClient, session.accessToken, node.ID, output)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "downloaded: %s\n", node.Path)
+	fmt.Fprintf(stdout, "output: %s\n", output)
+	fmt.Fprintf(stdout, "bytes: %d\n", written)
 	return nil
 }
 
@@ -193,10 +233,12 @@ func runFilePin(ctx context.Context, args []string, stdout, stderr io.Writer, pi
 type fileCommandSession struct {
 	apiClient   *client.Client
 	accessToken string
+	root        string
+	workspace   workspaceConfig
 }
 
 func openFileCommandSession(ctx context.Context, rootPath, workspaceConfigPath, configPath string) (fileCommandSession, error) {
-	_, workspace, _, err := loadWorkspace(rootPath, workspaceConfigPath)
+	root, workspace, _, err := loadWorkspace(rootPath, workspaceConfigPath)
 	if err != nil {
 		return fileCommandSession{}, err
 	}
@@ -211,6 +253,8 @@ func openFileCommandSession(ctx context.Context, rootPath, workspaceConfigPath, 
 	return fileCommandSession{
 		apiClient:   client.New(serverURL),
 		accessToken: loginConfig.Tokens.AccessToken,
+		root:        root,
+		workspace:   workspace,
 	}, nil
 }
 
@@ -257,6 +301,133 @@ func (s fileCommandSession) resolveFileID(ctx context.Context, fileID, remotePat
 		return "", "", err
 	}
 	return node.ID, node.Path, nil
+}
+
+func (s fileCommandSession) resolveDownloadFile(ctx context.Context, fileID, remotePath string) (client.FileNode, error) {
+	id := strings.TrimSpace(fileID)
+	remote := strings.TrimSpace(remotePath)
+	if id == "" && remote == "" {
+		return client.FileNode{}, errors.New("remote path or file id is required")
+	}
+	if id != "" && remote != "" {
+		return client.FileNode{}, errors.New("remote path and file id cannot both be set")
+	}
+	var (
+		node client.FileNode
+		err  error
+	)
+	if id != "" {
+		node, err = s.apiClient.GetFile(ctx, s.accessToken, id)
+	} else {
+		normalized, normalizeErr := normalizeRemotePath(remote)
+		if normalizeErr != nil {
+			return client.FileNode{}, normalizeErr
+		}
+		node, err = s.apiClient.GetFileByPath(ctx, s.accessToken, normalized)
+	}
+	if err != nil {
+		return client.FileNode{}, err
+	}
+	if node.NodeType != "file" {
+		if strings.TrimSpace(node.Path) != "" {
+			return client.FileNode{}, fmt.Errorf("remote path is not a file: %s", node.Path)
+		}
+		return client.FileNode{}, fmt.Errorf("file id is not a file: %s", node.ID)
+	}
+	return node, nil
+}
+
+func (s fileCommandSession) downloadOutputPath(node client.FileNode, outputPath string) (string, error) {
+	output := strings.TrimSpace(outputPath)
+	if output == "" {
+		localPath, ok, err := localPathForRemote(s.root, s.workspace.RemotePath, node.Path)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", errors.New("remote file is outside workspace remote path; pass --output to choose a destination")
+		}
+		if filepath.Clean(localPath) == filepath.Clean(s.root) {
+			return "", errors.New("remote file maps to the workspace root; pass --output to choose a destination")
+		}
+		return localPath, nil
+	}
+	abs, err := filepath.Abs(output)
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(abs); err == nil && info.IsDir() {
+		name := strings.TrimSpace(node.Name)
+		if name == "" {
+			name = filepath.Base(node.Path)
+		}
+		abs = filepath.Join(abs, name)
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
+func downloadFileToPath(ctx context.Context, apiClient *client.Client, accessToken, fileID, outputPath string) (int64, error) {
+	result, err := apiClient.DownloadFile(ctx, accessToken, fileID, client.DownloadOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer result.Body.Close()
+	if result.StatusCode == http.StatusNotModified {
+		return 0, nil
+	}
+	return writeStreamAtomically(outputPath, result.Body)
+}
+
+func writeStreamAtomically(outputPath string, r io.Reader) (int64, error) {
+	dir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return 0, err
+	}
+	if info, err := os.Stat(outputPath); err == nil && info.IsDir() {
+		return 0, fmt.Errorf("output path is a directory: %s", outputPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	tmp, err := os.CreateTemp(dir, ".synchub-download-*")
+	if err != nil {
+		return 0, err
+	}
+	tmpName := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	written, copyErr := io.Copy(tmp, r)
+	closeErr := tmp.Close()
+	if copyErr != nil {
+		return written, copyErr
+	}
+	if closeErr != nil {
+		return written, closeErr
+	}
+	if err := replaceFile(tmpName, outputPath); err != nil {
+		return written, err
+	}
+	removeTmp = false
+	return written, nil
+}
+
+func replaceFile(tmpName, outputPath string) error {
+	if info, err := os.Stat(outputPath); err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("output path is a directory: %s", outputPath)
+		}
+		if err := os.Remove(outputPath); err != nil {
+			return err
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(tmpName, outputPath)
 }
 
 func parseFileVersionFlag(raw string) (int64, error) {

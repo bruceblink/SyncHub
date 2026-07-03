@@ -217,6 +217,28 @@ func TestGetFileByPath(t *testing.T) {
 	}
 }
 
+func TestGetFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files/file_1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","version":3}}`))
+	}))
+	defer server.Close()
+
+	node, err := New(server.URL).GetFile(context.Background(), "access-token", "file_1")
+	if err != nil {
+		t.Fatalf("get file: %v", err)
+	}
+	if node.ID != "file_1" || node.Path != "/workspace/a.txt" || node.Version != 3 {
+		t.Fatalf("unexpected node: %#v", node)
+	}
+}
+
 func TestListFiles(t *testing.T) {
 	parentID := "dir_1"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
