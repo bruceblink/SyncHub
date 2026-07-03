@@ -15,9 +15,9 @@ go fmt ./...
 go vet ./...
 go test ./...
 go run ./cmd/synchub-api
-go run ./cmd/synchub-cli login --server http://localhost:8080 --email user@example.com --password password
+go run ./cmd/synchub-cli register --server http://localhost:8765 --email user@example.com --password password
 go run ./cmd/synchub-cli workspace init --path . --remote-path /workspace
-go run ./cmd/synchub-cli manifest scan --path .
+go run ./cmd/synchub-cli sync once --path .
 go run ./cmd/synchub-cli sync status --path .
 ```
 

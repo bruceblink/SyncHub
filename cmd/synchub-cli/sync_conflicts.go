@@ -29,7 +29,7 @@ func runSyncConflicts(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	loginConfig, err := readConfig(*configPath)
+	loginConfig, err := readConfigWithRefresh(ctx, *configPath)
 	if err != nil {
 		return err
 	}

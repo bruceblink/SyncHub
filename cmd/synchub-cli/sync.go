@@ -18,6 +18,8 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return errors.New("sync command is required")
 	}
 	switch args[0] {
+	case "once":
+		return runSyncOnce(ctx, args[1:], stdout, stderr)
 	case "status":
 		return runSyncStatus(args[1:], stdout, stderr)
 	case "push":
@@ -35,6 +37,45 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		printSyncUsage(stderr)
 		return fmt.Errorf("unknown sync command: %s", args[0])
 	}
+}
+
+func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("sync once", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	manifestPath := fs.String("manifest", "", "manifest file path")
+	deviceName := fs.String("device-name", "", "device name")
+	devicePlatform := fs.String("platform", "", "device platform")
+	limit := fs.Int("limit", 500, "maximum changes to pull")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *limit <= 0 {
+		return errors.New("limit must be positive")
+	}
+
+	commonArgs := []string{"--path", *rootPath, "--config", *configPath}
+	if strings.TrimSpace(*workspaceConfigPath) != "" {
+		commonArgs = append(commonArgs, "--workspace-config", *workspaceConfigPath)
+	}
+	if strings.TrimSpace(*manifestPath) != "" {
+		commonArgs = append(commonArgs, "--manifest", *manifestPath)
+	}
+	if err := runSyncPush(ctx, commonArgs, stdout, stderr); err != nil {
+		return err
+	}
+
+	pullArgs := append([]string{}, commonArgs...)
+	if strings.TrimSpace(*deviceName) != "" {
+		pullArgs = append(pullArgs, "--device-name", *deviceName)
+	}
+	if strings.TrimSpace(*devicePlatform) != "" {
+		pullArgs = append(pullArgs, "--platform", *devicePlatform)
+	}
+	pullArgs = append(pullArgs, "--limit", fmt.Sprintf("%d", *limit))
+	return runSyncPull(ctx, pullArgs, stdout, stderr)
 }
 
 func runSyncStatus(args []string, stdout, stderr io.Writer) error {
@@ -78,7 +119,7 @@ func runSyncStatus(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintln(stdout, "manifest: missing")
-			fmt.Fprintln(stdout, "next: run synchub-cli manifest scan --path .")
+			fmt.Fprintln(stdout, "next: run synchub-cli sync once --path .")
 			return nil
 		}
 		return err

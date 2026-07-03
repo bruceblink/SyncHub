@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-const defaultServerURL = "http://localhost:8080"
+const defaultServerURL = "http://localhost:8765"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -23,6 +23,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return errors.New("command is required")
 	}
 	switch args[0] {
+	case "register":
+		return runRegister(ctx, args[1:], stdout, stderr)
 	case "login":
 		return runLogin(ctx, args[1:], stdout, stderr)
 	case "workspace":

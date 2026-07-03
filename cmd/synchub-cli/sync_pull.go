@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/bruceblink/SyncHub/internal/manifest"
 	"github.com/bruceblink/SyncHub/pkg/client"
@@ -45,7 +48,7 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
-	loginConfig, err := readConfig(*configPath)
+	loginConfig, err := readConfigWithRefresh(ctx, *configPath)
 	if err != nil {
 		return err
 	}
@@ -68,9 +71,13 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
-	files, dirs, deleted, moved := 0, 0, 0, 0
+	previousEntries, err := manifestEntriesByPath(previousManifest)
+	if err != nil {
+		return err
+	}
+	files, dirs, deleted, moved, conflictKept := 0, 0, 0, 0, 0
 	for _, event := range changes.Items {
-		result, err := applyChangeEvent(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace.RemotePath, event)
+		result, err := applyChangeEvent(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, event, previousEntries)
 		if err != nil {
 			return err
 		}
@@ -78,6 +85,7 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		dirs += result.dirs
 		deleted += result.deleted
 		moved += result.moved
+		conflictKept += result.conflictKept
 	}
 	if len(changes.Items) > 0 {
 		if err := writePullManifest(ctx, root, workspace.RemotePath, localManifestPath, previousManifest, changes.Items); err != nil {
@@ -105,6 +113,9 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	fmt.Fprintf(stdout, "directories: %d\n", dirs)
 	fmt.Fprintf(stdout, "deleted: %d\n", deleted)
 	fmt.Fprintf(stdout, "moved: %d\n", moved)
+	if conflictKept > 0 {
+		fmt.Fprintf(stdout, "conflicts kept: %d\n", conflictKept)
+	}
 	fmt.Fprintf(stdout, "cursor: %d\n", workspace.LastAppliedChangeID)
 	return nil
 }
@@ -248,16 +259,17 @@ func ensureWorkspaceDevice(ctx context.Context, apiClient *client.Client, access
 }
 
 type pullApplyResult struct {
-	files   int
-	dirs    int
-	deleted int
-	moved   int
+	files        int
+	dirs         int
+	deleted      int
+	moved        int
+	conflictKept int
 }
 
-func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken, root, remoteRoot string, event client.ChangeEvent) (pullApplyResult, error) {
+func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace workspaceConfig, event client.ChangeEvent, previousEntries map[string]manifest.Entry) (pullApplyResult, error) {
 	switch event.EventType {
 	case "create", "update", "restore":
-		localPath, ok, err := localPathForRemote(root, remoteRoot, event.Path)
+		localPath, ok, err := localPathForRemote(root, workspace.RemotePath, event.Path)
 		if err != nil || !ok {
 			return pullApplyResult{}, err
 		}
@@ -267,12 +279,16 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 			}
 			return pullApplyResult{dirs: 1}, nil
 		}
+		conflictKept, err := keepLocalConflictIfChanged(localPath, event.Path, workspace, previousEntries)
+		if err != nil {
+			return pullApplyResult{}, err
+		}
 		if err := downloadChangeFile(ctx, apiClient, accessToken, event.FileID, localPath); err != nil {
 			return pullApplyResult{}, err
 		}
-		return pullApplyResult{files: 1}, nil
+		return pullApplyResult{files: 1, conflictKept: boolToInt(conflictKept)}, nil
 	case "delete":
-		localPath, ok, err := localPathForRemote(root, remoteRoot, event.Path)
+		localPath, ok, err := localPathForRemote(root, workspace.RemotePath, event.Path)
 		if err != nil || !ok {
 			return pullApplyResult{}, err
 		}
@@ -284,13 +300,78 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 		if event.OldPath == nil {
 			return pullApplyResult{}, errors.New("move event is missing old_path")
 		}
-		if err := moveLocalPath(root, remoteRoot, *event.OldPath, event.Path); err != nil {
+		if err := moveLocalPath(root, workspace.RemotePath, *event.OldPath, event.Path); err != nil {
 			return pullApplyResult{}, err
 		}
 		return pullApplyResult{moved: 1}, nil
 	default:
 		return pullApplyResult{}, fmt.Errorf("unsupported change event type: %s", event.EventType)
 	}
+}
+
+func keepLocalConflictIfChanged(localPath, remotePath string, workspace workspaceConfig, previousEntries map[string]manifest.Entry) (bool, error) {
+	previous, ok := previousEntries[remotePath]
+	if !ok || previous.SHA256 == "" {
+		return false, nil
+	}
+	info, err := os.Stat(localPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		return false, nil
+	}
+	currentSHA, err := localFileSHA256(localPath)
+	if err != nil {
+		return false, err
+	}
+	if currentSHA == previous.SHA256 {
+		return false, nil
+	}
+	conflictPath := conflictLocalPath(localPath, conflictDeviceLabel(workspace), syncPushNow().UTC())
+	if err := os.MkdirAll(filepath.Dir(conflictPath), 0o755); err != nil {
+		return false, err
+	}
+	if err := os.Rename(localPath, conflictPath); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func conflictLocalPath(localPath, device string, timestamp time.Time) string {
+	dir := filepath.Dir(localPath)
+	base := filepath.Base(localPath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	if name == "" {
+		name = strings.TrimPrefix(base, ".")
+		ext = ""
+	}
+	conflictName := fmt.Sprintf("%s.conflict-%s-%s%s", name, sanitizeConflictPathPart(device), timestamp.UTC().Format("20060102T150405.000000000Z"), ext)
+	return filepath.Join(dir, conflictName)
+}
+
+func localFileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func moveLocalPath(root, remoteRoot, oldRemotePath, newRemotePath string) error {
@@ -303,6 +384,13 @@ func moveLocalPath(root, remoteRoot, oldRemotePath, newRemotePath string) error 
 		return err
 	}
 	if _, err := os.Stat(oldLocalPath); err != nil {
+		if os.IsNotExist(err) {
+			if _, targetErr := os.Stat(newLocalPath); targetErr == nil {
+				return nil
+			} else if !os.IsNotExist(targetErr) {
+				return targetErr
+			}
+		}
 		return err
 	}
 	if _, err := os.Stat(newLocalPath); err == nil {

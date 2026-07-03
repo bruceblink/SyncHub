@@ -29,6 +29,61 @@ func TestLogin(t *testing.T) {
 	}
 }
 
+func TestRefresh(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/auth/refresh" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		var req struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode refresh request: %v", err)
+		}
+		if req.RefreshToken != "refresh-old" {
+			t.Fatalf("refresh token = %q", req.RefreshToken)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"access_token":"access-new","refresh_token":"refresh-new","expires_in":900}}`))
+	}))
+	defer server.Close()
+
+	tokens, err := New(server.URL).Refresh(context.Background(), "refresh-old")
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if tokens.AccessToken != "access-new" || tokens.RefreshToken != "refresh-new" || tokens.ExpiresIn != 900 {
+		t.Fatalf("unexpected tokens: %#v", tokens)
+	}
+}
+
+func TestRegister(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/auth/register" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"user":{"id":"u1","email":"user@example.com","status":"active"},"tokens":{"access_token":"access","refresh_token":"refresh","expires_in":900}}}`))
+	}))
+	defer server.Close()
+
+	data, err := New(server.URL).Register(context.Background(), "user@example.com", "password123")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if data.User.Email != "user@example.com" || data.Tokens.AccessToken != "access" {
+		t.Fatalf("unexpected register data: %#v", data)
+	}
+}
+
+func TestNewDefaultsToLocalMVPServer(t *testing.T) {
+	client := New("")
+	if client.BaseURL != "http://localhost:8765" {
+		t.Fatalf("base url = %q, want http://localhost:8765", client.BaseURL)
+	}
+}
+
 func TestLoginReturnsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

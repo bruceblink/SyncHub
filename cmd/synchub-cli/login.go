@@ -35,6 +35,35 @@ func runLogin(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if err != nil {
 		return err
 	}
+	return writeAuthConfig(stdout, *configPath, apiClient, data, "logged in as")
+}
+
+func runRegister(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("register", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	serverURL := fs.String("server", envOrDefault("SYNCHUB_SERVER", defaultServerURL), "SyncHub API server URL")
+	email := fs.String("email", os.Getenv("SYNCHUB_EMAIL"), "register email")
+	password := fs.String("password", os.Getenv("SYNCHUB_PASSWORD"), "register password")
+	configPath := fs.String("config", defaultConfigPath(), "config file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*email) == "" {
+		return errors.New("email is required")
+	}
+	if *password == "" {
+		return errors.New("password is required")
+	}
+
+	apiClient := client.New(*serverURL)
+	data, err := apiClient.Register(ctx, *email, *password)
+	if err != nil {
+		return err
+	}
+	return writeAuthConfig(stdout, *configPath, apiClient, data, "registered as")
+}
+
+func writeAuthConfig(stdout io.Writer, configPath string, apiClient *client.Client, data client.LoginData, successPrefix string) error {
 	now := time.Now().UTC()
 	cfg := cliConfig{
 		ServerURL:            apiClient.BaseURL,
@@ -43,10 +72,10 @@ func runLogin(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		AccessTokenExpiresAt: data.Tokens.AccessTokenExpiresAt(now),
 		UpdatedAt:            now,
 	}
-	if err := writeConfig(*configPath, cfg); err != nil {
+	if err := writeConfig(configPath, cfg); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "logged in as %s\n", data.User.Email)
-	fmt.Fprintf(stdout, "config: %s\n", *configPath)
+	fmt.Fprintf(stdout, "%s %s\n", successPrefix, data.User.Email)
+	fmt.Fprintf(stdout, "config: %s\n", configPath)
 	return nil
 }

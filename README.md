@@ -43,3 +43,43 @@ Agent -> REST API -> SyncHub Server -> Storage
 ## Roadmap
 
 See docs/roadmap/ROADMAP.md
+
+## MVP Quick Start
+
+Run the API server with the default SQLite database and local file storage:
+
+```bash
+go run ./cmd/synchub-api
+```
+
+The server listens on `http://localhost:8765` by default.
+
+Useful endpoints:
+
+- `GET /healthz`
+- `GET /readyz`
+- `GET /swagger/`
+- `GET /swagger/openapi.yaml`
+
+Run the MVP checks:
+
+```bash
+go fmt ./...
+go vet ./...
+go test ./...
+```
+
+Minimal CLI flow:
+
+```bash
+go run ./cmd/synchub-cli register --server http://localhost:8765 --email user@example.com --password password
+go run ./cmd/synchub-cli workspace init --path . --remote-path /workspace
+go run ./cmd/synchub-cli sync once --path .
+go run ./cmd/synchub-cli sync status --path .
+```
+
+For a containerized local server:
+
+```bash
+docker compose up --build
+```

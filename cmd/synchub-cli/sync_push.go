@@ -44,14 +44,19 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	m, err := readManifest(localManifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return errors.New("manifest is missing; run synchub-cli manifest scan first")
+			m = manifest.Manifest{
+				Version:    1,
+				Root:       root,
+				RemotePath: workspace.RemotePath,
+			}
+		} else {
+			return err
 		}
-		return err
 	}
 	if m.Root != "" && filepath.Clean(m.Root) != filepath.Clean(root) {
 		return fmt.Errorf("manifest root %s does not match workspace root %s", m.Root, root)
 	}
-	loginConfig, err := readConfig(*configPath)
+	loginConfig, err := readConfigWithRefresh(ctx, *configPath)
 	if err != nil {
 		return err
 	}

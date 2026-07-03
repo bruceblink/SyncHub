@@ -166,11 +166,28 @@ func New(baseURL string) *Client {
 	return &Client{BaseURL: normalizeBaseURL(baseURL), HTTPClient: http.DefaultClient}
 }
 
+func (c *Client) Register(ctx context.Context, email, password string) (LoginData, error) {
+	var data LoginData
+	err := c.postJSON(ctx, "/api/v1/auth/register", map[string]string{
+		"email":    email,
+		"password": password,
+	}, &data)
+	return data, err
+}
+
 func (c *Client) Login(ctx context.Context, email, password string) (LoginData, error) {
 	var data LoginData
 	err := c.postJSON(ctx, "/api/v1/auth/login", map[string]string{
 		"email":    email,
 		"password": password,
+	}, &data)
+	return data, err
+}
+
+func (c *Client) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
+	var data TokenPair
+	err := c.postJSON(ctx, "/api/v1/auth/refresh", map[string]string{
+		"refresh_token": refreshToken,
 	}, &data)
 	return data, err
 }
@@ -482,7 +499,7 @@ func (c *Client) endpoint(path string) string {
 func normalizeBaseURL(baseURL string) string {
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
-		baseURL = "http://localhost:8080"
+		baseURL = "http://localhost:8765"
 	}
 	if !strings.Contains(baseURL, "://") {
 		baseURL = "http://" + baseURL
