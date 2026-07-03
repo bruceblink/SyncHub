@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,11 +14,15 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/bruceblink/SyncHub/internal/watch"
 )
 
 const defaultAgentInterval = 30 * time.Second
+const defaultWatchInterval = time.Second
 
 var agentNow = time.Now
+var agentWatchReady = func() {}
 
 type agentOptions struct {
 	RootPath            string
@@ -26,6 +31,7 @@ type agentOptions struct {
 	ManifestPath        string
 	CLIPath             string
 	Interval            time.Duration
+	WatchInterval       time.Duration
 	DeviceName          string
 	DevicePlatform      string
 	Limit               int
@@ -33,9 +39,15 @@ type agentOptions struct {
 	Cycles              int
 	Once                bool
 	DryRun              bool
+	Watch               bool
 }
 
 type syncOnceRunner func(context.Context, agentOptions, io.Writer, io.Writer) error
+
+type agentWorkspaceConfig struct {
+	Root       string `json:"root"`
+	RemotePath string `json:"remote_path"`
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -64,26 +76,25 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 
 	fmt.Fprintf(stdout, "agent started: %s\n", opts.RootPath)
 	fmt.Fprintf(stdout, "sync interval: %s\n", opts.Interval)
-	consecutiveFailures := 0
-	cyclesRun := 0
-	var lastErr error
+	if opts.Watch {
+		return runWatchLoop(ctx, opts, stdout, stderr, runner)
+	}
+	return runPeriodicLoop(ctx, opts, stdout, stderr, runner)
+}
+
+type syncLoopState struct {
+	consecutiveFailures int
+	cyclesRun           int
+	lastErr             error
+}
+
+func runPeriodicLoop(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) error {
+	state := syncLoopState{}
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
 	for {
-		if err := runSyncCycle(ctx, opts, stdout, stderr, runner); err != nil {
-			lastErr = err
-			consecutiveFailures++
-			if shouldStopAfterFailures(opts, consecutiveFailures) {
-				return maxFailuresError(consecutiveFailures, err)
-			}
-		} else {
-			lastErr = nil
-			consecutiveFailures = 0
-		}
-		cyclesRun++
-		if shouldStopAfterCycles(opts, cyclesRun) {
-			fmt.Fprintf(stdout, "agent stopped: sync cycles reached %d\n", cyclesRun)
-			return lastErr
+		if stop, err := state.runCycle(ctx, opts, stdout, stderr, runner); stop {
+			return err
 		}
 		select {
 		case <-ctx.Done():
@@ -91,6 +102,80 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 		case <-ticker.C:
 		}
 	}
+}
+
+func runWatchLoop(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) error {
+	root, remotePath, err := loadAgentWatchTarget(opts.RootPath, opts.WorkspaceConfigPath)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "watch interval: %s\n", opts.WatchInterval)
+
+	state := syncLoopState{}
+	if stop, err := state.runCycle(ctx, opts, stdout, stderr, runner); stop {
+		return err
+	}
+	poller, err := watch.NewPoller(ctx, root, remotePath)
+	if err != nil {
+		return err
+	}
+	agentWatchReady()
+
+	syncTicker := time.NewTicker(opts.Interval)
+	defer syncTicker.Stop()
+	watchTicker := time.NewTicker(opts.WatchInterval)
+	defer watchTicker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-syncTicker.C:
+			if stop, err := state.runCycle(ctx, opts, stdout, stderr, runner); stop {
+				return err
+			}
+			if state.lastErr == nil {
+				if _, err := poller.Poll(ctx); err != nil {
+					return err
+				}
+			}
+		case <-watchTicker.C:
+			changes, err := poller.Poll(ctx)
+			if err != nil {
+				return err
+			}
+			if len(changes) == 0 {
+				continue
+			}
+			fmt.Fprintf(stdout, "local changes detected: %d\n", len(changes))
+			if stop, err := state.runCycle(ctx, opts, stdout, stderr, runner); stop {
+				return err
+			}
+			if state.lastErr == nil {
+				if _, err := poller.Poll(ctx); err != nil {
+					return err
+				}
+			}
+		}
+	}
+}
+
+func (s *syncLoopState) runCycle(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) (bool, error) {
+	if err := runSyncCycle(ctx, opts, stdout, stderr, runner); err != nil {
+		s.lastErr = err
+		s.consecutiveFailures++
+		if shouldStopAfterFailures(opts, s.consecutiveFailures) {
+			return true, maxFailuresError(s.consecutiveFailures, err)
+		}
+	} else {
+		s.lastErr = nil
+		s.consecutiveFailures = 0
+	}
+	s.cyclesRun++
+	if shouldStopAfterCycles(opts, s.cyclesRun) {
+		fmt.Fprintf(stdout, "agent stopped: sync cycles reached %d\n", s.cyclesRun)
+		return true, s.lastErr
+	}
+	return false, nil
 }
 
 func runSyncCycle(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) error {
@@ -127,6 +212,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.StringVar(&opts.ManifestPath, "manifest", "", "manifest file path")
 	fs.StringVar(&opts.CLIPath, "cli", "", "synchub-cli executable path")
 	fs.DurationVar(&opts.Interval, "interval", defaultAgentInterval, "sync interval")
+	fs.DurationVar(&opts.WatchInterval, "watch-interval", defaultWatchInterval, "local workspace polling interval when --watch is enabled")
 	fs.StringVar(&opts.DeviceName, "device-name", "", "device name")
 	fs.StringVar(&opts.DevicePlatform, "platform", "", "device platform")
 	fs.IntVar(&opts.Limit, "limit", 500, "maximum changes to pull per sync cycle")
@@ -134,6 +220,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.IntVar(&opts.Cycles, "cycles", 0, "number of sync cycles to run before exit; 0 runs until interrupted")
 	fs.BoolVar(&opts.Once, "once", false, "run one sync cycle and exit")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state; requires --once")
+	fs.BoolVar(&opts.Watch, "watch", false, "trigger sync when local workspace changes are detected")
 	if len(args) > 0 {
 		switch args[0] {
 		case "help", "-h", "--help":
@@ -159,8 +246,14 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.Once && opts.Cycles > 0 {
 		return agentOptions{}, errors.New("cycles cannot be used with --once")
 	}
+	if opts.Watch && opts.Once {
+		return agentOptions{}, errors.New("watch cannot be used with --once")
+	}
 	if opts.DryRun && !opts.Once {
 		return agentOptions{}, errors.New("dry run requires --once")
+	}
+	if opts.Watch && opts.WatchInterval <= 0 {
+		return agentOptions{}, errors.New("watch interval must be positive")
 	}
 	if strings.TrimSpace(opts.RootPath) == "" {
 		return agentOptions{}, errors.New("workspace path is required")
@@ -174,6 +267,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-agent --path . --once")
 	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run")
 	fmt.Fprintln(w, "  synchub-agent --path . --interval 30s --device-name laptop --platform windows --limit 500")
+	fmt.Fprintln(w, "  synchub-agent --path . --watch --watch-interval 1s")
 	fmt.Fprintln(w, "  synchub-agent --path . --cycles 3")
 	fmt.Fprintln(w, "  synchub-agent --path . --max-failures 5")
 }
@@ -229,6 +323,53 @@ func buildSyncOnceArgs(opts agentOptions) []string {
 		args = append(args, "--dry-run")
 	}
 	return args
+}
+
+func loadAgentWatchTarget(rootPath, workspaceConfigPath string) (string, string, error) {
+	root, err := resolveAgentRoot(rootPath)
+	if err != nil {
+		return "", "", err
+	}
+	configPath := strings.TrimSpace(workspaceConfigPath)
+	if configPath == "" {
+		configPath = filepath.Join(root, ".synchub", "workspace.json")
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", errors.New("workspace is not initialized; run synchub-cli workspace init first")
+		}
+		return "", "", err
+	}
+	var cfg agentWorkspaceConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(cfg.Root) != "" {
+		root = filepath.Clean(cfg.Root)
+	}
+	if strings.TrimSpace(cfg.RemotePath) == "" {
+		return "", "", errors.New("workspace config is incomplete; run synchub-cli workspace init again")
+	}
+	return root, cfg.RemotePath, nil
+}
+
+func resolveAgentRoot(root string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		return "", errors.New("workspace path is required")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace path is not a directory: %s", abs)
+	}
+	return filepath.Clean(abs), nil
 }
 
 func defaultConfigPath() string {

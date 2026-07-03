@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -48,11 +51,68 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 	if got.Interval != 5*time.Second {
 		t.Fatalf("interval = %s, want 5s", got.Interval)
 	}
+	if got.WatchInterval != defaultWatchInterval {
+		t.Fatalf("watch interval = %s, want default %s", got.WatchInterval, defaultWatchInterval)
+	}
 	if got.Limit != 20 {
 		t.Fatalf("limit = %d, want 20", got.Limit)
 	}
 	if got.MaxFailures != 3 {
 		t.Fatalf("max failures = %d, want 3", got.MaxFailures)
+	}
+}
+
+func TestRunWatchTriggersSyncOnLocalChanges(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+	originalWatchReady := agentWatchReady
+	defer func() { agentWatchReady = originalWatchReady }()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".synchub"), 0o755); err != nil {
+		t.Fatalf("mkdir .synchub: %v", err)
+	}
+	workspacePath := filepath.Join(root, ".synchub", "workspace.json")
+	if err := writeAgentWorkspaceConfig(workspacePath, agentWorkspaceConfig{Root: root, RemotePath: "/workspace"}); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+
+	calls := 0
+	watchReady := make(chan struct{})
+	agentWatchReady = func() { close(watchReady) }
+	var stdout bytes.Buffer
+	go func() {
+		<-watchReady
+		_ = os.WriteFile(filepath.Join(root, "created.txt"), []byte("created"), 0o644)
+	}()
+	err := run(context.Background(), []string{
+		"--path", root,
+		"--workspace-config", workspacePath,
+		"--watch",
+		"--watch-interval", "1ms",
+		"--interval", "1h",
+		"--cycles", "2",
+	}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run watch agent: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("sync calls = %d, want 2", calls)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"agent started: " + root,
+		"watch interval: 1ms",
+		"local changes detected: 1",
+		"agent stopped: sync cycles reached 2",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
 	}
 }
 
@@ -252,10 +312,24 @@ func TestParseOptionsRejectsCyclesWithOnce(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsWatchWithOnce(t *testing.T) {
+	_, err := parseOptions([]string{"--watch", "--once"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "watch cannot be used with --once") {
+		t.Fatalf("error = %v, want watch cannot be used with --once", err)
+	}
+}
+
 func TestParseOptionsRejectsDryRunWithoutOnce(t *testing.T) {
 	_, err := parseOptions([]string{"--dry-run"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "dry run requires --once") {
 		t.Fatalf("error = %v, want dry run requires --once", err)
+	}
+}
+
+func TestParseOptionsRejectsInvalidWatchInterval(t *testing.T) {
+	_, err := parseOptions([]string{"--watch", "--watch-interval", "0s"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "watch interval must be positive") {
+		t.Fatalf("error = %v, want watch interval must be positive", err)
 	}
 }
 
@@ -284,6 +358,14 @@ func TestBuildSyncOnceArgs(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %#v, want %#v", got, want)
 	}
+}
+
+func writeAgentWorkspaceConfig(path string, cfg agentWorkspaceConfig) error {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600)
 }
 
 func TestBuildSyncOnceArgsOmitsEmptyOptionalPaths(t *testing.T) {
