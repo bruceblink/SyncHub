@@ -17,6 +17,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli file versions --path . --remote-path /workspace/readme.txt")
 	fmt.Fprintln(w, "  synchub-cli file restore --path . --remote-path /workspace/readme.txt --version 1")
 	fmt.Fprintln(w, "  synchub-cli file pin --path . --remote-path /workspace/readme.txt --version 1")
+	fmt.Fprintln(w, "  synchub-cli upload status --path . --id upl_1")
 	fmt.Fprintln(w, "  synchub-cli sync once --path .")
 	fmt.Fprintln(w, "  synchub-cli sync status --path .")
 	fmt.Fprintln(w, "  synchub-cli sync status --path . --show-conflicts")
@@ -53,6 +54,11 @@ func printFileUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli file restore --path . --file-id file_1 --version 1")
 	fmt.Fprintln(w, "  synchub-cli file pin --path . --remote-path /workspace/readme.txt --version 1")
 	fmt.Fprintln(w, "  synchub-cli file unpin --path . --file-id file_1 --version 1")
+}
+
+func printUploadUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  synchub-cli upload status --path . --id upl_1")
 }
 
 func printSyncUsage(w io.Writer) {
