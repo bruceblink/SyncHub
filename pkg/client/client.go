@@ -270,9 +270,17 @@ func (c *Client) ListFileVersions(ctx context.Context, accessToken, fileID strin
 }
 
 func (c *Client) RestoreFileVersion(ctx context.Context, accessToken, fileID string, version int64) (RestoreFileVersionData, error) {
+	return c.RestoreFileVersionWithDevice(ctx, accessToken, fileID, version, "")
+}
+
+func (c *Client) RestoreFileVersionWithDevice(ctx context.Context, accessToken, fileID string, version int64, deviceID string) (RestoreFileVersionData, error) {
 	var data RestoreFileVersionData
 	path := fmt.Sprintf("/api/v1/files/%s/versions/%d/restore", url.PathEscape(fileID), version)
-	err := c.postJSONAuth(ctx, path, accessToken, map[string]any{}, nil, &data)
+	payload := map[string]any{}
+	if strings.TrimSpace(deviceID) != "" {
+		payload["device_id"] = deviceID
+	}
+	err := c.postJSONAuth(ctx, path, accessToken, payload, nil, &data)
 	return data, err
 }
 

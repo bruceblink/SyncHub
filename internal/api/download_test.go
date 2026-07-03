@@ -200,8 +200,8 @@ func (r *downloadFileRepo) UnpinFileVersion(ctx context.Context, userID, fileID 
 	return domain.FileVersion{}, errNotImplemented()
 }
 
-func (r *downloadFileRepo) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
-	_, _, _, _ = ctx, userID, fileID, version
+func (r *downloadFileRepo) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64, sourceDeviceID *string) (domain.FileNode, int64, error) {
+	_, _, _, _, _ = ctx, userID, fileID, version, sourceDeviceID
 	return domain.FileNode{}, 0, errNotImplemented()
 }
 

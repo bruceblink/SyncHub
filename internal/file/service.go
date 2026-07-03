@@ -23,7 +23,7 @@ type Repository interface {
 	ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error)
 	PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
 	UnpinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
-	RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error)
+	RestoreFileVersion(ctx context.Context, userID, fileID string, version int64, sourceDeviceID *string) (domain.FileNode, int64, error)
 	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error)
 	DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error
 	CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error)
@@ -93,7 +93,7 @@ func (s *Service) Versions(ctx context.Context, userID, fileID string, limit int
 	return s.repo.ListFileVersions(ctx, userID, fileID, limit)
 }
 
-func (s *Service) RestoreVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
+func (s *Service) RestoreVersion(ctx context.Context, userID, fileID string, version int64, sourceDeviceID *string) (domain.FileNode, int64, error) {
 	if strings.TrimSpace(fileID) == "" {
 		return domain.FileNode{}, 0, domain.E(domain.CodeInvalidArgument, "file id is required", nil)
 	}
@@ -107,7 +107,7 @@ func (s *Service) RestoreVersion(ctx context.Context, userID, fileID string, ver
 	if node.NodeType != domain.NodeTypeFile {
 		return domain.FileNode{}, 0, domain.E(domain.CodeInvalidArgument, "only files can be restored", nil)
 	}
-	return s.repo.RestoreFileVersion(ctx, userID, fileID, version)
+	return s.repo.RestoreFileVersion(ctx, userID, fileID, version, cleanOptionalString(sourceDeviceID))
 }
 
 func (s *Service) PinVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error) {

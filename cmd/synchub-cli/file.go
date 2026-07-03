@@ -268,7 +268,7 @@ func runFileRestore(ctx context.Context, args []string, stdout, stderr io.Writer
 		return err
 	}
 
-	restored, err := session.apiClient.RestoreFileVersion(ctx, session.accessToken, id, parsedVersion)
+	restored, err := session.apiClient.RestoreFileVersionWithDevice(ctx, session.accessToken, id, parsedVersion, session.workspace.DeviceID)
 	if err != nil {
 		return err
 	}

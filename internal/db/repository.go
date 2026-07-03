@@ -235,7 +235,7 @@ func (r *Repository) UnpinFileVersion(ctx context.Context, userID, fileID string
 	return unpinned, wrapNotFound(err, "file version not found")
 }
 
-func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
+func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64, sourceDeviceID *string) (domain.FileNode, int64, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return domain.FileNode{}, 0, wrapDBErr(err)
@@ -279,7 +279,7 @@ func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID stri
 	if err != nil {
 		return domain.FileNode{}, 0, wrapDBErr(err)
 	}
-	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil, nil)
+	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil, sourceDeviceID)
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}

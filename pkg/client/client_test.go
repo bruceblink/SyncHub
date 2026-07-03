@@ -319,12 +319,21 @@ func TestRestoreFileVersion(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
 			t.Fatalf("authorization = %q", got)
 		}
+		var req struct {
+			DeviceID string `json:"device_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode restore request: %v", err)
+		}
+		if req.DeviceID != "dev_1" {
+			t.Fatalf("device id = %q", req.DeviceID)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file":{"id":"file_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":6,"sha256":"sha2","version":4,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:03:00Z"},"change_id":9}}`))
 	}))
 	defer server.Close()
 
-	restored, err := New(server.URL).RestoreFileVersion(context.Background(), "access-token", "file_1", 2)
+	restored, err := New(server.URL).RestoreFileVersionWithDevice(context.Background(), "access-token", "file_1", 2, "dev_1")
 	if err != nil {
 		t.Fatalf("restore file version: %v", err)
 	}

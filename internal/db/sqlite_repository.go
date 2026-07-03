@@ -310,7 +310,7 @@ func (r *SQLiteRepository) UnpinFileVersion(ctx context.Context, userID, fileID 
 	return r.getFileVersion(ctx, userID, fileID, version)
 }
 
-func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
+func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64, sourceDeviceID *string) (domain.FileNode, int64, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return domain.FileNode{}, 0, wrapSQLiteDBErr(err)
@@ -357,7 +357,7 @@ func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileI
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}
-	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil, nil)
+	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil, sourceDeviceID)
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}

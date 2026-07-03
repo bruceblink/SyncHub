@@ -277,12 +277,21 @@ func (s *Server) listFileVersions(c *gin.Context) {
 }
 
 func (s *Server) restoreFileVersion(c *gin.Context) {
+	var req struct {
+		DeviceID string `json:"device_id"`
+	}
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+			return
+		}
+	}
 	version, err := parsePositiveInt64Param(c, "version")
 	if err != nil {
 		fail(c, err)
 		return
 	}
-	node, changeID, err := s.files.RestoreVersion(c.Request.Context(), userID(c), c.Param("id"), version)
+	node, changeID, err := s.files.RestoreVersion(c.Request.Context(), userID(c), c.Param("id"), version, optionalString(req.DeviceID))
 	if err != nil {
 		fail(c, err)
 		return

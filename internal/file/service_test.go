@@ -107,8 +107,8 @@ func (r *fakeRepo) UnpinFileVersion(ctx context.Context, userID, fileID string, 
 	return domain.FileVersion{}, nil
 }
 
-func (r *fakeRepo) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error) {
-	_, _, _, _ = ctx, userID, fileID, version
+func (r *fakeRepo) RestoreFileVersion(ctx context.Context, userID, fileID string, version int64, sourceDeviceID *string) (domain.FileNode, int64, error) {
+	_, _, _, _, _ = ctx, userID, fileID, version, sourceDeviceID
 	return domain.FileNode{}, 0, nil
 }
 

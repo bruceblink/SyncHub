@@ -293,6 +293,16 @@ paths:
           schema:
             type: integer
             minimum: 1
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_id:
+                  type: string
+                  description: Optional source device id for sync change attribution.
       responses:
         "200":
           description: Restored file metadata.

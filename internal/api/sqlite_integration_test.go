@@ -723,7 +723,9 @@ func TestSQLiteRestoreFileVersion(t *testing.T) {
 		t.Fatalf("second commit status = %d body = %s", secondCommit.Code, secondCommit.Body.String())
 	}
 
-	restoreResp := doJSON(t, server, http.MethodPost, "/api/v1/files/"+firstCommitBody.Data.FileID+"/versions/1/restore", token, map[string]any{})
+	restoreResp := doJSON(t, server, http.MethodPost, "/api/v1/files/"+firstCommitBody.Data.FileID+"/versions/1/restore", token, map[string]any{
+		"device_id": deviceBody.Data.ID,
+	})
 	if restoreResp.Code != http.StatusOK {
 		t.Fatalf("restore status = %d body = %s", restoreResp.Code, restoreResp.Body.String())
 	}
@@ -787,9 +789,10 @@ func TestSQLiteRestoreFileVersion(t *testing.T) {
 	var changesBody struct {
 		Data struct {
 			Items []struct {
-				EventType string `json:"event_type"`
-				Path      string `json:"path"`
-				Version   *int64 `json:"version"`
+				EventType      string  `json:"event_type"`
+				Path           string  `json:"path"`
+				Version        *int64  `json:"version"`
+				SourceDeviceID *string `json:"source_device_id"`
 			} `json:"items"`
 		} `json:"data"`
 	}
@@ -800,6 +803,9 @@ func TestSQLiteRestoreFileVersion(t *testing.T) {
 	last := changesBody.Data.Items[len(changesBody.Data.Items)-1]
 	if last.EventType != "restore" || last.Path != "/workspace/restore.txt" || last.Version == nil || *last.Version != 3 {
 		t.Fatalf("last change = %#v", last)
+	}
+	if last.SourceDeviceID == nil || *last.SourceDeviceID != deviceBody.Data.ID {
+		t.Fatalf("restore source device id = %#v, want %s", last.SourceDeviceID, deviceBody.Data.ID)
 	}
 }
 

@@ -1686,6 +1686,15 @@ func TestRunFileRestoreByRemotePath(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":6,"sha256":"sha2","version":2,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:02:00Z"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/file_1/versions/1/restore":
+			var req struct {
+				DeviceID string `json:"device_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode restore request: %v", err)
+			}
+			if req.DeviceID != "dev_1" {
+				t.Fatalf("restore device id = %q", req.DeviceID)
+			}
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file":{"id":"file_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":5,"sha256":"sha1","version":3,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:04:00Z"},"change_id":9}}`))
 		default:
 			t.Fatalf("request = %s %s", r.Method, r.URL.String())
@@ -1693,7 +1702,19 @@ func TestRunFileRestoreByRemotePath(t *testing.T) {
 	}))
 	defer server.Close()
 
-	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:        1,
+		Root:           root,
+		RemotePath:     "/workspace",
+		ServerURL:      server.URL,
+		UserID:         "u1",
+		UserEmail:      "user@example.com",
+		DeviceID:       "dev_1",
+		DeviceName:     "laptop",
+		DevicePlatform: "windows",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	})
 	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
 	if err := writeConfig(loginConfigPath, cliConfig{
 		ServerURL: server.URL,

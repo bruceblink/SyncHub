@@ -143,6 +143,14 @@ Request:
 
 `POST /api/v1/files/{file_id}/versions/{version}/restore`
 
+Request:
+
+```json
+{
+  "device_id": "dev_..."
+}
+```
+
 ### Pin / Unpin 版本
 
 ```text
