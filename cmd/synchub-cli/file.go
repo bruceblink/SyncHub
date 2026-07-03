@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ func runFile(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	switch args[0] {
 	case "versions":
 		return runFileVersions(ctx, args[1:], stdout, stderr)
+	case "restore":
+		return runFileRestore(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printFileUsage(stdout)
 		return nil
@@ -82,6 +85,64 @@ func runFileVersions(ctx context.Context, args []string, stdout, stderr io.Write
 		return err
 	}
 	printFileVersions(stdout, remote, id, versions.Items)
+	return nil
+}
+
+func runFileRestore(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("file restore", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	remotePath := fs.String("remote-path", "", "remote file path")
+	fileID := fs.String("file-id", "", "remote file id")
+	version := fs.String("version", "", "version number to restore")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	parsedVersion, err := strconv.ParseInt(strings.TrimSpace(*version), 10, 64)
+	if err != nil || parsedVersion <= 0 {
+		return errors.New("version must be a positive integer")
+	}
+	id := strings.TrimSpace(*fileID)
+	remote := strings.TrimSpace(*remotePath)
+	if id == "" && remote == "" {
+		return errors.New("remote path or file id is required")
+	}
+
+	_, workspace, _, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+	if err != nil {
+		return err
+	}
+	loginConfig, err := readConfigWithRefresh(ctx, *configPath)
+	if err != nil {
+		return err
+	}
+	serverURL := workspace.ServerURL
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = loginConfig.ServerURL
+	}
+
+	apiClient := client.New(serverURL)
+	if id == "" {
+		normalized, err := normalizeRemotePath(remote)
+		if err != nil {
+			return err
+		}
+		node, err := apiClient.GetFileByPath(ctx, loginConfig.Tokens.AccessToken, normalized)
+		if err != nil {
+			return err
+		}
+		id = node.ID
+	}
+
+	restored, err := apiClient.RestoreFileVersion(ctx, loginConfig.Tokens.AccessToken, id, parsedVersion)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "restored: %s\n", restored.File.Path)
+	fmt.Fprintf(stdout, "version: %d\n", restored.File.Version)
+	fmt.Fprintf(stdout, "change id: %d\n", restored.ChangeID)
 	return nil
 }
 
