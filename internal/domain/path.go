@@ -13,15 +13,17 @@ func NormalizePath(p string) (string, error) {
 	if strings.ContainsRune(p, 0) {
 		return "", E(CodeInvalidArgument, "path contains null byte", nil)
 	}
+	for _, segment := range strings.Split(p, "/") {
+		if segment == ".." {
+			return "", E(CodeInvalidArgument, "path traversal is not allowed", nil)
+		}
+	}
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}
 	cleaned := path.Clean(p)
 	if cleaned == "." {
 		cleaned = "/"
-	}
-	if strings.Contains(cleaned, "/../") || cleaned == "/.." {
-		return "", E(CodeInvalidArgument, "path traversal is not allowed", nil)
 	}
 	return cleaned, nil
 }
