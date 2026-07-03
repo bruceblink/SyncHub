@@ -69,6 +69,7 @@ create table if not exists upload_sessions (
     staging_key text not null,
     expires_at datetime not null,
     idempotency_key text,
+    source_device_id text,
     created_at datetime not null default current_timestamp,
     updated_at datetime not null default current_timestamp
 );

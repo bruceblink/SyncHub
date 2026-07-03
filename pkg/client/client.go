@@ -67,6 +67,7 @@ type InitUploadRequest struct {
 	SHA256      string `json:"sha256"`
 	ChunkSize   int64  `json:"chunk_size,omitempty"`
 	BaseVersion *int64 `json:"base_version,omitempty"`
+	DeviceID    string `json:"device_id,omitempty"`
 }
 
 type UploadSession struct {

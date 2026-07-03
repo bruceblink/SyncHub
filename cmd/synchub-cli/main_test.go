@@ -870,7 +870,7 @@ func TestRunSyncPushUploadsManifestFiles(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode init upload request: %v", err)
 			}
-			if req.Path != "/workspace/nested/a.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) {
+			if req.Path != "/workspace/nested/a.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) || req.DeviceID != "dev_1" {
 				t.Fatalf("unexpected init upload request: %#v", req)
 			}
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_1","path":"/workspace/nested/a.txt","chunk_size":3,"expires_at":"2026-06-30T00:00:00Z","status":"pending","uploaded_chunks":[]}}`))
@@ -900,6 +900,7 @@ func TestRunSyncPushUploadsManifestFiles(t *testing.T) {
 		ServerURL:  server.URL,
 		UserID:     "u1",
 		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
 	}, 0o600); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
@@ -1244,6 +1245,19 @@ func TestRunSyncOncePushesAndPulls(t *testing.T) {
 	}
 	if _, err := readManifest(filepath.Join(root, ".synchub", "manifest.json")); err != nil {
 		t.Fatalf("read manifest after sync once: %v", err)
+	}
+}
+
+func TestSyncPullIdentifiesOwnChangeEvent(t *testing.T) {
+	source := "dev_1"
+	if !isOwnChangeEvent(workspaceConfig{DeviceID: "dev_1"}, client.ChangeEvent{SourceDeviceID: &source}) {
+		t.Fatal("expected event from the same device to be identified as own change")
+	}
+	if isOwnChangeEvent(workspaceConfig{DeviceID: "dev_2"}, client.ChangeEvent{SourceDeviceID: &source}) {
+		t.Fatal("event from another device should not be identified as own change")
+	}
+	if isOwnChangeEvent(workspaceConfig{DeviceID: "dev_1"}, client.ChangeEvent{}) {
+		t.Fatal("event without source device should not be identified as own change")
 	}
 }
 

@@ -152,7 +152,7 @@ func (r *SQLiteRepository) CreateDirectory(ctx context.Context, userID, path, na
 	if err != nil {
 		return domain.FileNode{}, wrapSQLiteDBErr(err)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventCreate, nil, path, nil)
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventCreate, nil, path, nil, nil)
 	return node, wrapSQLiteDBErr(err)
 }
 
@@ -332,7 +332,7 @@ func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileI
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}
-	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil)
+	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil, nil)
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}
@@ -362,7 +362,7 @@ func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath
 	if err != nil {
 		return domain.FileNode{}, err
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path)
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, nil)
 	return node, wrapSQLiteDBErr(err)
 }
 
@@ -383,7 +383,7 @@ func (r *SQLiteRepository) DeleteFile(ctx context.Context, userID, fileID string
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return domain.E(domain.CodeFileNotFound, "file not found", nil)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path)
+	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path, nil)
 	return wrapSQLiteDBErr(err)
 }
 
@@ -401,9 +401,9 @@ func (r *SQLiteRepository) CreateUploadSession(ctx context.Context, s domain.Upl
 	s.CreatedAt = now
 	s.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, `
-		insert into upload_sessions (id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at)
-		values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, s.ID, s.UserID, s.TargetPath, s.TargetFileID, s.BaseVersion, s.TotalSize, s.ChunkSize, s.SHA256, s.Status, s.StagingKey, s.ExpiresAt, s.IdempotencyKey, s.CreatedAt, s.UpdatedAt)
+		insert into upload_sessions (id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at)
+		values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, s.ID, s.UserID, s.TargetPath, s.TargetFileID, s.BaseVersion, s.TotalSize, s.ChunkSize, s.SHA256, s.Status, s.StagingKey, s.ExpiresAt, s.IdempotencyKey, s.SourceDeviceID, s.CreatedAt, s.UpdatedAt)
 	if isSQLiteUniqueViolation(err) && s.IdempotencyKey != nil {
 		return r.getUploadSessionByIdempotencyKey(ctx, s.UserID, *s.IdempotencyKey)
 	}
@@ -413,7 +413,7 @@ func (r *SQLiteRepository) CreateUploadSession(ctx context.Context, s domain.Upl
 func (r *SQLiteRepository) GetUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error) {
 	var s domain.UploadSession
 	err := r.db.QueryRowContext(ctx, `
-		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at
 		from upload_sessions
 		where user_id = ? and id = ?
 	`, userID, uploadID).Scan(uploadSessionScan(&s)...)
@@ -477,7 +477,7 @@ func (r *SQLiteRepository) DeleteExpiredFileVersions(ctx context.Context, cutoff
 func (r *SQLiteRepository) getUploadSessionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.UploadSession, error) {
 	var s domain.UploadSession
 	err := r.db.QueryRowContext(ctx, `
-		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at
 		from upload_sessions
 		where user_id = ? and idempotency_key = ?
 	`, userID, idempotencyKey).Scan(uploadSessionScan(&s)...)
@@ -568,7 +568,7 @@ func (r *SQLiteRepository) CommitUpload(ctx context.Context, userID, uploadID, s
 
 	var s domain.UploadSession
 	err = tx.QueryRowContext(ctx, `
-		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at
 		from upload_sessions
 		where user_id = ? and id = ?
 	`, userID, uploadID).Scan(uploadSessionScan(&s)...)
@@ -627,9 +627,9 @@ func (r *SQLiteRepository) CommitUpload(ctx context.Context, userID, uploadID, s
 		newVersion := existing.Version + 1
 		versionID := uuid.NewString()
 		_, err = tx.ExecContext(ctx, `
-			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key, created_at)
-			values (?, ?, ?, ?, ?, ?, ?, ?)
-		`, versionID, existing.ID, userID, newVersion, s.TotalSize, s.SHA256, storageKey, now)
+			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id, created_at)
+			values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, versionID, existing.ID, userID, newVersion, s.TotalSize, s.SHA256, storageKey, s.SourceDeviceID, now)
 		if err != nil {
 			return domain.FileNode{}, 0, wrapSQLiteDBErr(err)
 		}
@@ -657,9 +657,9 @@ func (r *SQLiteRepository) CommitUpload(ctx context.Context, userID, uploadID, s
 			return domain.FileNode{}, 0, wrapSQLiteDBErr(err)
 		}
 		_, err = tx.ExecContext(ctx, `
-			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key, created_at)
-			values (?, ?, ?, 1, ?, ?, ?, ?)
-		`, versionID, fileID, userID, s.TotalSize, s.SHA256, storageKey, now)
+			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id, created_at)
+			values (?, ?, ?, 1, ?, ?, ?, ?, ?)
+		`, versionID, fileID, userID, s.TotalSize, s.SHA256, storageKey, s.SourceDeviceID, now)
 		if err != nil {
 			return domain.FileNode{}, 0, wrapSQLiteDBErr(err)
 		}
@@ -668,7 +668,7 @@ func (r *SQLiteRepository) CommitUpload(ctx context.Context, userID, uploadID, s
 			return domain.FileNode{}, 0, err
 		}
 	}
-	changeID, err := r.createChangeEvent(ctx, tx, userID, node.ID, eventType, &node.Version, node.Path, nil)
+	changeID, err := r.createChangeEvent(ctx, tx, userID, node.ID, eventType, &node.Version, node.Path, nil, s.SourceDeviceID)
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}
@@ -917,19 +917,19 @@ func (r *SQLiteRepository) getFileByPathTx(ctx context.Context, tx *sql.Tx, user
 	return node, wrapSQLiteNotFound(err, "file not found")
 }
 
-func (r *SQLiteRepository) createChangeEvent(ctx context.Context, tx *sql.Tx, userID, fileID, eventType string, version *int64, path string, oldPath *string) (int64, error) {
+func (r *SQLiteRepository) createChangeEvent(ctx context.Context, tx *sql.Tx, userID, fileID, eventType string, version *int64, path string, oldPath, sourceDeviceID *string) (int64, error) {
 	query := `
-		insert into change_events (user_id, file_id, event_type, version, path, old_path, created_at)
-		values (?, ?, ?, ?, ?, ?, ?)
+		insert into change_events (user_id, file_id, event_type, version, path, old_path, source_device_id, created_at)
+		values (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	var (
 		result sql.Result
 		err    error
 	)
 	if tx != nil {
-		result, err = tx.ExecContext(ctx, query, userID, fileID, eventType, version, path, oldPath, time.Now().UTC())
+		result, err = tx.ExecContext(ctx, query, userID, fileID, eventType, version, path, oldPath, sourceDeviceID, time.Now().UTC())
 	} else {
-		result, err = r.db.ExecContext(ctx, query, userID, fileID, eventType, version, path, oldPath, time.Now().UTC())
+		result, err = r.db.ExecContext(ctx, query, userID, fileID, eventType, version, path, oldPath, sourceDeviceID, time.Now().UTC())
 	}
 	if err != nil {
 		return 0, wrapSQLiteDBErr(err)
@@ -943,11 +943,21 @@ func ensureSQLiteSchemaUpgrades(ctx context.Context, conn *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	if hasPinnedAt {
-		return nil
+	if !hasPinnedAt {
+		if _, err := conn.ExecContext(ctx, "alter table file_versions add column pinned_at datetime"); err != nil {
+			return err
+		}
 	}
-	_, err = conn.ExecContext(ctx, "alter table file_versions add column pinned_at datetime")
-	return err
+	hasSourceDeviceID, err := sqliteColumnExists(ctx, conn, "upload_sessions", "source_device_id")
+	if err != nil {
+		return err
+	}
+	if !hasSourceDeviceID {
+		if _, err := conn.ExecContext(ctx, "alter table upload_sessions add column source_device_id text"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func sqliteColumnExists(ctx context.Context, conn *sql.DB, table, column string) (bool, error) {

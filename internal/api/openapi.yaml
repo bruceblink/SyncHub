@@ -760,6 +760,10 @@ components:
         base_version:
           type: integer
           nullable: true
+        device_id:
+          type: string
+          description: Optional source device id used to mark generated change events.
+          nullable: true
     UploadSession:
       type: object
       properties:

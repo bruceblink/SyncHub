@@ -330,12 +330,13 @@ func (s *Server) initUpload(c *gin.Context) {
 		SHA256      string `json:"sha256"`
 		ChunkSize   int64  `json:"chunk_size"`
 		BaseVersion *int64 `json:"base_version"`
+		DeviceID    string `json:"device_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
 		return
 	}
-	session, err := s.files.InitUpload(c.Request.Context(), userID(c), req.Path, req.Size, req.SHA256, req.ChunkSize, req.BaseVersion, c.GetHeader("Idempotency-Key"))
+	session, err := s.files.InitUpload(c.Request.Context(), userID(c), req.Path, req.Size, req.SHA256, req.ChunkSize, req.BaseVersion, c.GetHeader("Idempotency-Key"), req.DeviceID)
 	if err != nil {
 		fail(c, err)
 		return

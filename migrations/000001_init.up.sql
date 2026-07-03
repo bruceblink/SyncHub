@@ -72,6 +72,7 @@ create table upload_sessions (
     staging_key text not null,
     expires_at timestamptz not null,
     idempotency_key text,
+    source_device_id uuid,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );

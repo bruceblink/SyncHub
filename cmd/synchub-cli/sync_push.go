@@ -171,7 +171,7 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 }
 
 func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace workspaceConfig, item manifest.Entry, createdDirs map[string]struct{}) (pushManifestResult, error) {
-	version, err := uploadManifestEntry(ctx, apiClient, accessToken, root, item, createdDirs)
+	version, err := uploadManifestEntry(ctx, apiClient, accessToken, root, workspace, item, createdDirs)
 	if err != nil {
 		if !isAPIErrorCode(err, "FILE_CONFLICT") {
 			return pushManifestResult{}, err
@@ -179,7 +179,7 @@ func pushManifestEntry(ctx context.Context, apiClient *client.Client, accessToke
 		conflictItem := item
 		conflictItem.Path = conflictRemotePath(item.Path, conflictDeviceLabel(workspace), syncPushNow().UTC())
 		conflictItem.RemoteVersion = nil
-		if _, err := uploadManifestEntry(ctx, apiClient, accessToken, root, conflictItem, createdDirs); err != nil {
+		if _, err := uploadManifestEntry(ctx, apiClient, accessToken, root, workspace, conflictItem, createdDirs); err != nil {
 			return pushManifestResult{}, fmt.Errorf("upload conflict copy for %s: %w", item.Path, err)
 		}
 		return pushManifestResult{conflictKept: true}, nil
@@ -329,7 +329,7 @@ func deleteManifestEntry(ctx context.Context, apiClient *client.Client, accessTo
 	return nil
 }
 
-func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, item manifest.Entry, createdDirs map[string]struct{}) (int64, error) {
+func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace workspaceConfig, item manifest.Entry, createdDirs map[string]struct{}) (int64, error) {
 	localPath := filepath.Join(root, filepath.FromSlash(item.RelativePath))
 	if err := ensureRemoteDirectories(ctx, apiClient, accessToken, item.Path, createdDirs); err != nil {
 		return 0, err
@@ -339,6 +339,7 @@ func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessTo
 		Size:        item.Size,
 		SHA256:      item.SHA256,
 		BaseVersion: item.RemoteVersion,
+		DeviceID:    workspace.DeviceID,
 	}, uploadIdempotencyKey(item))
 	if err != nil {
 		return 0, err

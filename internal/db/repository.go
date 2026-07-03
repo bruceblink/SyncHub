@@ -110,7 +110,7 @@ func (r *Repository) CreateDirectory(ctx context.Context, userID, path, name str
 	if err != nil {
 		return domain.FileNode{}, wrapDBErr(err)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventCreate, nil, path, nil)
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventCreate, nil, path, nil, nil)
 	return node, wrapDBErr(err)
 }
 
@@ -260,7 +260,7 @@ func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID stri
 	if err != nil {
 		return domain.FileNode{}, 0, wrapDBErr(err)
 	}
-	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil)
+	changeID, err := r.createChangeEvent(ctx, tx, userID, fileID, domain.EventRestore, &restored.Version, restored.Path, nil, nil)
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}
@@ -285,7 +285,7 @@ func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newN
 	if err != nil {
 		return domain.FileNode{}, wrapNotFound(err, "file not found")
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path)
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, nil)
 	return node, wrapDBErr(err)
 }
 
@@ -305,7 +305,7 @@ func (r *Repository) DeleteFile(ctx context.Context, userID, fileID string) erro
 	if tag.RowsAffected() == 0 {
 		return domain.E(domain.CodeFileNotFound, "file not found", nil)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path)
+	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path, nil)
 	return wrapDBErr(err)
 }
 
@@ -320,10 +320,10 @@ func (r *Repository) CreateUploadSession(ctx context.Context, s domain.UploadSes
 		s.Status = domain.UploadStatusPending
 	}
 	err := r.pool.QueryRow(ctx, `
-		insert into upload_sessions (id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key)
-		values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-		returning id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
-	`, s.ID, s.UserID, s.TargetPath, s.TargetFileID, s.BaseVersion, s.TotalSize, s.ChunkSize, s.SHA256, s.Status, s.StagingKey, s.ExpiresAt, s.IdempotencyKey).Scan(uploadSessionScan(&s)...)
+		insert into upload_sessions (id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id)
+		values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		returning id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at
+	`, s.ID, s.UserID, s.TargetPath, s.TargetFileID, s.BaseVersion, s.TotalSize, s.ChunkSize, s.SHA256, s.Status, s.StagingKey, s.ExpiresAt, s.IdempotencyKey, s.SourceDeviceID).Scan(uploadSessionScan(&s)...)
 	if isUniqueViolation(err) && s.IdempotencyKey != nil {
 		return r.getUploadSessionByIdempotencyKey(ctx, s.UserID, *s.IdempotencyKey)
 	}
@@ -333,7 +333,7 @@ func (r *Repository) CreateUploadSession(ctx context.Context, s domain.UploadSes
 func (r *Repository) GetUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error) {
 	var s domain.UploadSession
 	err := r.pool.QueryRow(ctx, `
-		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at
 		from upload_sessions
 		where user_id = $1 and id = $2
 	`, userID, uploadID).Scan(uploadSessionScan(&s)...)
@@ -391,7 +391,7 @@ func (r *Repository) DeleteExpiredFileVersions(ctx context.Context, cutoff time.
 func (r *Repository) getUploadSessionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.UploadSession, error) {
 	var s domain.UploadSession
 	err := r.pool.QueryRow(ctx, `
-		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at
 		from upload_sessions
 		where user_id = $1 and idempotency_key = $2
 	`, userID, idempotencyKey).Scan(uploadSessionScan(&s)...)
@@ -474,7 +474,7 @@ func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storage
 
 	var s domain.UploadSession
 	err = tx.QueryRow(ctx, `
-		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, created_at, updated_at
+		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at
 		from upload_sessions
 		where user_id = $1 and id = $2
 		for update
@@ -533,9 +533,9 @@ func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storage
 		newVersion := existing.Version + 1
 		versionID := uuid.NewString()
 		_, err = tx.Exec(ctx, `
-			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key)
-			values ($1,$2,$3,$4,$5,$6,$7)
-		`, versionID, existing.ID, userID, newVersion, s.TotalSize, s.SHA256, storageKey)
+			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id)
+			values ($1,$2,$3,$4,$5,$6,$7,$8)
+		`, versionID, existing.ID, userID, newVersion, s.TotalSize, s.SHA256, storageKey, s.SourceDeviceID)
 		if err != nil {
 			return domain.FileNode{}, 0, wrapDBErr(err)
 		}
@@ -560,9 +560,9 @@ func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storage
 			return domain.FileNode{}, 0, wrapDBErr(err)
 		}
 		_, err = tx.Exec(ctx, `
-			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key)
-			values ($1,$2,$3,1,$4,$5,$6)
-		`, versionID, fileID, userID, s.TotalSize, s.SHA256, storageKey)
+			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key, created_by_device_id)
+			values ($1,$2,$3,1,$4,$5,$6,$7)
+		`, versionID, fileID, userID, s.TotalSize, s.SHA256, storageKey, s.SourceDeviceID)
 		if err != nil {
 			return domain.FileNode{}, 0, wrapDBErr(err)
 		}
@@ -571,7 +571,7 @@ func (r *Repository) CommitUpload(ctx context.Context, userID, uploadID, storage
 			return domain.FileNode{}, 0, err
 		}
 	}
-	changeID, err := r.createChangeEvent(ctx, tx, userID, node.ID, eventType, &node.Version, node.Path, nil)
+	changeID, err := r.createChangeEvent(ctx, tx, userID, node.ID, eventType, &node.Version, node.Path, nil, s.SourceDeviceID)
 	if err != nil {
 		return domain.FileNode{}, 0, err
 	}
@@ -768,18 +768,18 @@ func (r *Repository) getFileByPathTx(ctx context.Context, tx pgx.Tx, userID, pat
 	return node, wrapNotFound(err, "file not found")
 }
 
-func (r *Repository) createChangeEvent(ctx context.Context, tx pgx.Tx, userID, fileID, eventType string, version *int64, path string, oldPath *string) (int64, error) {
+func (r *Repository) createChangeEvent(ctx context.Context, tx pgx.Tx, userID, fileID, eventType string, version *int64, path string, oldPath, sourceDeviceID *string) (int64, error) {
 	query := `
-		insert into change_events (user_id, file_id, event_type, version, path, old_path)
-		values ($1,$2,$3,$4,$5,$6)
+		insert into change_events (user_id, file_id, event_type, version, path, old_path, source_device_id)
+		values ($1,$2,$3,$4,$5,$6,$7)
 		returning id
 	`
 	var id int64
 	var err error
 	if tx != nil {
-		err = tx.QueryRow(ctx, query, userID, fileID, eventType, version, path, oldPath).Scan(&id)
+		err = tx.QueryRow(ctx, query, userID, fileID, eventType, version, path, oldPath, sourceDeviceID).Scan(&id)
 	} else {
-		err = r.pool.QueryRow(ctx, query, userID, fileID, eventType, version, path, oldPath).Scan(&id)
+		err = r.pool.QueryRow(ctx, query, userID, fileID, eventType, version, path, oldPath, sourceDeviceID).Scan(&id)
 	}
 	return id, wrapDBErr(err)
 }
@@ -793,7 +793,7 @@ func fileVersionScan(v *domain.FileVersion) []any {
 }
 
 func uploadSessionScan(s *domain.UploadSession) []any {
-	return []any{&s.ID, &s.UserID, &s.TargetPath, &s.TargetFileID, &s.BaseVersion, &s.TotalSize, &s.ChunkSize, &s.SHA256, &s.Status, &s.StagingKey, &s.ExpiresAt, &s.IdempotencyKey, &s.CreatedAt, &s.UpdatedAt}
+	return []any{&s.ID, &s.UserID, &s.TargetPath, &s.TargetFileID, &s.BaseVersion, &s.TotalSize, &s.ChunkSize, &s.SHA256, &s.Status, &s.StagingKey, &s.ExpiresAt, &s.IdempotencyKey, &s.SourceDeviceID, &s.CreatedAt, &s.UpdatedAt}
 }
 
 func deviceScan(d *domain.Device) []any {

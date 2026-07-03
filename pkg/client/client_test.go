@@ -354,7 +354,7 @@ func TestInitUpload(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.Path != "/workspace/a.txt" || req.Size != 5 || req.SHA256 != "hash" || req.ChunkSize != 2 {
+		if req.Path != "/workspace/a.txt" || req.Size != 5 || req.SHA256 != "hash" || req.ChunkSize != 2 || req.DeviceID != "dev_1" {
 			t.Fatalf("unexpected request body: %#v", req)
 		}
 
@@ -368,6 +368,7 @@ func TestInitUpload(t *testing.T) {
 		Size:      5,
 		SHA256:    "hash",
 		ChunkSize: 2,
+		DeviceID:  "dev_1",
 	}, "upload-1")
 	if err != nil {
 		t.Fatalf("init upload: %v", err)

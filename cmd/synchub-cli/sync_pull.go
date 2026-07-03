@@ -77,6 +77,9 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	files, dirs, deleted, moved, conflictKept := 0, 0, 0, 0, 0
 	for _, event := range changes.Items {
+		if isOwnChangeEvent(workspace, event) {
+			continue
+		}
 		result, err := applyChangeEvent(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, event, previousEntries)
 		if err != nil {
 			return err
@@ -118,6 +121,10 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	fmt.Fprintf(stdout, "cursor: %d\n", workspace.LastAppliedChangeID)
 	return nil
+}
+
+func isOwnChangeEvent(workspace workspaceConfig, event client.ChangeEvent) bool {
+	return strings.TrimSpace(workspace.DeviceID) != "" && event.SourceDeviceID != nil && *event.SourceDeviceID == workspace.DeviceID
 }
 
 func readPullManifest(root, manifestPath string) (manifest.Manifest, error) {

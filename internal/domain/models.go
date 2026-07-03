@@ -63,6 +63,7 @@ type UploadSession struct {
 	StagingKey     string
 	ExpiresAt      time.Time
 	IdempotencyKey *string
+	SourceDeviceID *string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }

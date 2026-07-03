@@ -79,6 +79,7 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 		"size":       len(content),
 		"sha256":     sha,
 		"chunk_size": len(content),
+		"device_id":  deviceBody.Data.ID,
 	})
 	if uploadResp.Code != http.StatusCreated {
 		t.Fatalf("init upload status = %d body = %s", uploadResp.Code, uploadResp.Body.String())
@@ -115,9 +116,10 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 	var changesBody struct {
 		Data struct {
 			Items []struct {
-				ID        int64  `json:"id"`
-				EventType string `json:"event_type"`
-				Path      string `json:"path"`
+				ID             int64   `json:"id"`
+				EventType      string  `json:"event_type"`
+				Path           string  `json:"path"`
+				SourceDeviceID *string `json:"source_device_id"`
 			} `json:"items"`
 			NextCursor int64 `json:"next_cursor"`
 		} `json:"data"`
@@ -131,6 +133,9 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 	}
 	if changesBody.Data.Items[1].EventType != "create" || changesBody.Data.Items[1].Path != "/workspace/sync.txt" {
 		t.Fatalf("file change = %#v", changesBody.Data.Items[1])
+	}
+	if changesBody.Data.Items[1].SourceDeviceID == nil || *changesBody.Data.Items[1].SourceDeviceID != deviceBody.Data.ID {
+		t.Fatalf("file change source device = %#v, want %s", changesBody.Data.Items[1].SourceDeviceID, deviceBody.Data.ID)
 	}
 	if changesBody.Data.NextCursor == 0 {
 		t.Fatalf("missing next cursor: %#v", changesBody.Data)
