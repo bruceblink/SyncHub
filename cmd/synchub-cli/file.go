@@ -23,6 +23,10 @@ func runFile(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runFileVersions(ctx, args[1:], stdout, stderr)
 	case "restore":
 		return runFileRestore(ctx, args[1:], stdout, stderr)
+	case "pin":
+		return runFilePin(ctx, args[1:], stdout, stderr, true)
+	case "unpin":
+		return runFilePin(ctx, args[1:], stdout, stderr, false)
 	case "help", "-h", "--help":
 		printFileUsage(stdout)
 		return nil
@@ -47,40 +51,16 @@ func runFileVersions(ctx context.Context, args []string, stdout, stderr io.Write
 	if *limit <= 0 {
 		return errors.New("limit must be positive")
 	}
-	id := strings.TrimSpace(*fileID)
-	remote := strings.TrimSpace(*remotePath)
-	if id == "" && remote == "" {
-		return errors.New("remote path or file id is required")
-	}
-
-	_, workspace, _, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
 	if err != nil {
 		return err
 	}
-	loginConfig, err := readConfigWithRefresh(ctx, *configPath)
+	id, remote, err := session.resolveFileID(ctx, *fileID, *remotePath)
 	if err != nil {
 		return err
 	}
-	serverURL := workspace.ServerURL
-	if strings.TrimSpace(serverURL) == "" {
-		serverURL = loginConfig.ServerURL
-	}
 
-	apiClient := client.New(serverURL)
-	if id == "" {
-		normalized, err := normalizeRemotePath(remote)
-		if err != nil {
-			return err
-		}
-		node, err := apiClient.GetFileByPath(ctx, loginConfig.Tokens.AccessToken, normalized)
-		if err != nil {
-			return err
-		}
-		id = node.ID
-		remote = node.Path
-	}
-
-	versions, err := apiClient.ListFileVersions(ctx, loginConfig.Tokens.AccessToken, id, int32(*limit))
+	versions, err := session.apiClient.ListFileVersions(ctx, session.accessToken, id, int32(*limit))
 	if err != nil {
 		return err
 	}
@@ -100,43 +80,20 @@ func runFileRestore(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	parsedVersion, err := strconv.ParseInt(strings.TrimSpace(*version), 10, 64)
-	if err != nil || parsedVersion <= 0 {
-		return errors.New("version must be a positive integer")
-	}
-	id := strings.TrimSpace(*fileID)
-	remote := strings.TrimSpace(*remotePath)
-	if id == "" && remote == "" {
-		return errors.New("remote path or file id is required")
-	}
-
-	_, workspace, _, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+	parsedVersion, err := parseFileVersionFlag(*version)
 	if err != nil {
 		return err
 	}
-	loginConfig, err := readConfigWithRefresh(ctx, *configPath)
+	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
 	if err != nil {
 		return err
 	}
-	serverURL := workspace.ServerURL
-	if strings.TrimSpace(serverURL) == "" {
-		serverURL = loginConfig.ServerURL
+	id, _, err := session.resolveFileID(ctx, *fileID, *remotePath)
+	if err != nil {
+		return err
 	}
 
-	apiClient := client.New(serverURL)
-	if id == "" {
-		normalized, err := normalizeRemotePath(remote)
-		if err != nil {
-			return err
-		}
-		node, err := apiClient.GetFileByPath(ctx, loginConfig.Tokens.AccessToken, normalized)
-		if err != nil {
-			return err
-		}
-		id = node.ID
-	}
-
-	restored, err := apiClient.RestoreFileVersion(ctx, loginConfig.Tokens.AccessToken, id, parsedVersion)
+	restored, err := session.apiClient.RestoreFileVersion(ctx, session.accessToken, id, parsedVersion)
 	if err != nil {
 		return err
 	}
@@ -144,6 +101,108 @@ func runFileRestore(ctx context.Context, args []string, stdout, stderr io.Writer
 	fmt.Fprintf(stdout, "version: %d\n", restored.File.Version)
 	fmt.Fprintf(stdout, "change id: %d\n", restored.ChangeID)
 	return nil
+}
+
+func runFilePin(ctx context.Context, args []string, stdout, stderr io.Writer, pin bool) error {
+	command := "file pin"
+	if !pin {
+		command = "file unpin"
+	}
+	fs := flag.NewFlagSet(command, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	remotePath := fs.String("remote-path", "", "remote file path")
+	fileID := fs.String("file-id", "", "remote file id")
+	version := fs.String("version", "", "version number to update")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	parsedVersion, err := parseFileVersionFlag(*version)
+	if err != nil {
+		return err
+	}
+	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
+	if err != nil {
+		return err
+	}
+	id, remote, err := session.resolveFileID(ctx, *fileID, *remotePath)
+	if err != nil {
+		return err
+	}
+
+	var updated client.FileVersion
+	if pin {
+		updated, err = session.apiClient.PinFileVersion(ctx, session.accessToken, id, parsedVersion)
+	} else {
+		updated, err = session.apiClient.UnpinFileVersion(ctx, session.accessToken, id, parsedVersion)
+	}
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(remote) != "" {
+		fmt.Fprintf(stdout, "file: %s\n", remote)
+	}
+	action := "pinned"
+	if !pin {
+		action = "unpinned"
+	}
+	fmt.Fprintf(stdout, "%s: %s v%d\n", action, updated.FileID, updated.Version)
+	fmt.Fprintf(stdout, "pinned at: %s\n", formatOptionalTime(updated.PinnedAt))
+	return nil
+}
+
+type fileCommandSession struct {
+	apiClient   *client.Client
+	accessToken string
+}
+
+func openFileCommandSession(ctx context.Context, rootPath, workspaceConfigPath, configPath string) (fileCommandSession, error) {
+	_, workspace, _, err := loadWorkspace(rootPath, workspaceConfigPath)
+	if err != nil {
+		return fileCommandSession{}, err
+	}
+	loginConfig, err := readConfigWithRefresh(ctx, configPath)
+	if err != nil {
+		return fileCommandSession{}, err
+	}
+	serverURL := workspace.ServerURL
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = loginConfig.ServerURL
+	}
+	return fileCommandSession{
+		apiClient:   client.New(serverURL),
+		accessToken: loginConfig.Tokens.AccessToken,
+	}, nil
+}
+
+func (s fileCommandSession) resolveFileID(ctx context.Context, fileID, remotePath string) (string, string, error) {
+	id := strings.TrimSpace(fileID)
+	remote := strings.TrimSpace(remotePath)
+	if id == "" && remote == "" {
+		return "", "", errors.New("remote path or file id is required")
+	}
+	if id != "" {
+		return id, remote, nil
+	}
+	normalized, err := normalizeRemotePath(remote)
+	if err != nil {
+		return "", "", err
+	}
+	node, err := s.apiClient.GetFileByPath(ctx, s.accessToken, normalized)
+	if err != nil {
+		return "", "", err
+	}
+	return node.ID, node.Path, nil
+}
+
+func parseFileVersionFlag(raw string) (int64, error) {
+	version, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || version <= 0 {
+		return 0, errors.New("version must be a positive integer")
+	}
+	return version, nil
 }
 
 func printFileVersions(stdout io.Writer, remotePath, fileID string, versions []client.FileVersion) {
