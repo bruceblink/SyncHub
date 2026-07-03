@@ -442,6 +442,38 @@ func (r *SQLiteRepository) ExpireUploadSessions(ctx context.Context, now time.Ti
 	return rows, wrapSQLiteDBErr(err)
 }
 
+func (r *SQLiteRepository) DeleteExpiredFileVersions(ctx context.Context, cutoff time.Time, minVersions int64, limit int32) (int64, error) {
+	if minVersions <= 0 {
+		minVersions = 20
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	result, err := r.db.ExecContext(ctx, `
+		delete from file_versions
+		where id in (
+			select id
+			from (
+				select v.id, v.pinned_at, v.created_at, n.current_version_id,
+					row_number() over (partition by v.file_id order by v.version desc) as version_rank
+				from file_versions v
+				join file_nodes n on n.id = v.file_id and n.user_id = v.user_id
+			) ranked
+			where pinned_at is null
+				and id <> current_version_id
+				and created_at < ?
+				and version_rank > ?
+			order by created_at, id
+			limit ?
+		)
+	`, cutoff, minVersions, limit)
+	if err != nil {
+		return 0, wrapSQLiteDBErr(err)
+	}
+	rows, err := result.RowsAffected()
+	return rows, wrapSQLiteDBErr(err)
+}
+
 func (r *SQLiteRepository) getUploadSessionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.UploadSession, error) {
 	var s domain.UploadSession
 	err := r.db.QueryRowContext(ctx, `

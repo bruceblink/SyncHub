@@ -242,7 +242,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - restore version API。
 - 版本 pin。
 - 版本保留策略配置。
-- 后台清理过期版本和孤儿对象。
+- 后台清理过期历史版本记录。
 
 验收标准：
 
@@ -250,6 +250,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 用户可恢复指定版本。
 - 删除 / 恢复都会产生 change event。
 - 清理任务不会删除当前版本和 pinned version。
+- 孤儿对象扫描保留在 Later，不进入当前 MVP 清理闭环。
 
 ## Later: WebDAV Adapter
 

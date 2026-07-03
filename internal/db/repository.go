@@ -359,6 +359,35 @@ func (r *Repository) ExpireUploadSessions(ctx context.Context, now time.Time, li
 	return tag.RowsAffected(), wrapDBErr(err)
 }
 
+func (r *Repository) DeleteExpiredFileVersions(ctx context.Context, cutoff time.Time, minVersions int64, limit int32) (int64, error) {
+	if minVersions <= 0 {
+		minVersions = 20
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	tag, err := r.pool.Exec(ctx, `
+		with ranked as (
+			select v.id, v.pinned_at, v.created_at, n.current_version_id,
+				row_number() over (partition by v.file_id order by v.version desc) as version_rank
+			from file_versions v
+			join file_nodes n on n.id = v.file_id and n.user_id = v.user_id
+		), candidates as (
+			select id
+			from ranked
+			where pinned_at is null
+				and id <> current_version_id
+				and created_at < $1
+				and version_rank > $2
+			order by created_at, id
+			limit $3
+		)
+		delete from file_versions
+		where id in (select id from candidates)
+	`, cutoff, minVersions, limit)
+	return tag.RowsAffected(), wrapDBErr(err)
+}
+
 func (r *Repository) getUploadSessionByIdempotencyKey(ctx context.Context, userID, idempotencyKey string) (domain.UploadSession, error) {
 	var s domain.UploadSession
 	err := r.pool.QueryRow(ctx, `

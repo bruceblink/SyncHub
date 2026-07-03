@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -37,6 +38,78 @@ func TestSQLiteExpireUploadSessions(t *testing.T) {
 	assertUploadStatus(t, repo, user.ID, expired.ID, domain.UploadStatusExpired)
 	assertUploadStatus(t, repo, user.ID, future.ID, domain.UploadStatusPending)
 	assertUploadStatus(t, repo, user.ID, committed.ID, domain.UploadStatusCommitted)
+}
+
+func TestSQLiteDeleteExpiredFileVersionsKeepsCurrentPinnedAndRecent(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "version-cleanup@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	now := time.Now().UTC()
+	fileID := "file-version-cleanup"
+	_, err = repo.db.ExecContext(ctx, `
+		insert into file_nodes (id, user_id, name, path, node_type, size, sha256, storage_key, version, created_at, updated_at)
+		values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, fileID, user.ID, "cleanup.txt", "/cleanup.txt", domain.NodeTypeFile, 5, "sha5", "objects/user/sha5", 5, now.Add(-6*time.Hour), now)
+	if err != nil {
+		t.Fatalf("insert file node: %v", err)
+	}
+	for version := int64(1); version <= 5; version++ {
+		var pinnedAt *time.Time
+		if version == 2 {
+			pinned := now.Add(-5 * time.Hour)
+			pinnedAt = &pinned
+		}
+		_, err = repo.db.ExecContext(ctx, `
+			insert into file_versions (id, file_id, user_id, version, size, sha256, storage_key, pinned_at, created_at)
+			values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, fmt.Sprintf("version-%d", version), fileID, user.ID, version, version, fmt.Sprintf("sha%d", version), fmt.Sprintf("objects/user/sha%d", version), pinnedAt, now.Add(time.Duration(-version)*time.Hour))
+		if err != nil {
+			t.Fatalf("insert file version %d: %v", version, err)
+		}
+	}
+	_, err = repo.db.ExecContext(ctx, `
+		update file_nodes
+		set current_version_id = ?, storage_key = ?, sha256 = ?
+		where id = ?
+	`, "version-5", "objects/user/sha5", "sha5", fileID)
+	if err != nil {
+		t.Fatalf("set current version: %v", err)
+	}
+
+	deleted, err := repo.DeleteExpiredFileVersions(ctx, now.Add(-30*time.Minute), 2, 100)
+	if err != nil {
+		t.Fatalf("delete expired file versions: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted versions = %d, want 2", deleted)
+	}
+
+	versions, err := repo.ListFileVersions(ctx, user.ID, fileID, 10)
+	if err != nil {
+		t.Fatalf("list file versions: %v", err)
+	}
+	got := make([]int64, 0, len(versions))
+	for _, version := range versions {
+		got = append(got, version.Version)
+	}
+	want := []int64{5, 4, 2}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("remaining versions = %v, want %v", got, want)
+	}
+	if versions[0].PinnedAt != nil {
+		t.Fatalf("current version unexpectedly pinned: %#v", versions[0])
+	}
+	if versions[2].Version != 2 || versions[2].PinnedAt == nil {
+		t.Fatalf("pinned version was not preserved: %#v", versions[2])
+	}
 }
 
 func TestSQLiteSchemaIncludesSyncConflicts(t *testing.T) {

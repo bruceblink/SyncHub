@@ -59,7 +59,7 @@ Phase 1 不做内容级合并。Phase 2 使用 keep-both 默认策略：
 ## 删除语义
 
 - 删除先写入 soft delete 和 change_event。
-- Storage 对象不立即删除，等版本保留策略确认后由后台任务清理。
+- Storage 对象不立即删除；当前 MVP 先清理过期历史版本记录，孤儿对象扫描留到 Later。
 - 客户端收到 delete event 后移入本地回收区或按配置删除。
 
 ## 版本保留
@@ -71,4 +71,4 @@ Phase 1 不做内容级合并。Phase 2 使用 keep-both 默认策略：
 - 手动 pin 的版本不自动清理。
 - 可通过 `VERSION_RETENTION_MIN_VERSIONS` 和 `VERSION_RETENTION_MAX_AGE_DAYS` 调整。
 
-实际清理在 Phase 3 实现。
+Phase 3 的 worker 会清理过期历史版本记录，但不会删除当前版本、pinned version 和每个文件最新保留窗口内的版本。

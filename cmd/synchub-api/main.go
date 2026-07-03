@@ -43,6 +43,9 @@ func main() {
 	go workerService.RunUploadSessionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, 1000, func(err error) {
 		slog.Error("upload session cleanup failed", "error", err)
 	})
+	go workerService.RunFileVersionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.VersionRetention.MinVersions, cfg.VersionRetention.MaxAge, 1000, func(err error) {
+		slog.Error("file version cleanup failed", "error", err)
+	})
 
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: apiServer.Handler()}
 	go func() {
