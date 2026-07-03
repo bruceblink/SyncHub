@@ -643,6 +643,7 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 		"synchub-cli sync push --path . --dry-run",
 		"synchub-cli sync pull --path . --dry-run",
 		"synchub-cli sync trash --path .",
+		"synchub-cli sync trash restore --path . --batch 20260702T010000.000000000Z --entry docs/",
 		"synchub-cli sync devices --path .",
 		"synchub-cli sync conflicts --path .",
 	} {
@@ -813,6 +814,80 @@ func TestRunSyncTrashHonorsLimit(t *testing.T) {
 	want := "trash entries: 1\n20260702T010000.000000000Z 20260702T010000.000000000Z.txt size=26\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunSyncTrashRestoreRestoresEntry(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	trashFile := filepath.Join(root, ".synchub", "trash", "20260702T010000.000000000Z", "docs", "readme.txt")
+	if err := os.MkdirAll(filepath.Dir(trashFile), 0o755); err != nil {
+		t.Fatalf("mkdir trash file: %v", err)
+	}
+	if err := os.WriteFile(trashFile, []byte("restore me"), 0o644); err != nil {
+		t.Fatalf("write trash file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"trash",
+		"restore",
+		"--path", root,
+		"--batch", "20260702T010000.000000000Z",
+		"--entry", "docs/readme.txt",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync trash restore: %v", err)
+	}
+	restoredPath := filepath.Join(root, "docs", "readme.txt")
+	want := "restored: " + restoredPath + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+	raw, err := os.ReadFile(restoredPath)
+	if err != nil {
+		t.Fatalf("read restored file: %v", err)
+	}
+	if string(raw) != "restore me" {
+		t.Fatalf("restored file = %q", string(raw))
+	}
+	if _, err := os.Stat(trashFile); !os.IsNotExist(err) {
+		t.Fatalf("trash file still exists or stat failed: %v", err)
+	}
+}
+
+func TestRunSyncTrashRestoreDoesNotOverwriteExistingTarget(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	trashFile := filepath.Join(root, ".synchub", "trash", "20260702T010000.000000000Z", "readme.txt")
+	if err := os.MkdirAll(filepath.Dir(trashFile), 0o755); err != nil {
+		t.Fatalf("mkdir trash file: %v", err)
+	}
+	if err := os.WriteFile(trashFile, []byte("trash"), 0o644); err != nil {
+		t.Fatalf("write trash file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "readme.txt"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("write existing file: %v", err)
+	}
+
+	err := run(context.Background(), []string{
+		"sync",
+		"trash",
+		"restore",
+		"--path", root,
+		"--batch", "20260702T010000.000000000Z",
+		"--entry", "readme.txt",
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "restore target already exists") {
+		t.Fatalf("error = %v, want restore target already exists", err)
+	}
+	raw, readErr := os.ReadFile(filepath.Join(root, "readme.txt"))
+	if readErr != nil {
+		t.Fatalf("read existing file: %v", readErr)
+	}
+	if string(raw) != "existing" {
+		t.Fatalf("existing file = %q", string(raw))
 	}
 }
 
