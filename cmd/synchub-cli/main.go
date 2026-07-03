@@ -31,6 +31,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runWorkspace(args[1:], stdout, stderr)
 	case "manifest":
 		return runManifest(ctx, args[1:], stdout, stderr)
+	case "file":
+		return runFile(ctx, args[1:], stdout, stderr)
 	case "sync":
 		return runSync(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":

@@ -442,6 +442,99 @@ func TestRunSyncConflictsShowsPendingConflicts(t *testing.T) {
 	}
 }
 
+func TestRunFileVersionsByRemotePath(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/by-path":
+			if got := r.URL.Query().Get("path"); got != "/workspace/a.txt" {
+				t.Fatalf("path = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":6,"sha256":"sha2","version":2,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:02:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/file_1/versions":
+			if got := r.URL.Query().Get("limit"); got != "2" {
+				t.Fatalf("limit = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"ver_2","file_id":"file_1","version":2,"size":6,"sha256":"sha2","pinned_at":"2026-06-30T00:03:00Z","created_at":"2026-06-30T00:02:00Z"},{"id":"ver_1","file_id":"file_1","version":1,"size":5,"sha256":"sha1","pinned_at":null,"created_at":"2026-06-30T00:01:00Z"}]}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"versions",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--remote-path", "/workspace/a.txt",
+		"--limit", "2",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file versions: %v", err)
+	}
+	want := "file: /workspace/a.txt\nfile id: file_1\nversions: 2\nv2 size=6 sha256=sha2 pinned=2026-06-30T00:03:00Z created=2026-06-30T00:02:00Z id=ver_2\nv1 size=5 sha256=sha1 pinned=- created=2026-06-30T00:01:00Z id=ver_1\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunFileVersionsByFileID(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files/file_1/versions" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[]}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"versions",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--file-id", "file_1",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file versions: %v", err)
+	}
+	want := "file id: file_1\nversions: 0\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestRunSyncPushUploadsManifestFiles(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
@@ -1940,11 +2033,16 @@ func clientUser(id, email string) client.User {
 
 func writeTestWorkspaceConfig(t *testing.T, root string) {
 	t.Helper()
+	writeTestWorkspaceConfigWithServer(t, root, "http://localhost:8765")
+}
+
+func writeTestWorkspaceConfigWithServer(t *testing.T, root, serverURL string) {
+	t.Helper()
 	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
 		Version:    1,
 		Root:       root,
 		RemotePath: "/workspace",
-		ServerURL:  "http://localhost:8765",
+		ServerURL:  serverURL,
 		UserID:     "u1",
 		UserEmail:  "user@example.com",
 	}, 0o600); err != nil {
