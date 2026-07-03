@@ -631,6 +631,25 @@ func TestRunSyncStatusCanShowRemoteConflicts(t *testing.T) {
 	}
 }
 
+func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "help"}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync help: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"synchub-cli sync push --path . --dry-run",
+		"synchub-cli sync pull --path . --dry-run",
+		"synchub-cli sync devices --path .",
+		"synchub-cli sync conflicts --path .",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("sync help missing %q: %s", want, out)
+		}
+	}
+}
+
 func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
 	root := t.TempDir()
 	writeTestWorkspaceConfig(t, root)
