@@ -101,6 +101,7 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 	}
 	files, dirs, deleted, moved := 0, 0, 0, 0
 	conflictPaths := []string{}
+	trashPaths := []string{}
 	for _, event := range changes.Items {
 		if isOwnChangeEvent(workspace, event) {
 			continue
@@ -114,6 +115,7 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 		deleted += result.deleted
 		moved += result.moved
 		conflictPaths = append(conflictPaths, result.conflictPaths...)
+		trashPaths = append(trashPaths, result.trashPaths...)
 	}
 	if len(changes.Items) > 0 {
 		if err := writePullManifest(ctx, root, workspace.RemotePath, localManifestPath, previousManifest, changes.Items); err != nil {
@@ -142,6 +144,12 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 		fmt.Fprintf(stdout, "conflicts kept: %d\n", len(conflictPaths))
 		for _, path := range conflictPaths {
 			fmt.Fprintf(stdout, "conflict: %s\n", path)
+		}
+	}
+	if len(trashPaths) > 0 {
+		fmt.Fprintf(stdout, "trashed: %d\n", len(trashPaths))
+		for _, path := range trashPaths {
+			fmt.Fprintf(stdout, "trash: %s\n", path)
 		}
 	}
 	fmt.Fprintf(stdout, "cursor: %d\n", workspace.LastAppliedChangeID)
@@ -331,6 +339,7 @@ type pullApplyResult struct {
 	deleted       int
 	moved         int
 	conflictPaths []string
+	trashPaths    []string
 }
 
 func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace workspaceConfig, event client.ChangeEvent, previousEntries map[string]manifest.Entry) (pullApplyResult, error) {
@@ -363,10 +372,14 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 		if err != nil {
 			return pullApplyResult{}, err
 		}
-		if err := os.RemoveAll(localPath); err != nil {
-			return pullApplyResult{}, err
+		var trashPath string
+		if conflictPath == "" {
+			trashPath, err = moveDeletedLocalPathToTrash(root, localPath, syncPushNow().UTC())
+			if err != nil {
+				return pullApplyResult{}, err
+			}
 		}
-		return pullApplyResult{deleted: 1, conflictPaths: conflictPathList(conflictPath)}, nil
+		return pullApplyResult{deleted: 1, conflictPaths: conflictPathList(conflictPath), trashPaths: conflictPathList(trashPath)}, nil
 	case "move":
 		if event.OldPath == nil {
 			return pullApplyResult{}, errors.New("move event is missing old_path")
@@ -561,6 +574,78 @@ func conflictPathList(path string) []string {
 		return nil
 	}
 	return []string{path}
+}
+
+func moveDeletedLocalPathToTrash(root, localPath string, timestamp time.Time) (string, error) {
+	if _, err := os.Stat(localPath); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	relative, err := safeWorkspaceRelativePath(root, localPath)
+	if err != nil {
+		return "", err
+	}
+	if relative == "" || relative == ".synchub" || strings.HasPrefix(relative, ".synchub/") {
+		return "", fmt.Errorf("refusing to trash protected workspace path: %s", localPath)
+	}
+	trashRoot := filepath.Join(root, ".synchub", "trash", timestamp.UTC().Format("20060102T150405.000000000Z"))
+	trashPath := filepath.Join(trashRoot, filepath.FromSlash(relative))
+	if err := os.MkdirAll(filepath.Dir(trashPath), 0o755); err != nil {
+		return "", err
+	}
+	trashPath, err = nextAvailablePath(trashPath)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Rename(localPath, trashPath); err != nil {
+		return "", err
+	}
+	return trashPath, nil
+}
+
+func safeWorkspaceRelativePath(root, localPath string) (string, error) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	absLocal, err := filepath.Abs(localPath)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absRoot, absLocal)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." {
+		return "", nil
+	}
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("path resolves outside workspace: %s", localPath)
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+func nextAvailablePath(path string) (string, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return path, nil
+		}
+		return "", err
+	}
+	dir := filepath.Dir(path)
+	ext := filepath.Ext(path)
+	name := strings.TrimSuffix(filepath.Base(path), ext)
+	for i := 1; ; i++ {
+		candidate := filepath.Join(dir, fmt.Sprintf("%s-%d%s", name, i, ext))
+		if _, err := os.Stat(candidate); err != nil {
+			if os.IsNotExist(err) {
+				return candidate, nil
+			}
+			return "", err
+		}
+	}
 }
 
 func moveLocalPath(root, remoteRoot, oldRemotePath, newRemotePath string) error {

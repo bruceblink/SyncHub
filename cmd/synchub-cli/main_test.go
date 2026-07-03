@@ -3996,6 +3996,10 @@ func TestRunSyncPullKeepsLocalConflictBeforeOverwrite(t *testing.T) {
 }
 
 func TestRunSyncPullAppliesDeleteEvents(t *testing.T) {
+	oldNow := syncPushNow
+	syncPushNow = func() time.Time { return time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC) }
+	defer func() { syncPushNow = oldNow }()
+
 	root := t.TempDir()
 	targetPath := filepath.Join(root, "obsolete.txt")
 	if err := os.WriteFile(targetPath, []byte("remove me"), 0o644); err != nil {
@@ -4084,8 +4088,19 @@ func TestRunSyncPullAppliesDeleteEvents(t *testing.T) {
 	if !strings.Contains(stdout.String(), "deleted: 1") || !strings.Contains(stdout.String(), "cursor: 3") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
+	trashPath := filepath.Join(root, ".synchub", "trash", "20260630T010203.000000000Z", "obsolete.txt")
+	if !strings.Contains(stdout.String(), "trashed: 1") || !strings.Contains(stdout.String(), "trash: "+trashPath) {
+		t.Fatalf("stdout = %q, want trash path %s", stdout.String(), trashPath)
+	}
 	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
 		t.Fatalf("obsolete file still exists or stat failed: %v", err)
+	}
+	trashed, err := os.ReadFile(trashPath)
+	if err != nil {
+		t.Fatalf("read trash file: %v", err)
+	}
+	if string(trashed) != "remove me" {
+		t.Fatalf("trash file = %q", string(trashed))
 	}
 	if !acked {
 		t.Fatal("delete change was not acked")
@@ -4349,6 +4364,22 @@ func TestDirectoryHasLocalChangesDetectsDeletedTrackedDescendant(t *testing.T) {
 	}
 	if !changed {
 		t.Fatal("directory missing a tracked descendant was not reported as changed")
+	}
+}
+
+func TestMoveDeletedLocalPathToTrashRejectsProtectedPaths(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".synchub"), 0o755); err != nil {
+		t.Fatalf("mkdir .synchub: %v", err)
+	}
+
+	for _, path := range []string{root, filepath.Join(root, ".synchub")} {
+		t.Run(path, func(t *testing.T) {
+			_, err := moveDeletedLocalPathToTrash(root, path, time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC))
+			if err == nil || !strings.Contains(err.Error(), "refusing to trash protected workspace path") {
+				t.Fatalf("error = %v, want protected path error", err)
+			}
+		})
 	}
 }
 
