@@ -32,6 +32,7 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 		"--device-name", "laptop",
 		"--platform", "windows",
 		"--limit", "20",
+		"--max-failures", "3",
 		"--once",
 	}, &stdout, &bytes.Buffer{}, runner)
 	if err != nil {
@@ -48,6 +49,9 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 	}
 	if got.Limit != 20 {
 		t.Fatalf("limit = %d, want 20", got.Limit)
+	}
+	if got.MaxFailures != 3 {
+		t.Fatalf("max failures = %d, want 3", got.MaxFailures)
 	}
 }
 
@@ -67,10 +71,13 @@ func TestRunSyncCycleShowsCompletionTime(t *testing.T) {
 	defer func() { agentNow = originalNow }()
 
 	var stdout bytes.Buffer
-	runSyncCycle(context.Background(), agentOptions{}, &stdout, &bytes.Buffer{}, func(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
+	err := runSyncCycle(context.Background(), agentOptions{}, &stdout, &bytes.Buffer{}, func(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
 		_, _ = stdout.Write([]byte("synced\n"))
 		return nil
 	})
+	if err != nil {
+		t.Fatalf("sync cycle: %v", err)
+	}
 
 	want := "synced\nsync completed: 2026-07-04T01:02:03Z\n"
 	if stdout.String() != want {
@@ -81,9 +88,12 @@ func TestRunSyncCycleShowsCompletionTime(t *testing.T) {
 func TestRunSyncCycleReportsErrorWithoutCompletion(t *testing.T) {
 	wantErr := errors.New("sync failed")
 	var stdout, stderr bytes.Buffer
-	runSyncCycle(context.Background(), agentOptions{}, &stdout, &stderr, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+	err := runSyncCycle(context.Background(), agentOptions{}, &stdout, &stderr, func(context.Context, agentOptions, io.Writer, io.Writer) error {
 		return wantErr
 	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
 
 	if stdout.String() != "" {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
@@ -91,6 +101,34 @@ func TestRunSyncCycleReportsErrorWithoutCompletion(t *testing.T) {
 	want := "sync failed: sync failed\n"
 	if stderr.String() != want {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
+func TestRunLoopStopsAfterMaxFailures(t *testing.T) {
+	wantErr := errors.New("sync failed")
+	err := run(context.Background(), []string{
+		"--interval", "1ms",
+		"--max-failures", "2",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		return wantErr
+	})
+	if err == nil || !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want wrapped sync failure", err)
+	}
+	if !strings.Contains(err.Error(), "sync failed 2 consecutive times") {
+		t.Fatalf("error = %v, want max failures message", err)
+	}
+}
+
+func TestShouldStopAfterFailures(t *testing.T) {
+	if shouldStopAfterFailures(agentOptions{MaxFailures: 0}, 100) {
+		t.Fatal("max failures 0 should disable failure stop")
+	}
+	if shouldStopAfterFailures(agentOptions{MaxFailures: 3}, 2) {
+		t.Fatal("should not stop before threshold")
+	}
+	if !shouldStopAfterFailures(agentOptions{MaxFailures: 3}, 3) {
+		t.Fatal("should stop at threshold")
 	}
 }
 
@@ -123,6 +161,13 @@ func TestParseOptionsRejectsInvalidLimit(t *testing.T) {
 	_, err := parseOptions([]string{"--limit", "0"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected invalid limit error")
+	}
+}
+
+func TestParseOptionsRejectsInvalidMaxFailures(t *testing.T) {
+	_, err := parseOptions([]string{"--max-failures", "-1"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected invalid max failures error")
 	}
 }
 

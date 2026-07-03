@@ -29,6 +29,7 @@ type agentOptions struct {
 	DeviceName          string
 	DevicePlatform      string
 	Limit               int
+	MaxFailures         int
 	Once                bool
 }
 
@@ -61,7 +62,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 
 	fmt.Fprintf(stdout, "agent started: %s\n", opts.RootPath)
 	fmt.Fprintf(stdout, "sync interval: %s\n", opts.Interval)
-	runSyncCycle(ctx, opts, stdout, stderr, runner)
+	consecutiveFailures := 0
+	if err := runSyncCycle(ctx, opts, stdout, stderr, runner); err != nil {
+		consecutiveFailures++
+		if shouldStopAfterFailures(opts, consecutiveFailures) {
+			return maxFailuresError(consecutiveFailures, err)
+		}
+	}
 
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
@@ -70,17 +77,33 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			runSyncCycle(ctx, opts, stdout, stderr, runner)
+			if err := runSyncCycle(ctx, opts, stdout, stderr, runner); err != nil {
+				consecutiveFailures++
+				if shouldStopAfterFailures(opts, consecutiveFailures) {
+					return maxFailuresError(consecutiveFailures, err)
+				}
+				continue
+			}
+			consecutiveFailures = 0
 		}
 	}
 }
 
-func runSyncCycle(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) {
+func runSyncCycle(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) error {
 	if err := runner(ctx, opts, stdout, stderr); err != nil {
 		fmt.Fprintf(stderr, "sync failed: %v\n", err)
-		return
+		return err
 	}
 	fmt.Fprintf(stdout, "sync completed: %s\n", agentNow().UTC().Format(time.RFC3339))
+	return nil
+}
+
+func shouldStopAfterFailures(opts agentOptions, consecutiveFailures int) bool {
+	return opts.MaxFailures > 0 && consecutiveFailures >= opts.MaxFailures
+}
+
+func maxFailuresError(consecutiveFailures int, err error) error {
+	return fmt.Errorf("sync failed %d consecutive times; max failures reached: %w", consecutiveFailures, err)
 }
 
 func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error) {
@@ -99,6 +122,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.StringVar(&opts.DeviceName, "device-name", "", "device name")
 	fs.StringVar(&opts.DevicePlatform, "platform", "", "device platform")
 	fs.IntVar(&opts.Limit, "limit", 500, "maximum changes to pull per sync cycle")
+	fs.IntVar(&opts.MaxFailures, "max-failures", 0, "maximum consecutive sync failures before exit; 0 disables")
 	fs.BoolVar(&opts.Once, "once", false, "run one sync cycle and exit")
 	if len(args) > 0 {
 		switch args[0] {
@@ -116,6 +140,9 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.Limit <= 0 {
 		return agentOptions{}, errors.New("limit must be positive")
 	}
+	if opts.MaxFailures < 0 {
+		return agentOptions{}, errors.New("max failures must be non-negative")
+	}
 	if strings.TrimSpace(opts.RootPath) == "" {
 		return agentOptions{}, errors.New("workspace path is required")
 	}
@@ -127,6 +154,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-agent --path .")
 	fmt.Fprintln(w, "  synchub-agent --path . --once")
 	fmt.Fprintln(w, "  synchub-agent --path . --interval 30s --device-name laptop --platform windows --limit 500")
+	fmt.Fprintln(w, "  synchub-agent --path . --max-failures 5")
 }
 
 func runSyncOnceCommand(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
