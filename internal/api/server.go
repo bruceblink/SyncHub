@@ -285,13 +285,14 @@ func (s *Server) unpinFileVersion(c *gin.Context) {
 
 func (s *Server) createDirectory(c *gin.Context) {
 	var req struct {
-		Path string `json:"path"`
+		Path     string `json:"path"`
+		DeviceID string `json:"device_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
 		return
 	}
-	node, err := s.files.CreateDirectory(c.Request.Context(), userID(c), req.Path)
+	node, err := s.files.CreateDirectory(c.Request.Context(), userID(c), req.Path, optionalString(req.DeviceID))
 	if err != nil {
 		fail(c, err)
 		return
@@ -301,13 +302,14 @@ func (s *Server) createDirectory(c *gin.Context) {
 
 func (s *Server) moveFile(c *gin.Context) {
 	var req struct {
-		Path string `json:"path"`
+		Path     string `json:"path"`
+		DeviceID string `json:"device_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
 		return
 	}
-	node, err := s.files.Move(c.Request.Context(), userID(c), c.Param("id"), req.Path)
+	node, err := s.files.Move(c.Request.Context(), userID(c), c.Param("id"), req.Path, optionalString(req.DeviceID))
 	if err != nil {
 		fail(c, err)
 		return
@@ -316,7 +318,11 @@ func (s *Server) moveFile(c *gin.Context) {
 }
 
 func (s *Server) deleteFile(c *gin.Context) {
-	if err := s.files.Delete(c.Request.Context(), userID(c), c.Param("id")); err != nil {
+	var req struct {
+		DeviceID string `json:"device_id"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if err := s.files.Delete(c.Request.Context(), userID(c), c.Param("id"), optionalString(req.DeviceID)); err != nil {
 		fail(c, err)
 		return
 	}
@@ -664,6 +670,14 @@ func parsePositiveInt64Param(c *gin.Context, name string) (int64, error) {
 		return 0, domain.E(domain.CodeInvalidArgument, "invalid "+name, err)
 	}
 	return parsed, nil
+}
+
+func optionalString(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func userDTO(user domain.User) gin.H {

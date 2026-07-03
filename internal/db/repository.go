@@ -97,7 +97,7 @@ func (r *Repository) RevokeRefreshToken(ctx context.Context, tokenHash string) e
 	return wrapDBErr(err)
 }
 
-func (r *Repository) CreateDirectory(ctx context.Context, userID, path, name string, parentID *string) (domain.FileNode, error) {
+func (r *Repository) CreateDirectory(ctx context.Context, userID, path, name string, parentID, sourceDeviceID *string) (domain.FileNode, error) {
 	node := domain.FileNode{ID: uuid.NewString(), UserID: userID, ParentID: parentID, Name: name, Path: path, NodeType: domain.NodeTypeDirectory, Version: 1}
 	err := r.pool.QueryRow(ctx, `
 		insert into file_nodes (id, user_id, parent_id, name, path, node_type, version)
@@ -110,7 +110,7 @@ func (r *Repository) CreateDirectory(ctx context.Context, userID, path, name str
 	if err != nil {
 		return domain.FileNode{}, wrapDBErr(err)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventCreate, nil, path, nil, nil)
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventCreate, nil, path, nil, sourceDeviceID)
 	return node, wrapDBErr(err)
 }
 
@@ -267,7 +267,7 @@ func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID stri
 	return restored, changeID, wrapDBErr(tx.Commit(ctx))
 }
 
-func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error) {
+func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error) {
 	old, err := r.GetFileByID(ctx, userID, fileID)
 	if err != nil {
 		return domain.FileNode{}, err
@@ -285,11 +285,11 @@ func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newN
 	if err != nil {
 		return domain.FileNode{}, wrapNotFound(err, "file not found")
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, nil)
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, sourceDeviceID)
 	return node, wrapDBErr(err)
 }
 
-func (r *Repository) DeleteFile(ctx context.Context, userID, fileID string) error {
+func (r *Repository) DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
 	node, err := r.GetFileByID(ctx, userID, fileID)
 	if err != nil {
 		return err
@@ -305,7 +305,7 @@ func (r *Repository) DeleteFile(ctx context.Context, userID, fileID string) erro
 	if tag.RowsAffected() == 0 {
 		return domain.E(domain.CodeFileNotFound, "file not found", nil)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path, nil)
+	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path, sourceDeviceID)
 	return wrapDBErr(err)
 }
 

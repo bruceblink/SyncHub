@@ -129,7 +129,7 @@ func (r *SQLiteRepository) RevokeRefreshToken(ctx context.Context, tokenHash str
 	return wrapSQLiteDBErr(err)
 }
 
-func (r *SQLiteRepository) CreateDirectory(ctx context.Context, userID, path, name string, parentID *string) (domain.FileNode, error) {
+func (r *SQLiteRepository) CreateDirectory(ctx context.Context, userID, path, name string, parentID, sourceDeviceID *string) (domain.FileNode, error) {
 	now := time.Now().UTC()
 	node := domain.FileNode{
 		ID:        uuid.NewString(),
@@ -152,7 +152,7 @@ func (r *SQLiteRepository) CreateDirectory(ctx context.Context, userID, path, na
 	if err != nil {
 		return domain.FileNode{}, wrapSQLiteDBErr(err)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventCreate, nil, path, nil, nil)
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventCreate, nil, path, nil, sourceDeviceID)
 	return node, wrapSQLiteDBErr(err)
 }
 
@@ -339,7 +339,7 @@ func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileI
 	return restored, changeID, wrapSQLiteDBErr(tx.Commit())
 }
 
-func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error) {
+func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error) {
 	old, err := r.GetFileByID(ctx, userID, fileID)
 	if err != nil {
 		return domain.FileNode{}, err
@@ -362,11 +362,11 @@ func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath
 	if err != nil {
 		return domain.FileNode{}, err
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, nil)
+	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, sourceDeviceID)
 	return node, wrapSQLiteDBErr(err)
 }
 
-func (r *SQLiteRepository) DeleteFile(ctx context.Context, userID, fileID string) error {
+func (r *SQLiteRepository) DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
 	node, err := r.GetFileByID(ctx, userID, fileID)
 	if err != nil {
 		return err
@@ -383,7 +383,7 @@ func (r *SQLiteRepository) DeleteFile(ctx context.Context, userID, fileID string
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return domain.E(domain.CodeFileNotFound, "file not found", nil)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path, nil)
+	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path, sourceDeviceID)
 	return wrapSQLiteDBErr(err)
 }
 

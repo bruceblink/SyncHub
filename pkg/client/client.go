@@ -200,10 +200,18 @@ func (c *Client) Logout(ctx context.Context, refreshToken string) error {
 }
 
 func (c *Client) CreateDirectory(ctx context.Context, accessToken, path string) (FileNode, error) {
+	return c.CreateDirectoryWithDevice(ctx, accessToken, path, "")
+}
+
+func (c *Client) CreateDirectoryWithDevice(ctx context.Context, accessToken, path, deviceID string) (FileNode, error) {
 	var data FileNode
-	err := c.postJSONAuth(ctx, "/api/v1/files/directories", accessToken, map[string]string{
+	payload := map[string]string{
 		"path": path,
-	}, nil, &data)
+	}
+	if strings.TrimSpace(deviceID) != "" {
+		payload["device_id"] = deviceID
+	}
+	err := c.postJSONAuth(ctx, "/api/v1/files/directories", accessToken, payload, nil, &data)
 	return data, err
 }
 
@@ -255,21 +263,44 @@ func (c *Client) UnpinFileVersion(ctx context.Context, accessToken, fileID strin
 }
 
 func (c *Client) DeleteFile(ctx context.Context, accessToken, fileID string) error {
+	return c.DeleteFileWithDevice(ctx, accessToken, fileID, "")
+}
+
+func (c *Client) DeleteFileWithDevice(ctx context.Context, accessToken, fileID, deviceID string) error {
 	path := fmt.Sprintf("/api/v1/files/%s", url.PathEscape(fileID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.endpoint(path), nil)
+	var body io.Reader
+	if strings.TrimSpace(deviceID) != "" {
+		payload, err := json.Marshal(map[string]string{"device_id": deviceID})
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.endpoint(path), body)
 	if err != nil {
 		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	setBearerToken(req, accessToken)
 	return c.doJSON(req, nil)
 }
 
 func (c *Client) MoveFile(ctx context.Context, accessToken, fileID, path string) (FileNode, error) {
+	return c.MoveFileWithDevice(ctx, accessToken, fileID, path, "")
+}
+
+func (c *Client) MoveFileWithDevice(ctx context.Context, accessToken, fileID, path, deviceID string) (FileNode, error) {
 	var data FileNode
 	endpoint := fmt.Sprintf("/api/v1/files/%s", url.PathEscape(fileID))
-	err := c.patchJSONAuth(ctx, endpoint, accessToken, map[string]string{
+	payload := map[string]string{
 		"path": path,
-	}, &data)
+	}
+	if strings.TrimSpace(deviceID) != "" {
+		payload["device_id"] = deviceID
+	}
+	err := c.patchJSONAuth(ctx, endpoint, accessToken, payload, &data)
 	return data, err
 }
 

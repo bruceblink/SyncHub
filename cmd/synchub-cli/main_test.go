@@ -997,6 +997,15 @@ func TestRunSyncPushDeletesRemovedManifestFiles(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"remove.txt","path":"/workspace/remove.txt","node_type":"file","version":3}}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/files/file_1":
+			var req struct {
+				DeviceID string `json:"device_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode delete request: %v", err)
+			}
+			if req.DeviceID != "dev_1" {
+				t.Fatalf("delete device id = %q", req.DeviceID)
+			}
 			deleted = true
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{}}`))
 		default:
@@ -1012,6 +1021,7 @@ func TestRunSyncPushDeletesRemovedManifestFiles(t *testing.T) {
 		ServerURL:  server.URL,
 		UserID:     "u1",
 		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
 	}, 0o600); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
@@ -1409,13 +1419,17 @@ func TestRunSyncPushMovesRenamedManifestFiles(t *testing.T) {
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"old.txt","path":"/workspace/old.txt","node_type":"file","version":3}}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/files/file_1":
 			var req struct {
-				Path string `json:"path"`
+				Path     string `json:"path"`
+				DeviceID string `json:"device_id"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode move request: %v", err)
 			}
 			if req.Path != "/workspace/renamed.txt" {
 				t.Fatalf("move path = %q", req.Path)
+			}
+			if req.DeviceID != "dev_1" {
+				t.Fatalf("move device id = %q", req.DeviceID)
 			}
 			moved = true
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"renamed.txt","path":"/workspace/renamed.txt","node_type":"file","version":4}}`))
@@ -1432,6 +1446,7 @@ func TestRunSyncPushMovesRenamedManifestFiles(t *testing.T) {
 		ServerURL:  server.URL,
 		UserID:     "u1",
 		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
 	}, 0o600); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}

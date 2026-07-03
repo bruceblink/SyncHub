@@ -160,6 +160,38 @@ func TestCreateDirectory(t *testing.T) {
 	}
 }
 
+func TestCreateDirectoryWithDevice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/files/directories" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		var req struct {
+			Path     string `json:"path"`
+			DeviceID string `json:"device_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Path != "/workspace" || req.DeviceID != "dev_1" {
+			t.Fatalf("request body = %#v", req)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"workspace","path":"/workspace","node_type":"directory","version":1}}`))
+	}))
+	defer server.Close()
+
+	node, err := New(server.URL).CreateDirectoryWithDevice(context.Background(), "access-token", "/workspace", "dev_1")
+	if err != nil {
+		t.Fatalf("create directory with device: %v", err)
+	}
+	if node.ID != "dir_1" || node.Path != "/workspace" || node.NodeType != "directory" {
+		t.Fatalf("unexpected node: %#v", node)
+	}
+}
+
 func TestGetFileByPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files/by-path" {
@@ -308,6 +340,38 @@ func TestDeleteFile(t *testing.T) {
 	}
 }
 
+func TestDeleteFileWithDevice(t *testing.T) {
+	deleted := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/files/file_1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		var req struct {
+			DeviceID string `json:"device_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.DeviceID != "dev_1" {
+			t.Fatalf("device id = %q", req.DeviceID)
+		}
+		deleted = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{}}`))
+	}))
+	defer server.Close()
+
+	if err := New(server.URL).DeleteFileWithDevice(context.Background(), "access-token", "file_1", "dev_1"); err != nil {
+		t.Fatalf("delete file with device: %v", err)
+	}
+	if !deleted {
+		t.Fatal("file was not deleted")
+	}
+}
+
 func TestMoveFile(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/files/file_1" {
@@ -333,6 +397,38 @@ func TestMoveFile(t *testing.T) {
 	node, err := New(server.URL).MoveFile(context.Background(), "access-token", "file_1", "/workspace/renamed.txt")
 	if err != nil {
 		t.Fatalf("move file: %v", err)
+	}
+	if node.ID != "file_1" || node.Path != "/workspace/renamed.txt" || node.Version != 4 {
+		t.Fatalf("unexpected node: %#v", node)
+	}
+}
+
+func TestMoveFileWithDevice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/files/file_1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		var req struct {
+			Path     string `json:"path"`
+			DeviceID string `json:"device_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Path != "/workspace/renamed.txt" || req.DeviceID != "dev_1" {
+			t.Fatalf("request body = %#v", req)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"renamed.txt","path":"/workspace/renamed.txt","node_type":"file","version":4}}`))
+	}))
+	defer server.Close()
+
+	node, err := New(server.URL).MoveFileWithDevice(context.Background(), "access-token", "file_1", "/workspace/renamed.txt", "dev_1")
+	if err != nil {
+		t.Fatalf("move file with device: %v", err)
 	}
 	if node.ID != "file_1" || node.Path != "/workspace/renamed.txt" || node.Version != 4 {
 		t.Fatalf("unexpected node: %#v", node)

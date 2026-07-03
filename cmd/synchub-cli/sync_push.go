@@ -98,13 +98,32 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	moved := 0
 	conflictKept := 0
 	manifestChanged := false
+	hasPushChanges := len(plannedMoves) > 0 || hasDeletedManifestEntries(m, currentPaths)
+	if !hasPushChanges {
+		for _, item := range currentManifest.Items {
+			path, err := normalizeRemotePath(item.Path)
+			if err != nil {
+				return err
+			}
+			previousItem, existed := previousEntries[path]
+			if !existed || previousItem.RemoteVersion == nil || manifestContentChanged(previousItem, item) {
+				hasPushChanges = true
+				break
+			}
+		}
+	}
+	if hasPushChanges && strings.TrimSpace(workspace.DeviceID) == "" {
+		if err := ensureWorkspacePushDevice(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspacePath, &workspace, *deviceName, *devicePlatform); err != nil {
+			return err
+		}
+	}
 	moveSources := make(map[string]struct{}, len(plannedMoves))
 	moveTargets := make(map[string]int64, len(plannedMoves))
 	for _, move := range plannedMoves {
-		if err := ensureRemoteDirectories(ctx, apiClient, loginConfig.Tokens.AccessToken, move.to.Path, createdDirs); err != nil {
+		if err := ensureRemoteDirectories(ctx, apiClient, loginConfig.Tokens.AccessToken, workspace.DeviceID, move.to.Path, createdDirs); err != nil {
 			return err
 		}
-		version, err := moveManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, move.from, move.to)
+		version, err := moveManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, workspace.DeviceID, move.from, move.to)
 		if err != nil {
 			return err
 		}
@@ -124,7 +143,7 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 			continue
 		}
 		if _, ok := currentPaths[path]; !ok {
-			if err := deleteManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, item); err != nil {
+			if err := deleteManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, workspace.DeviceID, item); err != nil {
 				return err
 			}
 			deleted++
@@ -144,11 +163,6 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		previousItem, existed := previousEntries[path]
 		if existed && previousItem.RemoteVersion != nil && !manifestContentChanged(previousItem, item) {
 			continue
-		}
-		if strings.TrimSpace(workspace.DeviceID) == "" {
-			if err := ensureWorkspacePushDevice(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspacePath, &workspace, *deviceName, *devicePlatform); err != nil {
-				return err
-			}
 		}
 		result, err := pushManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, item, createdDirs)
 		if err != nil {
@@ -292,12 +306,25 @@ func manifestContentChanged(before, after manifest.Entry) bool {
 	return before.Size != after.Size || before.SHA256 != after.SHA256
 }
 
-func moveManifestEntry(ctx context.Context, apiClient *client.Client, accessToken string, from, to manifest.Entry) (int64, error) {
+func hasDeletedManifestEntries(previous manifest.Manifest, currentPaths map[string]struct{}) bool {
+	for _, item := range previous.Items {
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			continue
+		}
+		if _, ok := currentPaths[path]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
+func moveManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, deviceID string, from, to manifest.Entry) (int64, error) {
 	node, err := apiClient.GetFileByPath(ctx, accessToken, from.Path)
 	if err != nil {
 		return 0, err
 	}
-	moved, err := apiClient.MoveFile(ctx, accessToken, node.ID, to.Path)
+	moved, err := apiClient.MoveFileWithDevice(ctx, accessToken, node.ID, to.Path, deviceID)
 	if err != nil {
 		return 0, err
 	}
@@ -341,7 +368,7 @@ func manifestPathSet(m manifest.Manifest) (map[string]struct{}, error) {
 	return paths, nil
 }
 
-func deleteManifestEntry(ctx context.Context, apiClient *client.Client, accessToken string, item manifest.Entry) error {
+func deleteManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, deviceID string, item manifest.Entry) error {
 	node, err := apiClient.GetFileByPath(ctx, accessToken, item.Path)
 	if err != nil {
 		if isAPIErrorCode(err, "NOT_FOUND") {
@@ -349,7 +376,7 @@ func deleteManifestEntry(ctx context.Context, apiClient *client.Client, accessTo
 		}
 		return err
 	}
-	if err := apiClient.DeleteFile(ctx, accessToken, node.ID); err != nil && !isAPIErrorCode(err, "NOT_FOUND") {
+	if err := apiClient.DeleteFileWithDevice(ctx, accessToken, node.ID, deviceID); err != nil && !isAPIErrorCode(err, "NOT_FOUND") {
 		return err
 	}
 	return nil
@@ -357,7 +384,7 @@ func deleteManifestEntry(ctx context.Context, apiClient *client.Client, accessTo
 
 func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace workspaceConfig, item manifest.Entry, createdDirs map[string]struct{}) (int64, error) {
 	localPath := filepath.Join(root, filepath.FromSlash(item.RelativePath))
-	if err := ensureRemoteDirectories(ctx, apiClient, accessToken, item.Path, createdDirs); err != nil {
+	if err := ensureRemoteDirectories(ctx, apiClient, accessToken, workspace.DeviceID, item.Path, createdDirs); err != nil {
 		return 0, err
 	}
 	session, err := apiClient.InitUpload(ctx, accessToken, client.InitUploadRequest{
@@ -433,12 +460,12 @@ func sanitizeConflictPathPart(value string) string {
 	return sanitized
 }
 
-func ensureRemoteDirectories(ctx context.Context, apiClient *client.Client, accessToken, filePath string, created map[string]struct{}) error {
+func ensureRemoteDirectories(ctx context.Context, apiClient *client.Client, accessToken, deviceID, filePath string, created map[string]struct{}) error {
 	for _, dir := range remoteParentDirs(filePath) {
 		if _, ok := created[dir]; ok {
 			continue
 		}
-		if _, err := apiClient.CreateDirectory(ctx, accessToken, dir); err != nil && !isAPIErrorCode(err, "ALREADY_EXISTS") {
+		if _, err := apiClient.CreateDirectoryWithDevice(ctx, accessToken, dir, deviceID); err != nil && !isAPIErrorCode(err, "ALREADY_EXISTS") {
 			return err
 		}
 		created[dir] = struct{}{}

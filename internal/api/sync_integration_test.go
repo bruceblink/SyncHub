@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -117,6 +118,7 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 		Data struct {
 			Items []struct {
 				ID             int64   `json:"id"`
+				FileID         string  `json:"file_id"`
 				EventType      string  `json:"event_type"`
 				Path           string  `json:"path"`
 				SourceDeviceID *string `json:"source_device_id"`
@@ -141,9 +143,55 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 		t.Fatalf("missing next cursor: %#v", changesBody.Data)
 	}
 
+	moveResp := doJSON(t, server, http.MethodPatch, "/api/v1/files/"+changesBody.Data.Items[1].FileID, token, map[string]any{
+		"path":      "/workspace/sync-renamed.txt",
+		"device_id": deviceBody.Data.ID,
+	})
+	if moveResp.Code != http.StatusOK {
+		t.Fatalf("move status = %d body = %s", moveResp.Code, moveResp.Body.String())
+	}
+	deleteResp := doJSON(t, server, http.MethodDelete, "/api/v1/files/"+changesBody.Data.Items[1].FileID, token, map[string]any{
+		"device_id": deviceBody.Data.ID,
+	})
+	if deleteResp.Code != http.StatusOK {
+		t.Fatalf("delete status = %d body = %s", deleteResp.Code, deleteResp.Body.String())
+	}
+
+	sourceReq := httptest.NewRequest(http.MethodGet, "/api/v1/sync/changes?device_id="+deviceBody.Data.ID+"&after_change_id="+strconv.FormatInt(changesBody.Data.NextCursor, 10)+"&limit=10", nil)
+	sourceReq.Header.Set("Authorization", "Bearer "+token)
+	sourceRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(sourceRec, sourceReq)
+	if sourceRec.Code != http.StatusOK {
+		t.Fatalf("source changes status = %d body = %s", sourceRec.Code, sourceRec.Body.String())
+	}
+	var sourceBody struct {
+		Data struct {
+			Items []struct {
+				EventType      string  `json:"event_type"`
+				SourceDeviceID *string `json:"source_device_id"`
+			} `json:"items"`
+			NextCursor int64 `json:"next_cursor"`
+		} `json:"data"`
+	}
+	decodeBody(t, sourceRec, &sourceBody)
+	if len(sourceBody.Data.Items) != 2 {
+		t.Fatalf("source changes count = %d body = %s", len(sourceBody.Data.Items), sourceRec.Body.String())
+	}
+	for _, item := range sourceBody.Data.Items {
+		if item.EventType != "move" && item.EventType != "delete" {
+			t.Fatalf("unexpected source event = %#v", item)
+		}
+		if item.SourceDeviceID == nil || *item.SourceDeviceID != deviceBody.Data.ID {
+			t.Fatalf("%s source device = %#v, want %s", item.EventType, item.SourceDeviceID, deviceBody.Data.ID)
+		}
+	}
+	if sourceBody.Data.NextCursor <= changesBody.Data.NextCursor {
+		t.Fatalf("source next cursor = %d, want > %d", sourceBody.Data.NextCursor, changesBody.Data.NextCursor)
+	}
+
 	ackResp := doJSON(t, server, http.MethodPost, "/api/v1/sync/ack", token, map[string]any{
 		"device_id":              deviceBody.Data.ID,
-		"last_applied_change_id": changesBody.Data.NextCursor,
+		"last_applied_change_id": sourceBody.Data.NextCursor,
 	})
 	if ackResp.Code != http.StatusOK {
 		t.Fatalf("ack status = %d body = %s", ackResp.Code, ackResp.Body.String())
@@ -154,8 +202,8 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 		} `json:"data"`
 	}
 	decodeBody(t, ackResp, &ackBody)
-	if ackBody.Data.LastAppliedChangeID != changesBody.Data.NextCursor {
-		t.Fatalf("ack cursor = %d, want %d", ackBody.Data.LastAppliedChangeID, changesBody.Data.NextCursor)
+	if ackBody.Data.LastAppliedChangeID != sourceBody.Data.NextCursor {
+		t.Fatalf("ack cursor = %d, want %d", ackBody.Data.LastAppliedChangeID, sourceBody.Data.NextCursor)
 	}
 
 	heartbeatResp := doJSON(t, server, http.MethodPost, "/api/v1/devices/"+deviceBody.Data.ID+"/heartbeat", token, map[string]any{})

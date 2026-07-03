@@ -196,6 +196,9 @@ paths:
               properties:
                 path:
                   type: string
+                device_id:
+                  type: string
+                  description: Optional source device id for sync change attribution.
       responses:
         "200":
           description: Updated file metadata.
@@ -208,6 +211,16 @@ paths:
       summary: Delete file
       parameters:
         - $ref: "#/components/parameters/FileID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_id:
+                  type: string
+                  description: Optional source device id for sync change attribution.
       responses:
         "200":
           description: Deleted.
@@ -305,6 +318,9 @@ paths:
                 path:
                   type: string
                   example: /workspace
+                device_id:
+                  type: string
+                  description: Optional source device id for sync change attribution.
       responses:
         "201":
           description: Created directory.

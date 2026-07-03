@@ -16,7 +16,7 @@ import (
 )
 
 type Repository interface {
-	CreateDirectory(ctx context.Context, userID, path, name string, parentID *string) (domain.FileNode, error)
+	CreateDirectory(ctx context.Context, userID, path, name string, parentID, sourceDeviceID *string) (domain.FileNode, error)
 	GetFileByID(ctx context.Context, userID, fileID string) (domain.FileNode, error)
 	GetFileByPath(ctx context.Context, userID, path string) (domain.FileNode, error)
 	ListFiles(ctx context.Context, userID string, parentID *string, limit int32) ([]domain.FileNode, error)
@@ -24,8 +24,8 @@ type Repository interface {
 	PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
 	UnpinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
 	RestoreFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileNode, int64, error)
-	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error)
-	DeleteFile(ctx context.Context, userID, fileID string) error
+	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error)
+	DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error
 	CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error)
 	GetUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error)
 	PutUploadChunk(ctx context.Context, uploadID string, chunkIndex, size int32, sha256sum, storageKey string) (domain.UploadChunk, error)
@@ -44,7 +44,7 @@ func NewService(repo Repository, store storage.Storage, chunkSize int64, ttl tim
 	return &Service{repo: repo, store: store, chunkSize: chunkSize, uploadSessionTTL: ttl}
 }
 
-func (s *Service) CreateDirectory(ctx context.Context, userID, targetPath string) (domain.FileNode, error) {
+func (s *Service) CreateDirectory(ctx context.Context, userID, targetPath string, sourceDeviceID *string) (domain.FileNode, error) {
 	normalized, err := domain.NormalizePath(targetPath)
 	if err != nil {
 		return domain.FileNode{}, err
@@ -64,7 +64,7 @@ func (s *Service) CreateDirectory(ctx context.Context, userID, targetPath string
 		}
 		parentID = &parent.ID
 	}
-	return s.repo.CreateDirectory(ctx, userID, normalized, name, parentID)
+	return s.repo.CreateDirectory(ctx, userID, normalized, name, parentID, cleanOptionalString(sourceDeviceID))
 }
 
 func (s *Service) GetByID(ctx context.Context, userID, fileID string) (domain.FileNode, error) {
@@ -131,7 +131,7 @@ func (s *Service) UnpinVersion(ctx context.Context, userID, fileID string, versi
 	return s.repo.UnpinFileVersion(ctx, userID, fileID, version)
 }
 
-func (s *Service) Move(ctx context.Context, userID, fileID, newPath string) (domain.FileNode, error) {
+func (s *Service) Move(ctx context.Context, userID, fileID, newPath string, sourceDeviceID *string) (domain.FileNode, error) {
 	normalized, err := domain.NormalizePath(newPath)
 	if err != nil {
 		return domain.FileNode{}, err
@@ -148,11 +148,11 @@ func (s *Service) Move(ctx context.Context, userID, fileID, newPath string) (dom
 		}
 		parentID = &parent.ID
 	}
-	return s.repo.MoveFile(ctx, userID, fileID, normalized, name, parentID)
+	return s.repo.MoveFile(ctx, userID, fileID, normalized, name, parentID, cleanOptionalString(sourceDeviceID))
 }
 
-func (s *Service) Delete(ctx context.Context, userID, fileID string) error {
-	return s.repo.DeleteFile(ctx, userID, fileID)
+func (s *Service) Delete(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
+	return s.repo.DeleteFile(ctx, userID, fileID, cleanOptionalString(sourceDeviceID))
 }
 
 func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, size int64, sha256sum string, requestedChunkSize int64, baseVersion *int64, idempotencyKey, sourceDeviceID string) (domain.UploadSession, error) {
@@ -196,6 +196,17 @@ func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, siz
 		SourceDeviceID: deviceID,
 	}
 	return s.repo.CreateUploadSession(ctx, session)
+}
+
+func cleanOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func (s *Service) PutChunk(ctx context.Context, userID, uploadID string, chunkIndex int32, r io.Reader, checksum string) (domain.UploadChunk, error) {

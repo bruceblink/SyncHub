@@ -158,9 +158,9 @@ type downloadFileRepo struct {
 	node domain.FileNode
 }
 
-func (r *downloadFileRepo) CreateDirectory(ctx context.Context, userID, path, name string, parentID *string) (domain.FileNode, error) {
+func (r *downloadFileRepo) CreateDirectory(ctx context.Context, userID, path, name string, parentID, sourceDeviceID *string) (domain.FileNode, error) {
 	_, _, _, _ = ctx, userID, path, name
-	_ = parentID
+	_, _ = parentID, sourceDeviceID
 	return domain.FileNode{}, errNotImplemented()
 }
 
@@ -205,14 +205,14 @@ func (r *downloadFileRepo) RestoreFileVersion(ctx context.Context, userID, fileI
 	return domain.FileNode{}, 0, errNotImplemented()
 }
 
-func (r *downloadFileRepo) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string) (domain.FileNode, error) {
+func (r *downloadFileRepo) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error) {
 	_, _, _, _, _ = ctx, userID, fileID, newPath, newName
-	_ = newParentID
+	_, _ = newParentID, sourceDeviceID
 	return domain.FileNode{}, errNotImplemented()
 }
 
-func (r *downloadFileRepo) DeleteFile(ctx context.Context, userID, fileID string) error {
-	_, _, _ = ctx, userID, fileID
+func (r *downloadFileRepo) DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
+	_, _, _, _ = ctx, userID, fileID, sourceDeviceID
 	return errNotImplemented()
 }
 
