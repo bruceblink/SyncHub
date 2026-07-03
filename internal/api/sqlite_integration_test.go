@@ -725,6 +725,11 @@ func TestSQLiteUploadInitIdempotencyKey(t *testing.T) {
 	}
 	decodeBody(t, registerResp, &registerBody)
 
+	createDirResp := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", registerBody.Data.Tokens.AccessToken, map[string]any{"path": "/workspace"})
+	if createDirResp.Code != http.StatusCreated {
+		t.Fatalf("create directory status = %d body = %s", createDirResp.Code, createDirResp.Body.String())
+	}
+
 	sum := sha256.Sum256([]byte("hello"))
 	body := map[string]any{
 		"path":       "/workspace/idempotent.txt",

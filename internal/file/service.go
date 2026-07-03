@@ -53,16 +53,9 @@ func (s *Service) CreateDirectory(ctx context.Context, userID, targetPath string
 	if err != nil {
 		return domain.FileNode{}, err
 	}
-	var parentID *string
-	if parentPath != "/" {
-		parent, err := s.repo.GetFileByPath(ctx, userID, parentPath)
-		if err != nil {
-			return domain.FileNode{}, err
-		}
-		if parent.NodeType != domain.NodeTypeDirectory {
-			return domain.FileNode{}, domain.E(domain.CodeInvalidArgument, "parent is not a directory", nil)
-		}
-		parentID = &parent.ID
+	parentID, err := s.parentIDForPath(ctx, userID, parentPath)
+	if err != nil {
+		return domain.FileNode{}, err
 	}
 	return s.repo.CreateDirectory(ctx, userID, normalized, name, parentID, cleanOptionalString(sourceDeviceID))
 }
@@ -140,13 +133,9 @@ func (s *Service) Move(ctx context.Context, userID, fileID, newPath string, sour
 	if err != nil {
 		return domain.FileNode{}, err
 	}
-	var parentID *string
-	if parentPath != "/" {
-		parent, err := s.repo.GetFileByPath(ctx, userID, parentPath)
-		if err != nil {
-			return domain.FileNode{}, err
-		}
-		parentID = &parent.ID
+	parentID, err := s.parentIDForPath(ctx, userID, parentPath)
+	if err != nil {
+		return domain.FileNode{}, err
 	}
 	return s.repo.MoveFile(ctx, userID, fileID, normalized, name, parentID, cleanOptionalString(sourceDeviceID))
 }
@@ -170,10 +159,22 @@ func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, siz
 	if chunkSize <= 0 || chunkSize > math.MaxInt32 {
 		return domain.UploadSession{}, domain.E(domain.CodeInvalidArgument, "invalid chunk size", nil)
 	}
+	parentPath, _, err := domain.SplitPath(normalized)
+	if err != nil {
+		return domain.UploadSession{}, err
+	}
+	if _, err := s.parentIDForPath(ctx, userID, parentPath); err != nil {
+		return domain.UploadSession{}, err
+	}
 	existing, err := s.repo.GetFileByPath(ctx, userID, normalized)
 	var targetFileID *string
 	if err == nil {
+		if existing.NodeType != domain.NodeTypeFile {
+			return domain.UploadSession{}, domain.E(domain.CodeInvalidArgument, "upload target must be a file path", nil)
+		}
 		targetFileID = &existing.ID
+	} else if domain.ErrorCodeOf(err) != domain.CodeNotFound {
+		return domain.UploadSession{}, err
 	}
 	var key *string
 	if trimmed := strings.TrimSpace(idempotencyKey); trimmed != "" {
@@ -196,6 +197,20 @@ func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, siz
 		SourceDeviceID: deviceID,
 	}
 	return s.repo.CreateUploadSession(ctx, session)
+}
+
+func (s *Service) parentIDForPath(ctx context.Context, userID, parentPath string) (*string, error) {
+	if parentPath == "/" {
+		return nil, nil
+	}
+	parent, err := s.repo.GetFileByPath(ctx, userID, parentPath)
+	if err != nil {
+		return nil, err
+	}
+	if parent.NodeType != domain.NodeTypeDirectory {
+		return nil, domain.E(domain.CodeInvalidArgument, "parent is not a directory", nil)
+	}
+	return &parent.ID, nil
 }
 
 func cleanOptionalString(value *string) *string {
