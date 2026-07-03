@@ -26,6 +26,8 @@ func runFile(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runFileList(ctx, args[1:], stdout, stderr)
 	case "download":
 		return runFileDownload(ctx, args[1:], stdout, stderr)
+	case "delete":
+		return runFileDelete(ctx, args[1:], stdout, stderr)
 	case "versions":
 		return runFileVersions(ctx, args[1:], stdout, stderr)
 	case "restore":
@@ -75,6 +77,34 @@ func runFileList(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	printFileList(stdout, files)
+	return nil
+}
+
+func runFileDelete(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("file delete", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	remotePath := fs.String("remote-path", "", "remote file or directory path")
+	fileID := fs.String("file-id", "", "remote file or directory id")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
+	if err != nil {
+		return err
+	}
+	node, err := session.resolveFileNode(ctx, *fileID, *remotePath)
+	if err != nil {
+		return err
+	}
+	if err := session.apiClient.DeleteFileWithDevice(ctx, session.accessToken, node.ID, session.workspace.DeviceID); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "deleted: %s\n", node.Path)
+	fmt.Fprintf(stdout, "id: %s\n", node.ID)
 	return nil
 }
 
@@ -304,6 +334,20 @@ func (s fileCommandSession) resolveFileID(ctx context.Context, fileID, remotePat
 }
 
 func (s fileCommandSession) resolveDownloadFile(ctx context.Context, fileID, remotePath string) (client.FileNode, error) {
+	node, err := s.resolveFileNode(ctx, fileID, remotePath)
+	if err != nil {
+		return client.FileNode{}, err
+	}
+	if node.NodeType != "file" {
+		if strings.TrimSpace(node.Path) != "" {
+			return client.FileNode{}, fmt.Errorf("remote path is not a file: %s", node.Path)
+		}
+		return client.FileNode{}, fmt.Errorf("file id is not a file: %s", node.ID)
+	}
+	return node, nil
+}
+
+func (s fileCommandSession) resolveFileNode(ctx context.Context, fileID, remotePath string) (client.FileNode, error) {
 	id := strings.TrimSpace(fileID)
 	remote := strings.TrimSpace(remotePath)
 	if id == "" && remote == "" {
@@ -327,12 +371,6 @@ func (s fileCommandSession) resolveDownloadFile(ctx context.Context, fileID, rem
 	}
 	if err != nil {
 		return client.FileNode{}, err
-	}
-	if node.NodeType != "file" {
-		if strings.TrimSpace(node.Path) != "" {
-			return client.FileNode{}, fmt.Errorf("remote path is not a file: %s", node.Path)
-		}
-		return client.FileNode{}, fmt.Errorf("file id is not a file: %s", node.ID)
 	}
 	return node, nil
 }
