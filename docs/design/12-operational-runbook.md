@@ -8,9 +8,11 @@
 
 ## 排查
 
-- logs
-- metrics
+- logs: API 请求日志包含 method、path、status、duration_ms 和 trace_id，日志级别由 `LOG_LEVEL` 控制。
+- metrics: `GET /metrics` 输出 Prometheus text format 的请求计数和耗时累计值。
+- readiness: `GET /readyz` 同时检查数据库和 storage。
 - 过期上传会话由 API 进程内 worker 周期性标记为 `expired`，间隔由 `UPLOAD_CLEANUP_INTERVAL_SECONDS` 控制。
+- 清理任务每轮处理数量由 `CLEANUP_BATCH_LIMIT` 控制，默认 `1000`。
 
 ## 本地备份
 

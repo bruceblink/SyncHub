@@ -32,6 +32,7 @@ Later 按明确需求再评估：
 - `UPLOAD_CHUNK_SIZE`
 - `UPLOAD_SESSION_TTL_SECONDS`
 - `UPLOAD_CLEANUP_INTERVAL_SECONDS`
+- `CLEANUP_BATCH_LIMIT`，默认 `1000`
 - `VERSION_RETENTION_MIN_VERSIONS`，默认 `20`
 - `VERSION_RETENTION_MAX_AGE_DAYS`，默认 `30`
 
@@ -61,6 +62,11 @@ Later adapter 配置：
 
 - `GET /healthz`: 进程存活。
 - `GET /readyz`: 数据库、storage 可用。
+
+## 指标
+
+- `GET /metrics`: Prometheus text format，当前输出 API 请求总数和请求耗时累计值。
+- metrics 是进程内指标；容器重启后会重新计数。
 
 ## API 文档
 

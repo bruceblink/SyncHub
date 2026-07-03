@@ -7,6 +7,7 @@
 - Content-Type: JSON 接口使用 `application/json`；chunk 上传使用 `application/octet-stream` 或 multipart。
 - Pagination: `page_size` 最大 200，列表接口返回 `next_cursor`。
 - Idempotency: 创建上传会话、提交上传、删除文件应支持 `Idempotency-Key`。
+- Observability: `GET /healthz`、`GET /readyz`、`GET /metrics`、`GET /swagger/openapi.yaml` 不需要认证。
 
 ## 通用响应
 
@@ -102,8 +103,8 @@ Request:
 
 ```json
 {
-  "parent_id": "root",
-  "name": "notes"
+  "path": "/workspace/notes",
+  "device_id": "dev_..."
 }
 ```
 
@@ -115,14 +116,37 @@ Request:
 
 ```json
 {
-  "parent_id": "new_parent_id",
-  "name": "new-name.txt"
+  "path": "/workspace/new-name.txt",
+  "device_id": "dev_..."
 }
 ```
 
 ### 删除
 
 `DELETE /api/v1/files/{file_id}`
+
+Request:
+
+```json
+{
+  "device_id": "dev_..."
+}
+```
+
+### 版本历史
+
+`GET /api/v1/files/{file_id}/versions?limit=100`
+
+### 恢复版本
+
+`POST /api/v1/files/{file_id}/versions/{version}/restore`
+
+### Pin / Unpin 版本
+
+```text
+POST   /api/v1/files/{file_id}/versions/{version}/pin
+DELETE /api/v1/files/{file_id}/versions/{version}/pin
+```
 
 ## Upload
 
@@ -142,7 +166,8 @@ Request:
   "size": 10485760,
   "sha256": "hex",
   "chunk_size": 4194304,
-  "base_version": 3
+  "base_version": 3,
+  "device_id": "dev_..."
 }
 ```
 
@@ -229,6 +254,22 @@ Request:
 {
   "device_id": "dev_...",
   "last_applied_change_id": 1024
+}
+```
+
+### 查询冲突
+
+`GET /api/v1/sync/conflicts?resolution=pending&limit=100`
+
+### 标记冲突处理结果
+
+`PATCH /api/v1/sync/conflicts/{conflict_id}`
+
+Request:
+
+```json
+{
+  "resolution": "keep_both"
 }
 ```
 

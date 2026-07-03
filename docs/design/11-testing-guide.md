@@ -7,6 +7,7 @@
 - API integration tests: Gin router + test database + mock/local storage。
 - Storage tests: Local FS backend 的 put/read/delete/compose/range。
 - Sync tests: change cursor、manifest diff、冲突检测。
+- CLI E2E tests: 使用 SQLite API test server 和临时 workspace 验证双设备同步闭环。
 
 ## 首期必须覆盖
 
@@ -17,6 +18,9 @@
 - upload commit 幂等。
 - base_version 冲突返回。
 - 用户 A 不能访问用户 B 的文件。
+- 版本历史、restore、pin / unpin。
+- sync conflicts 查询和 resolution 更新。
+- 两个本地 workspace 通过同一个 SQLite API server 完成 push / pull。
 
 ## 测试工具建议
 
