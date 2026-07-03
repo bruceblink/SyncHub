@@ -14,6 +14,7 @@ func TestHealthz(t *testing.T) {
 	server := New(nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("X-Trace-ID", "trace-health")
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 
@@ -27,6 +28,12 @@ func TestHealthz(t *testing.T) {
 	}
 	if body.Code != float64(0) || body.Message != "ok" {
 		t.Fatalf("unexpected response: %#v", body)
+	}
+	if body.TraceID != "trace-health" {
+		t.Fatalf("trace id = %q, want trace-health", body.TraceID)
+	}
+	if got := rec.Header().Get("X-Trace-ID"); got != "trace-health" {
+		t.Fatalf("trace header = %q, want trace-health", got)
 	}
 }
 
@@ -67,6 +74,9 @@ func TestReadyzFailsWhenStorageIsNotReady(t *testing.T) {
 	}
 	if !strings.Contains(body.Message, "storage is not ready") {
 		t.Fatalf("unexpected response: %#v", body)
+	}
+	if body.TraceID == "" {
+		t.Fatalf("trace id was not set in error response: %#v", body)
 	}
 }
 

@@ -13,7 +13,10 @@ import (
 	"github.com/bruceblink/SyncHub/internal/storage"
 	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
+
+const traceIDKey = "trace_id"
 
 type Pinger interface {
 	Ping(ctx context.Context) error
@@ -40,6 +43,7 @@ func NewWithSyncAndStorage(auth *authsvc.Service, files *filesvc.Service, sync *
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(traceMiddleware())
 	s := &Server{router: r, auth: auth, files: files, sync: sync, db: db, storage: store}
 	s.routes()
 	return s
@@ -47,6 +51,21 @@ func NewWithSyncAndStorage(auth *authsvc.Service, files *filesvc.Service, sync *
 
 func (s *Server) Handler() http.Handler {
 	return s.router
+}
+
+func traceMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		traceID := strings.TrimSpace(c.GetHeader("X-Trace-ID"))
+		if traceID == "" {
+			traceID = strings.TrimSpace(c.GetHeader("X-Request-ID"))
+		}
+		if traceID == "" {
+			traceID = uuid.NewString()
+		}
+		c.Set(traceIDKey, traceID)
+		c.Header("X-Trace-ID", traceID)
+		c.Next()
+	}
 }
 
 func (s *Server) routes() {

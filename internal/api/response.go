@@ -17,11 +17,11 @@ type Response struct {
 }
 
 func ok(c *gin.Context, data any) {
-	c.JSON(http.StatusOK, Response{Code: 0, Message: "ok", Data: data})
+	c.JSON(http.StatusOK, Response{Code: 0, Message: "ok", Data: data, TraceID: traceID(c)})
 }
 
 func created(c *gin.Context, data any) {
-	c.JSON(http.StatusCreated, Response{Code: 0, Message: "ok", Data: data})
+	c.JSON(http.StatusCreated, Response{Code: 0, Message: "ok", Data: data, TraceID: traceID(c)})
 }
 
 func fail(c *gin.Context, err error) {
@@ -29,7 +29,16 @@ func fail(c *gin.Context, err error) {
 	if !errors.As(err, &appErr) {
 		appErr = domain.E(domain.CodeInternal, "internal error", err)
 	}
-	c.JSON(statusFor(appErr.Code), Response{Code: appErr.Code, Message: appErr.Error()})
+	c.JSON(statusFor(appErr.Code), Response{Code: appErr.Code, Message: appErr.Error(), TraceID: traceID(c)})
+}
+
+func traceID(c *gin.Context) string {
+	value, ok := c.Get(traceIDKey)
+	if !ok {
+		return ""
+	}
+	traceID, _ := value.(string)
+	return traceID
 }
 
 func statusFor(code domain.ErrorCode) int {
