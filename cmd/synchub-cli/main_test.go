@@ -1426,6 +1426,67 @@ func TestRunFileMoveRequiresTargetPath(t *testing.T) {
 	}
 }
 
+func TestRunFileMoveByFileID(t *testing.T) {
+	root := t.TempDir()
+	moved := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/dir_1":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"docs","path":"/workspace/docs","node_type":"directory","version":2,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/files/dir_1":
+			var req struct {
+				Path     string `json:"path"`
+				DeviceID string `json:"device_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode move request: %v", err)
+			}
+			if req.Path != "/archive/docs" || req.DeviceID != "" {
+				t.Fatalf("move request = %#v", req)
+			}
+			moved = true
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"docs","path":"/archive/docs","node_type":"directory","version":3,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:02:00Z"}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"move",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--file-id", "dir_1",
+		"--to", "/archive/docs",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file move: %v", err)
+	}
+	if !moved {
+		t.Fatal("move endpoint was not called")
+	}
+	want := "moved: /workspace/docs -> /archive/docs\nid: dir_1\nversion: 3\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestRunFileVersionsByRemotePath(t *testing.T) {
 	root := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
