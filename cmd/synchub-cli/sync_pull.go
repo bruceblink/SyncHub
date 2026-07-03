@@ -129,11 +129,6 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 		if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
 			return err
 		}
-	} else if *resetCursor && workspace.LastAppliedChangeID != 0 {
-		workspace.LastAppliedChangeID = 0
-		if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
-			return err
-		}
 	}
 	fmt.Fprintf(stdout, "pulled: %d files\n", files)
 	fmt.Fprintf(stdout, "directories: %d\n", dirs)
