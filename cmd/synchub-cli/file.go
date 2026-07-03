@@ -45,6 +45,7 @@ func runFileList(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	configPath := fs.String("config", defaultConfigPath(), "login config file path")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	parentID := fs.String("parent-id", "", "remote parent directory id")
+	remotePath := fs.String("remote-path", "", "remote parent directory path")
 	pageSize := fs.Int("page-size", 100, "maximum files to list")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -52,13 +53,16 @@ func runFileList(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if *pageSize <= 0 {
 		return errors.New("page size must be positive")
 	}
+	if strings.TrimSpace(*parentID) != "" && strings.TrimSpace(*remotePath) != "" {
+		return errors.New("parent id and remote path cannot both be set")
+	}
 	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
 	if err != nil {
 		return err
 	}
-	var parent *string
-	if trimmed := strings.TrimSpace(*parentID); trimmed != "" {
-		parent = &trimmed
+	parent, err := session.resolveFileListParent(ctx, *parentID, *remotePath)
+	if err != nil {
+		return err
 	}
 	files, err := session.apiClient.ListFiles(ctx, session.accessToken, parent, int32(*pageSize))
 	if err != nil {
@@ -207,6 +211,31 @@ func openFileCommandSession(ctx context.Context, rootPath, workspaceConfigPath, 
 		apiClient:   client.New(serverURL),
 		accessToken: loginConfig.Tokens.AccessToken,
 	}, nil
+}
+
+func (s fileCommandSession) resolveFileListParent(ctx context.Context, parentID, remotePath string) (*string, error) {
+	if trimmed := strings.TrimSpace(parentID); trimmed != "" {
+		return &trimmed, nil
+	}
+	remote := strings.TrimSpace(remotePath)
+	if remote == "" {
+		return nil, nil
+	}
+	normalized, err := normalizeRemotePath(remote)
+	if err != nil {
+		return nil, err
+	}
+	if normalized == "/" {
+		return nil, nil
+	}
+	node, err := s.apiClient.GetFileByPath(ctx, s.accessToken, normalized)
+	if err != nil {
+		return nil, err
+	}
+	if node.NodeType != "directory" {
+		return nil, fmt.Errorf("remote path is not a directory: %s", normalized)
+	}
+	return &node.ID, nil
 }
 
 func (s fileCommandSession) resolveFileID(ctx context.Context, fileID, remotePath string) (string, string, error) {

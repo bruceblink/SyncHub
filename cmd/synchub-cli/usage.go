@@ -42,6 +42,7 @@ func printManifestUsage(w io.Writer) {
 func printFileUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli file list --path .")
+	fmt.Fprintln(w, "  synchub-cli file list --path . --remote-path /workspace/docs")
 	fmt.Fprintln(w, "  synchub-cli file list --path . --parent-id dir_1")
 	fmt.Fprintln(w, "  synchub-cli file versions --path . --remote-path /workspace/readme.txt")
 	fmt.Fprintln(w, "  synchub-cli file versions --path . --file-id file_1")

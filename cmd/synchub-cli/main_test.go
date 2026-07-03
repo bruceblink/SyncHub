@@ -766,6 +766,149 @@ func TestRunFileList(t *testing.T) {
 	}
 }
 
+func TestRunFileListByRemotePath(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/by-path":
+			if got := r.URL.Query().Get("path"); got != "/workspace/docs" {
+				t.Fatalf("path = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_docs","name":"docs","path":"/workspace/docs","node_type":"directory","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files":
+			if got := r.URL.Query().Get("parent_id"); got != "dir_docs" {
+				t.Fatalf("parent_id = %q", got)
+			}
+			if got := r.URL.Query().Get("page_size"); got != "20" {
+				t.Fatalf("page_size = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"file_1","parent_id":"dir_docs","name":"guide.md","path":"/workspace/docs/guide.md","node_type":"file","size":9,"sha256":"sha1","version":3,"created_at":"2026-06-30T00:01:00Z","updated_at":"2026-06-30T00:02:00Z"}]}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"list",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--remote-path", "/workspace/docs",
+		"--page-size", "20",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file list: %v", err)
+	}
+	want := "files: 1\nfile guide.md size=9 version=3 id=file_1\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunFileListRootRemotePath(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("parent_id"); got != "" {
+			t.Fatalf("parent_id = %q", got)
+		}
+		if got := r.URL.Query().Get("page_size"); got != "100" {
+			t.Fatalf("page_size = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"dir_1","name":"workspace","path":"/workspace","node_type":"directory","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}]}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"list",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--remote-path", "/",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file list: %v", err)
+	}
+	want := "files: 1\ndirectory workspace/ size=0 version=1 id=dir_1\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunFileListRejectsRemoteFilePath(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/by-path":
+			if got := r.URL.Query().Get("path"); got != "/workspace/a.txt" {
+				t.Fatalf("path = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":5,"sha256":"sha1","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	err := run(context.Background(), []string{
+		"file",
+		"list",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--remote-path", "/workspace/a.txt",
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "remote path is not a directory: /workspace/a.txt") {
+		t.Fatalf("error = %v, want remote path is not a directory", err)
+	}
+}
+
 func TestRunFileVersionsByRemotePath(t *testing.T) {
 	root := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
