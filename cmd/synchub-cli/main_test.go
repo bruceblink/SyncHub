@@ -1193,8 +1193,6 @@ func TestRunSyncOncePushesAndPulls(t *testing.T) {
 			registeredDevice = true
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices/dev_1/heartbeat":
-			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/changes":
 			listedChanges = true
 			if got := r.URL.Query().Get("device_id"); got != "dev_1" {

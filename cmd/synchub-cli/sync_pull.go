@@ -20,6 +20,10 @@ import (
 )
 
 func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return runSyncPullWithDeviceEnsure(ctx, args, stdout, stderr, true)
+}
+
+func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, stderr io.Writer, ensureDevice bool) error {
 	fs := flag.NewFlagSet("sync pull", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	rootPath := fs.String("path", ".", "local workspace root")
@@ -57,14 +61,19 @@ func runSyncPull(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		serverURL = loginConfig.ServerURL
 	}
 	apiClient := client.New(serverURL)
-	changed, err := ensureWorkspaceDevice(ctx, apiClient, loginConfig.Tokens.AccessToken, root, &workspace, *deviceName, *devicePlatform)
-	if err != nil {
-		return err
-	}
-	if changed {
-		if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
+	if ensureDevice {
+		changed, err := ensureWorkspaceDevice(ctx, apiClient, loginConfig.Tokens.AccessToken, root, &workspace, *deviceName, *devicePlatform)
+		if err != nil {
 			return err
 		}
+		if changed {
+			if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
+				return err
+			}
+		}
+	}
+	if strings.TrimSpace(workspace.DeviceID) == "" {
+		return errors.New("workspace device is not registered")
 	}
 
 	changes, err := apiClient.ListChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, workspace.LastAppliedChangeID, int32(*limit))

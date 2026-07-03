@@ -81,7 +81,7 @@ func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		pullArgs = append(pullArgs, "--platform", *devicePlatform)
 	}
 	pullArgs = append(pullArgs, "--limit", fmt.Sprintf("%d", *limit))
-	return runSyncPull(ctx, pullArgs, stdout, stderr)
+	return runSyncPullWithDeviceEnsure(ctx, pullArgs, stdout, stderr, false)
 }
 
 func ensureSyncOnceDevice(ctx context.Context, rootPath, workspaceConfigPath, configPath, deviceName, devicePlatform string) error {
