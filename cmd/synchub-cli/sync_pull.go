@@ -304,6 +304,24 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 		if event.OldPath == nil {
 			return pullApplyResult{}, errors.New("move event is missing old_path")
 		}
+		oldLocalPath, ok, err := localPathForRemote(root, workspace.RemotePath, *event.OldPath)
+		if err != nil || !ok {
+			return pullApplyResult{}, err
+		}
+		conflictKept, err := keepLocalConflictIfChanged(oldLocalPath, *event.OldPath, workspace, previousEntries)
+		if err != nil {
+			return pullApplyResult{}, err
+		}
+		if conflictKept {
+			newLocalPath, ok, err := localPathForRemote(root, workspace.RemotePath, event.Path)
+			if err != nil || !ok {
+				return pullApplyResult{}, err
+			}
+			if err := downloadChangeFile(ctx, apiClient, accessToken, event.FileID, newLocalPath); err != nil {
+				return pullApplyResult{}, err
+			}
+			return pullApplyResult{moved: 1, conflictKept: 1}, nil
+		}
 		if err := moveLocalPath(root, workspace.RemotePath, *event.OldPath, event.Path); err != nil {
 			return pullApplyResult{}, err
 		}
