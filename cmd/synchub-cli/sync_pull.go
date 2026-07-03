@@ -35,6 +35,7 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 	devicePlatform := fs.String("platform", runtime.GOOS, "device platform")
 	limit := fs.Int("limit", 500, "maximum changes to pull")
 	resetCursor := fs.Bool("reset-cursor", false, "reset local change cursor and replay the available change feed")
+	dryRun := fs.Bool("dry-run", false, "preview remote changes without modifying local files or cursor")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -43,14 +44,6 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 	}
 
 	root, workspace, workspacePath, err := loadWorkspace(*rootPath, *workspaceConfigPath)
-	if err != nil {
-		return err
-	}
-	localManifestPath := *manifestPath
-	if strings.TrimSpace(localManifestPath) == "" {
-		localManifestPath = filepath.Join(root, ".synchub", "manifest.json")
-	}
-	previousManifest, err := readPullManifest(root, localManifestPath)
 	if err != nil {
 		return err
 	}
@@ -63,7 +56,7 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 		serverURL = loginConfig.ServerURL
 	}
 	apiClient := client.New(serverURL)
-	if ensureDevice {
+	if ensureDevice && !*dryRun {
 		changed, err := ensureWorkspaceDevice(ctx, apiClient, loginConfig.Tokens.AccessToken, root, &workspace, *deviceName, *devicePlatform)
 		if err != nil {
 			return err
@@ -87,6 +80,19 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 		if isAPIErrorCode(err, "SYNC_CURSOR_EXPIRED") {
 			return fmt.Errorf("sync cursor expired; run synchub-cli sync pull --path %s --reset-cursor to replay the available change feed", root)
 		}
+		return err
+	}
+	if *dryRun {
+		printSyncPullPreview(stdout, previewPullChanges(workspace, changes.Items), workspace.LastAppliedChangeID, pullNextCursor(changes))
+		return nil
+	}
+
+	localManifestPath := *manifestPath
+	if strings.TrimSpace(localManifestPath) == "" {
+		localManifestPath = filepath.Join(root, ".synchub", "manifest.json")
+	}
+	previousManifest, err := readPullManifest(root, localManifestPath)
+	if err != nil {
 		return err
 	}
 	previousEntries, err := manifestEntriesByPath(previousManifest)
@@ -113,10 +119,7 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 			return err
 		}
 	}
-	nextCursor := changes.NextCursor
-	if nextCursor == 0 && len(changes.Items) > 0 {
-		nextCursor = changes.Items[len(changes.Items)-1].ID
-	}
+	nextCursor := pullNextCursor(changes)
 	if nextCursor > workspace.LastAppliedChangeID || (*resetCursor && nextCursor > 0) {
 		device, err := apiClient.AckChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, nextCursor)
 		if err != nil {
@@ -143,6 +146,41 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 
 func isOwnChangeEvent(workspace workspaceConfig, event client.ChangeEvent) bool {
 	return strings.TrimSpace(workspace.DeviceID) != "" && event.SourceDeviceID != nil && *event.SourceDeviceID == workspace.DeviceID
+}
+
+func previewPullChanges(workspace workspaceConfig, changes []client.ChangeEvent) []client.ChangeEvent {
+	preview := make([]client.ChangeEvent, 0, len(changes))
+	for _, event := range changes {
+		if isOwnChangeEvent(workspace, event) {
+			continue
+		}
+		preview = append(preview, event)
+	}
+	return preview
+}
+
+func pullNextCursor(changes client.ChangeList) int64 {
+	if changes.NextCursor != 0 || len(changes.Items) == 0 {
+		return changes.NextCursor
+	}
+	return changes.Items[len(changes.Items)-1].ID
+}
+
+func printSyncPullPreview(stdout io.Writer, changes []client.ChangeEvent, currentCursor, nextCursor int64) {
+	fmt.Fprintln(stdout, "dry run: true")
+	fmt.Fprintf(stdout, "changes: %d\n", len(changes))
+	for _, event := range changes {
+		fmt.Fprintln(stdout, formatPullPreviewChange(event))
+	}
+	fmt.Fprintf(stdout, "current cursor: %d\n", currentCursor)
+	fmt.Fprintf(stdout, "next cursor: %d\n", nextCursor)
+}
+
+func formatPullPreviewChange(event client.ChangeEvent) string {
+	if event.EventType == "move" && event.OldPath != nil {
+		return fmt.Sprintf("%s %s -> %s version=%s id=%d", event.EventType, *event.OldPath, event.Path, versionString(event.Version), event.ID)
+	}
+	return fmt.Sprintf("%s %s version=%s id=%d", event.EventType, event.Path, versionString(event.Version), event.ID)
 }
 
 func readPullManifest(root, manifestPath string) (manifest.Manifest, error) {
