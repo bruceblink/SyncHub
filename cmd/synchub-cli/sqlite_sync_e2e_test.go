@@ -83,8 +83,8 @@ func TestSQLiteTwoDeviceSyncFlow(t *testing.T) {
 	)
 	assertFileContent(t, filepath.Join(deviceOneRoot, "shared.txt"), "from device two")
 
-	if err := os.Remove(filepath.Join(deviceTwoRoot, "shared.txt")); err != nil {
-		t.Fatalf("delete device two file: %v", err)
+	if err := os.Rename(filepath.Join(deviceTwoRoot, "shared.txt"), filepath.Join(deviceTwoRoot, "renamed.txt")); err != nil {
+		t.Fatalf("rename device two file: %v", err)
 	}
 	runCLI(t, "sync", "once",
 		"--path", deviceTwoRoot,
@@ -99,6 +99,24 @@ func TestSQLiteTwoDeviceSyncFlow(t *testing.T) {
 		"--platform", "test",
 	)
 	assertFileMissing(t, filepath.Join(deviceOneRoot, "shared.txt"))
+	assertFileContent(t, filepath.Join(deviceOneRoot, "renamed.txt"), "from device two")
+
+	if err := os.Remove(filepath.Join(deviceTwoRoot, "renamed.txt")); err != nil {
+		t.Fatalf("delete device two file: %v", err)
+	}
+	runCLI(t, "sync", "once",
+		"--path", deviceTwoRoot,
+		"--config", deviceTwoConfig,
+		"--device-name", "device-two",
+		"--platform", "test",
+	)
+	runCLI(t, "sync", "once",
+		"--path", deviceOneRoot,
+		"--config", deviceOneConfig,
+		"--device-name", "device-one",
+		"--platform", "test",
+	)
+	assertFileMissing(t, filepath.Join(deviceOneRoot, "renamed.txt"))
 }
 
 func newSQLiteCLITestServer(t *testing.T) *httptest.Server {
