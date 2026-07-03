@@ -1879,6 +1879,54 @@ func TestRunSyncPushSkipsUnchangedManifestFiles(t *testing.T) {
 	}
 }
 
+func TestRunSyncPushWritesManifestForEmptyWorkspace(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request = %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"push",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	if stdout.String() != "uploaded: 0 files\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	m, err := readManifest(filepath.Join(root, ".synchub", "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(m.Items) != 0 || m.Root != root || m.RemotePath != "/workspace" {
+		t.Fatalf("manifest = %#v", m)
+	}
+}
+
 func TestRunSyncPushMovesRenamedManifestFiles(t *testing.T) {
 	root := t.TempDir()
 	content := []byte("same content")

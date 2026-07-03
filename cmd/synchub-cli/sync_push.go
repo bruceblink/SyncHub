@@ -48,9 +48,11 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if strings.TrimSpace(localManifestPath) == "" {
 		localManifestPath = filepath.Join(root, ".synchub", "manifest.json")
 	}
+	manifestMissing := false
 	m, err := readManifest(localManifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			manifestMissing = true
 			m = manifest.Manifest{
 				Version:    1,
 				Root:       root,
@@ -97,7 +99,7 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	deleted := 0
 	moved := 0
 	conflictKept := 0
-	manifestChanged := false
+	manifestChanged := manifestMissing
 	hasPushChanges := len(plannedMoves) > 0 || hasDeletedManifestEntries(m, currentPaths)
 	if !hasPushChanges {
 		for _, item := range currentManifest.Items {
