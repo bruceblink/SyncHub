@@ -58,6 +58,19 @@ Later adapter 配置：
 3. 滚动替换 API container。
 4. 健康检查通过后开放流量。
 
+## Docker 构建排查
+
+镜像构建依赖 Docker 能拉取基础镜像：
+
+- `golang:1.26-alpine`
+- `alpine:3.22`
+
+如果 `docker build` 在 `load metadata` 阶段失败，并出现 `failed to resolve source metadata`、`registry-1.docker.io` 连接超时或代理提示，通常说明 Docker Desktop 无法访问 Docker Hub，而不是项目编译失败。优先检查：
+
+- Docker Desktop proxy / registry mirror 配置。
+- 当前网络是否能访问 Docker Hub。
+- 本机是否已有可用的基础镜像缓存。
+
 ## 健康检查
 
 - `GET /healthz`: 进程存活。
