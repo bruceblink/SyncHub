@@ -278,6 +278,167 @@ func TestSQLiteSyncConflictRepository(t *testing.T) {
 	}
 }
 
+func TestSQLiteMoveDirectoryCascadesDescendantPaths(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "move-directory@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	workspace, err := repo.CreateDirectory(ctx, user.ID, "/workspace", "workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	src, err := repo.CreateDirectory(ctx, user.ID, "/workspace/src", "src", &workspace.ID, nil)
+	if err != nil {
+		t.Fatalf("create src: %v", err)
+	}
+	pkgDir, err := repo.CreateDirectory(ctx, user.ID, "/workspace/src/pkg", "pkg", &src.ID, nil)
+	if err != nil {
+		t.Fatalf("create pkg: %v", err)
+	}
+	file := commitTestFile(t, repo, user.ID, "/workspace/src/pkg/main.go", "sha-main", "objects/user/main")
+	archive, err := repo.CreateDirectory(ctx, user.ID, "/archive", "archive", nil, nil)
+	if err != nil {
+		t.Fatalf("create archive: %v", err)
+	}
+	deviceID := "dev-1"
+
+	moved, err := repo.MoveFile(ctx, user.ID, src.ID, "/archive/src", "src", &archive.ID, &deviceID)
+	if err != nil {
+		t.Fatalf("move directory: %v", err)
+	}
+	if moved.Path != "/archive/src" || moved.Version != 2 {
+		t.Fatalf("moved directory = %#v", moved)
+	}
+
+	if _, err := repo.GetFileByPath(ctx, user.ID, "/workspace/src/pkg/main.go"); domain.ErrorCodeOf(err) != domain.CodeNotFound {
+		t.Fatalf("old child path error = %v, want not found", err)
+	}
+	movedPkg, err := repo.GetFileByID(ctx, user.ID, pkgDir.ID)
+	if err != nil {
+		t.Fatalf("get moved pkg by id: %v", err)
+	}
+	if movedPkg.Path != "/archive/src/pkg" {
+		t.Fatalf("moved pkg path = %q", movedPkg.Path)
+	}
+	movedFile, err := repo.GetFileByID(ctx, user.ID, file.ID)
+	if err != nil {
+		t.Fatalf("get moved file by id: %v", err)
+	}
+	if movedFile.Path != "/archive/src/pkg/main.go" || movedFile.ParentID == nil || *movedFile.ParentID != pkgDir.ID {
+		t.Fatalf("moved file = %#v", movedFile)
+	}
+
+	events, err := repo.ListChanges(ctx, user.ID, createTestDevice(t, repo, user.ID).ID, 0, 20)
+	if err != nil {
+		t.Fatalf("list changes: %v", err)
+	}
+	last := events[len(events)-1]
+	if last.EventType != domain.EventMove || last.Path != "/archive/src" || last.OldPath == nil || *last.OldPath != "/workspace/src" {
+		t.Fatalf("last change = %#v", last)
+	}
+	if last.SourceDeviceID == nil || *last.SourceDeviceID != deviceID {
+		t.Fatalf("source device id = %#v, want %s", last.SourceDeviceID, deviceID)
+	}
+}
+
+func TestSQLiteMoveDirectoryRejectsDescendantTarget(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "move-into-self@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	workspace, err := repo.CreateDirectory(ctx, user.ID, "/workspace", "workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	src, err := repo.CreateDirectory(ctx, user.ID, "/workspace/src", "src", &workspace.ID, nil)
+	if err != nil {
+		t.Fatalf("create src: %v", err)
+	}
+	nested, err := repo.CreateDirectory(ctx, user.ID, "/workspace/src/nested", "nested", &src.ID, nil)
+	if err != nil {
+		t.Fatalf("create nested: %v", err)
+	}
+
+	_, err = repo.MoveFile(ctx, user.ID, src.ID, "/workspace/src/nested/src", "src", &nested.ID, nil)
+	if domain.ErrorCodeOf(err) != domain.CodeInvalidArgument {
+		t.Fatalf("move into descendant error = %v, want invalid argument", err)
+	}
+	node, err := repo.GetFileByID(ctx, user.ID, src.ID)
+	if err != nil {
+		t.Fatalf("get src: %v", err)
+	}
+	if node.Path != "/workspace/src" || node.Version != 1 {
+		t.Fatalf("src after rejected move = %#v", node)
+	}
+}
+
+func TestSQLiteDeleteDirectoryCascadesDescendants(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "delete-directory@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	workspace, err := repo.CreateDirectory(ctx, user.ID, "/workspace", "workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	src, err := repo.CreateDirectory(ctx, user.ID, "/workspace/src", "src", &workspace.ID, nil)
+	if err != nil {
+		t.Fatalf("create src: %v", err)
+	}
+	file := commitTestFile(t, repo, user.ID, "/workspace/src/main.go", "sha-delete", "objects/user/delete")
+	deviceID := "dev-1"
+
+	if err := repo.DeleteFile(ctx, user.ID, src.ID, &deviceID); err != nil {
+		t.Fatalf("delete directory: %v", err)
+	}
+	if _, err := repo.GetFileByID(ctx, user.ID, src.ID); domain.ErrorCodeOf(err) != domain.CodeNotFound {
+		t.Fatalf("deleted directory error = %v, want not found", err)
+	}
+	if _, err := repo.GetFileByID(ctx, user.ID, file.ID); domain.ErrorCodeOf(err) != domain.CodeNotFound {
+		t.Fatalf("deleted child file error = %v, want not found", err)
+	}
+	children, err := repo.ListFiles(ctx, user.ID, &workspace.ID, 10)
+	if err != nil {
+		t.Fatalf("list workspace children: %v", err)
+	}
+	if len(children) != 0 {
+		t.Fatalf("workspace children after delete = %#v, want none", children)
+	}
+
+	events, err := repo.ListChanges(ctx, user.ID, createTestDevice(t, repo, user.ID).ID, 0, 20)
+	if err != nil {
+		t.Fatalf("list changes: %v", err)
+	}
+	last := events[len(events)-1]
+	if last.EventType != domain.EventDelete || last.Path != "/workspace/src" || last.Version == nil || *last.Version != 2 {
+		t.Fatalf("last change = %#v", last)
+	}
+	if last.SourceDeviceID == nil || *last.SourceDeviceID != deviceID {
+		t.Fatalf("source device id = %#v, want %s", last.SourceDeviceID, deviceID)
+	}
+}
+
 func createUploadSession(t *testing.T, repo *SQLiteRepository, userID, targetPath, status string, expiresAt time.Time) domain.UploadSession {
 	t.Helper()
 	session, err := repo.CreateUploadSession(context.Background(), domain.UploadSession{
@@ -304,4 +465,34 @@ func assertUploadStatus(t *testing.T, repo *SQLiteRepository, userID, uploadID, 
 	if session.Status != want {
 		t.Fatalf("upload session %s status = %q, want %q", uploadID, session.Status, want)
 	}
+}
+
+func commitTestFile(t *testing.T, repo *SQLiteRepository, userID, targetPath, sha256sum, storageKey string) domain.FileNode {
+	t.Helper()
+	session, err := repo.CreateUploadSession(context.Background(), domain.UploadSession{
+		UserID:     userID,
+		TargetPath: targetPath,
+		TotalSize:  1,
+		ChunkSize:  1,
+		SHA256:     sha256sum,
+		Status:     domain.UploadStatusPending,
+		ExpiresAt:  time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("create upload session for %s: %v", targetPath, err)
+	}
+	node, _, err := repo.CommitUpload(context.Background(), userID, session.ID, storageKey)
+	if err != nil {
+		t.Fatalf("commit upload for %s: %v", targetPath, err)
+	}
+	return node
+}
+
+func createTestDevice(t *testing.T, repo *SQLiteRepository, userID string) domain.Device {
+	t.Helper()
+	device, err := repo.CreateDevice(context.Background(), userID, "test-device", "test")
+	if err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	return device
 }

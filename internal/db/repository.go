@@ -268,12 +268,22 @@ func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID stri
 }
 
 func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error) {
-	old, err := r.GetFileByID(ctx, userID, fileID)
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.FileNode{}, wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	old, err := r.getFileByIDTx(ctx, tx, userID, fileID)
 	if err != nil {
 		return domain.FileNode{}, err
 	}
+	if old.NodeType == domain.NodeTypeDirectory && isDescendantPath(newPath, old.Path) {
+		return domain.FileNode{}, domain.E(domain.CodeInvalidArgument, "directory cannot be moved into itself", nil)
+	}
+
 	var node domain.FileNode
-	err = r.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		update file_nodes
 		set parent_id = $3, name = $4, path = $5, version = version + 1, updated_at = now()
 		where user_id = $1 and id = $2 and deleted_at is null
@@ -285,28 +295,63 @@ func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newN
 	if err != nil {
 		return domain.FileNode{}, wrapNotFound(err, "file not found")
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, sourceDeviceID)
-	return node, wrapDBErr(err)
+	if old.NodeType == domain.NodeTypeDirectory {
+		_, err = tx.Exec(ctx, `
+			update file_nodes
+			set path = $2 || substring(path from length($3) + 1), updated_at = now()
+			where user_id = $1 and deleted_at is null
+				and path like replace(replace(replace($3, '\', '\\'), '%', '\%'), '_', '\_') || '/%' escape '\'
+		`, userID, newPath, old.Path)
+		if isUniqueViolation(err) {
+			return domain.FileNode{}, domain.E(domain.CodeAlreadyExists, "file path already exists", err)
+		}
+		if err != nil {
+			return domain.FileNode{}, wrapDBErr(err)
+		}
+	}
+	if _, err = r.createChangeEvent(ctx, tx, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, sourceDeviceID); err != nil {
+		return domain.FileNode{}, err
+	}
+	return node, wrapDBErr(tx.Commit(ctx))
 }
 
 func (r *Repository) DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
-	node, err := r.GetFileByID(ctx, userID, fileID)
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	node, err := r.getFileByIDTx(ctx, tx, userID, fileID)
 	if err != nil {
 		return err
 	}
-	tag, err := r.pool.Exec(ctx, `
+	nextVersion := node.Version + 1
+	tag, err := tx.Exec(ctx, `
 		update file_nodes
-		set deleted_at = now(), version = version + 1, updated_at = now()
+		set deleted_at = now(), version = $3, updated_at = now()
 		where user_id = $1 and id = $2 and deleted_at is null
-	`, userID, fileID)
+	`, userID, fileID, nextVersion)
 	if err != nil {
 		return wrapDBErr(err)
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.E(domain.CodeFileNotFound, "file not found", nil)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path, sourceDeviceID)
-	return wrapDBErr(err)
+	if node.NodeType == domain.NodeTypeDirectory {
+		if _, err := tx.Exec(ctx, `
+			update file_nodes
+			set deleted_at = now(), version = version + 1, updated_at = now()
+			where user_id = $1 and deleted_at is null
+				and path like replace(replace(replace($2, '\', '\\'), '%', '\%'), '_', '\_') || '/%' escape '\'
+		`, userID, node.Path); err != nil {
+			return wrapDBErr(err)
+		}
+	}
+	if _, err = r.createChangeEvent(ctx, tx, userID, fileID, domain.EventDelete, &nextVersion, node.Path, &node.Path, sourceDeviceID); err != nil {
+		return err
+	}
+	return wrapDBErr(tx.Commit(ctx))
 }
 
 func (r *Repository) CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error) {

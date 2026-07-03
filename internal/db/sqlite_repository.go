@@ -340,15 +340,26 @@ func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileI
 }
 
 func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error) {
-	old, err := r.GetFileByID(ctx, userID, fileID)
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return domain.FileNode{}, wrapSQLiteDBErr(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	old, err := r.getFileByIDTx(ctx, tx, userID, fileID)
 	if err != nil {
 		return domain.FileNode{}, err
 	}
-	result, err := r.db.ExecContext(ctx, `
+	if old.NodeType == domain.NodeTypeDirectory && isDescendantPath(newPath, old.Path) {
+		return domain.FileNode{}, domain.E(domain.CodeInvalidArgument, "directory cannot be moved into itself", nil)
+	}
+
+	now := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, `
 		update file_nodes
 		set parent_id = ?, name = ?, path = ?, version = version + 1, updated_at = ?
 		where user_id = ? and id = ? and deleted_at is null
-	`, newParentID, newName, newPath, time.Now().UTC(), userID, fileID)
+	`, newParentID, newName, newPath, now, userID, fileID)
 	if isSQLiteUniqueViolation(err) {
 		return domain.FileNode{}, domain.E(domain.CodeAlreadyExists, "file path already exists", err)
 	}
@@ -358,33 +369,58 @@ func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return domain.FileNode{}, domain.E(domain.CodeFileNotFound, "file not found", nil)
 	}
-	node, err := r.GetFileByID(ctx, userID, fileID)
+	if old.NodeType == domain.NodeTypeDirectory {
+		if err := r.updateDescendantPaths(ctx, tx, userID, old.Path, newPath, now); err != nil {
+			return domain.FileNode{}, err
+		}
+	}
+	node, err := r.getFileByIDTx(ctx, tx, userID, fileID)
 	if err != nil {
 		return domain.FileNode{}, err
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, sourceDeviceID)
-	return node, wrapSQLiteDBErr(err)
+	if _, err = r.createChangeEvent(ctx, tx, userID, node.ID, domain.EventMove, &node.Version, node.Path, &old.Path, sourceDeviceID); err != nil {
+		return domain.FileNode{}, err
+	}
+	return node, wrapSQLiteDBErr(tx.Commit())
 }
 
 func (r *SQLiteRepository) DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
-	node, err := r.GetFileByID(ctx, userID, fileID)
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return wrapSQLiteDBErr(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	node, err := r.getFileByIDTx(ctx, tx, userID, fileID)
 	if err != nil {
 		return err
 	}
+	nextVersion := node.Version + 1
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		update file_nodes
-		set deleted_at = ?, version = version + 1, updated_at = ?
+		set deleted_at = ?, version = ?, updated_at = ?
 		where user_id = ? and id = ? and deleted_at is null
-	`, now, now, userID, fileID)
+	`, now, nextVersion, now, userID, fileID)
 	if err != nil {
 		return wrapSQLiteDBErr(err)
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return domain.E(domain.CodeFileNotFound, "file not found", nil)
 	}
-	_, err = r.createChangeEvent(ctx, nil, userID, fileID, domain.EventDelete, &node.Version, node.Path, &node.Path, sourceDeviceID)
-	return wrapSQLiteDBErr(err)
+	if node.NodeType == domain.NodeTypeDirectory {
+		if _, err := tx.ExecContext(ctx, `
+			update file_nodes
+			set deleted_at = ?, version = version + 1, updated_at = ?
+			where user_id = ? and deleted_at is null and path like ? escape '\'
+		`, now, now, userID, escapeSQLiteLikePrefix(node.Path)+"/%"); err != nil {
+			return wrapSQLiteDBErr(err)
+		}
+	}
+	if _, err = r.createChangeEvent(ctx, tx, userID, fileID, domain.EventDelete, &nextVersion, node.Path, &node.Path, sourceDeviceID); err != nil {
+		return err
+	}
+	return wrapSQLiteDBErr(tx.Commit())
 }
 
 func (r *SQLiteRepository) CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error) {
@@ -938,6 +974,58 @@ func (r *SQLiteRepository) createChangeEvent(ctx context.Context, tx *sql.Tx, us
 	return id, wrapSQLiteDBErr(err)
 }
 
+func (r *SQLiteRepository) updateDescendantPaths(ctx context.Context, tx *sql.Tx, userID, oldPath, newPath string, now time.Time) error {
+	descendants, err := r.listDescendantPathUpdates(ctx, tx, userID, oldPath, newPath)
+	if err != nil {
+		return err
+	}
+	for _, descendant := range descendants {
+		_, err := tx.ExecContext(ctx, `
+			update file_nodes
+			set path = ?, updated_at = ?
+			where user_id = ? and id = ? and deleted_at is null
+		`, descendant.newPath, now, userID, descendant.id)
+		if isSQLiteUniqueViolation(err) {
+			return domain.E(domain.CodeAlreadyExists, "file path already exists", err)
+		}
+		if err != nil {
+			return wrapSQLiteDBErr(err)
+		}
+	}
+	return nil
+}
+
+type descendantPathUpdate struct {
+	id      string
+	newPath string
+}
+
+func (r *SQLiteRepository) listDescendantPathUpdates(ctx context.Context, tx *sql.Tx, userID, oldPath, newPath string) ([]descendantPathUpdate, error) {
+	rows, err := tx.QueryContext(ctx, `
+		select id, path
+		from file_nodes
+		where user_id = ? and deleted_at is null and path like ? escape '\'
+		order by length(path)
+	`, userID, escapeSQLiteLikePrefix(oldPath)+"/%")
+	if err != nil {
+		return nil, wrapSQLiteDBErr(err)
+	}
+	defer rows.Close()
+
+	var updates []descendantPathUpdate
+	for rows.Next() {
+		var id, currentPath string
+		if err := rows.Scan(&id, &currentPath); err != nil {
+			return nil, wrapSQLiteDBErr(err)
+		}
+		updates = append(updates, descendantPathUpdate{
+			id:      id,
+			newPath: newPath + strings.TrimPrefix(currentPath, oldPath),
+		})
+	}
+	return updates, wrapSQLiteDBErr(rows.Err())
+}
+
 func ensureSQLiteSchemaUpgrades(ctx context.Context, conn *sql.DB) error {
 	hasPinnedAt, err := sqliteColumnExists(ctx, conn, "file_versions", "pinned_at")
 	if err != nil {
@@ -1005,6 +1093,15 @@ func sqliteFilePath(databaseURL string) string {
 	path := strings.TrimPrefix(databaseURL, "file:")
 	path, _, _ = strings.Cut(path, "?")
 	return path
+}
+
+func isDescendantPath(path, parent string) bool {
+	return path == parent || strings.HasPrefix(path, parent+"/")
+}
+
+func escapeSQLiteLikePrefix(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(value)
 }
 
 func wrapSQLiteNotFound(err error, message string) error {
