@@ -33,6 +33,7 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 	deviceName := fs.String("device-name", "", "device name")
 	devicePlatform := fs.String("platform", runtime.GOOS, "device platform")
 	limit := fs.Int("limit", 500, "maximum changes to pull")
+	resetCursor := fs.Bool("reset-cursor", false, "reset local change cursor and replay the available change feed")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -76,8 +77,15 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 		return errors.New("workspace device is not registered")
 	}
 
-	changes, err := apiClient.ListChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, workspace.LastAppliedChangeID, int32(*limit))
+	afterChangeID := workspace.LastAppliedChangeID
+	if *resetCursor {
+		afterChangeID = 0
+	}
+	changes, err := apiClient.ListChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, afterChangeID, int32(*limit))
 	if err != nil {
+		if isAPIErrorCode(err, "SYNC_CURSOR_EXPIRED") {
+			return fmt.Errorf("sync cursor expired; run synchub-cli sync pull --path %s --reset-cursor to replay the available change feed", root)
+		}
 		return err
 	}
 	previousEntries, err := manifestEntriesByPath(previousManifest)
@@ -108,7 +116,7 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 	if nextCursor == 0 && len(changes.Items) > 0 {
 		nextCursor = changes.Items[len(changes.Items)-1].ID
 	}
-	if nextCursor > workspace.LastAppliedChangeID {
+	if nextCursor > workspace.LastAppliedChangeID || (*resetCursor && nextCursor > 0) {
 		device, err := apiClient.AckChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, nextCursor)
 		if err != nil {
 			return err
@@ -117,6 +125,11 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 		if workspace.LastAppliedChangeID < nextCursor {
 			workspace.LastAppliedChangeID = nextCursor
 		}
+		if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
+			return err
+		}
+	} else if *resetCursor && workspace.LastAppliedChangeID != 0 {
+		workspace.LastAppliedChangeID = 0
 		if err := writeWorkspaceConfig(workspacePath, workspace); err != nil {
 			return err
 		}
