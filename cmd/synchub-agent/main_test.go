@@ -34,6 +34,7 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 		"--limit", "20",
 		"--max-failures", "3",
 		"--once",
+		"--dry-run",
 	}, &stdout, &bytes.Buffer{}, runner)
 	if err != nil {
 		t.Fatalf("run agent once: %v", err)
@@ -41,7 +42,7 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 	if stdout.String() != "synced\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if !got.Once || got.RootPath != "." || got.ConfigPath != "login.json" || got.WorkspaceConfigPath != "workspace.json" || got.ManifestPath != "manifest.json" || got.CLIPath != "synchub-cli-test" || got.DeviceName != "laptop" || got.DevicePlatform != "windows" {
+	if !got.Once || !got.DryRun || got.RootPath != "." || got.ConfigPath != "login.json" || got.WorkspaceConfigPath != "workspace.json" || got.ManifestPath != "manifest.json" || got.CLIPath != "synchub-cli-test" || got.DeviceName != "laptop" || got.DevicePlatform != "windows" {
 		t.Fatalf("options = %#v", got)
 	}
 	if got.Interval != 5*time.Second {
@@ -145,7 +146,7 @@ func TestRunHelpPrintsUsage(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for help")
 	}
-	if !strings.Contains(stdout.String(), "synchub-agent --path . --once") {
+	if !strings.Contains(stdout.String(), "synchub-agent --path . --once --dry-run") {
 		t.Fatalf("usage output = %q", stdout.String())
 	}
 }
@@ -171,6 +172,13 @@ func TestParseOptionsRejectsInvalidMaxFailures(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsDryRunWithoutOnce(t *testing.T) {
+	_, err := parseOptions([]string{"--dry-run"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "dry run requires --once") {
+		t.Fatalf("error = %v, want dry run requires --once", err)
+	}
+}
+
 func TestBuildSyncOnceArgs(t *testing.T) {
 	got := buildSyncOnceArgs(agentOptions{
 		RootPath:            "workspace",
@@ -180,6 +188,7 @@ func TestBuildSyncOnceArgs(t *testing.T) {
 		DeviceName:          "laptop",
 		DevicePlatform:      "windows",
 		Limit:               20,
+		DryRun:              true,
 	})
 	want := []string{
 		"sync", "once",
@@ -190,6 +199,7 @@ func TestBuildSyncOnceArgs(t *testing.T) {
 		"--device-name", "laptop",
 		"--platform", "windows",
 		"--limit", "20",
+		"--dry-run",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %#v, want %#v", got, want)

@@ -91,6 +91,7 @@ go run ./cmd/synchub-agent --path .
 ```
 
 For a single agent sync cycle, add `--once`.
+For an agent-driven preview, use `--once --dry-run`.
 Use `--device-name`, `--platform`, and `--limit` to control device registration and pull batch size.
 Use `--max-failures N` to make the agent exit after N consecutive sync failures, so an external supervisor can restart it.
 

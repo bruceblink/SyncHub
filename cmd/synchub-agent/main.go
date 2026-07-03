@@ -31,6 +31,7 @@ type agentOptions struct {
 	Limit               int
 	MaxFailures         int
 	Once                bool
+	DryRun              bool
 }
 
 type syncOnceRunner func(context.Context, agentOptions, io.Writer, io.Writer) error
@@ -124,6 +125,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.IntVar(&opts.Limit, "limit", 500, "maximum changes to pull per sync cycle")
 	fs.IntVar(&opts.MaxFailures, "max-failures", 0, "maximum consecutive sync failures before exit; 0 disables")
 	fs.BoolVar(&opts.Once, "once", false, "run one sync cycle and exit")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state; requires --once")
 	if len(args) > 0 {
 		switch args[0] {
 		case "help", "-h", "--help":
@@ -143,6 +145,9 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.MaxFailures < 0 {
 		return agentOptions{}, errors.New("max failures must be non-negative")
 	}
+	if opts.DryRun && !opts.Once {
+		return agentOptions{}, errors.New("dry run requires --once")
+	}
 	if strings.TrimSpace(opts.RootPath) == "" {
 		return agentOptions{}, errors.New("workspace path is required")
 	}
@@ -153,6 +158,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-agent --path .")
 	fmt.Fprintln(w, "  synchub-agent --path . --once")
+	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run")
 	fmt.Fprintln(w, "  synchub-agent --path . --interval 30s --device-name laptop --platform windows --limit 500")
 	fmt.Fprintln(w, "  synchub-agent --path . --max-failures 5")
 }
@@ -204,6 +210,9 @@ func buildSyncOnceArgs(opts agentOptions) []string {
 		args = append(args, "--platform", opts.DevicePlatform)
 	}
 	args = append(args, "--limit", fmt.Sprintf("%d", opts.Limit))
+	if opts.DryRun {
+		args = append(args, "--dry-run")
+	}
 	return args
 }
 
