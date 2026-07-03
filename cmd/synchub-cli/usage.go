@@ -21,6 +21,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli sync pull --path .")
 	fmt.Fprintln(w, "  synchub-cli sync watch --path .")
 	fmt.Fprintln(w, "  synchub-cli sync conflicts --path .")
+	fmt.Fprintln(w, "  synchub-cli sync conflicts resolve --path . --id conf_1 --resolution keep_both")
 }
 
 func printWorkspaceUsage(w io.Writer) {
@@ -51,4 +52,11 @@ func printSyncUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli sync pull --path .")
 	fmt.Fprintln(w, "  synchub-cli sync watch --path .")
 	fmt.Fprintln(w, "  synchub-cli sync conflicts --path .")
+	fmt.Fprintln(w, "  synchub-cli sync conflicts resolve --path . --id conf_1 --resolution keep_both")
+}
+
+func printSyncConflictsUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  synchub-cli sync conflicts --path .")
+	fmt.Fprintln(w, "  synchub-cli sync conflicts resolve --path . --id conf_1 --resolution keep_both")
 }
