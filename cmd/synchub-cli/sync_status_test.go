@@ -277,6 +277,132 @@ func TestRunSyncStatusCanShowRemoteConflicts(t *testing.T) {
 	}
 }
 
+func TestRunSyncStatusCanShowRemoteChanges(t *testing.T) {
+	root := t.TempDir()
+	changesRequested := false
+	sourceDeviceID := "dev_1"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sync/changes" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("device_id"); got != "dev_1" {
+			t.Fatalf("device_id = %q", got)
+		}
+		if got := r.URL.Query().Get("after_change_id"); got != "4" {
+			t.Fatalf("after_change_id = %q", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "10" {
+			t.Fatalf("limit = %q", got)
+		}
+		changesRequested = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":5,"file_id":"file_own","event_type":"update","version":2,"path":"/workspace/own.txt","source_device_id":"dev_1","created_at":"2026-06-30T00:01:00Z"},{"id":6,"file_id":"file_1","event_type":"update","version":3,"path":"/workspace/a.txt","created_at":"2026-06-30T00:02:00Z"},{"id":7,"file_id":"file_2","event_type":"move","version":4,"path":"/workspace/b.txt","old_path":"/workspace/old.txt","source_device_id":"dev_2","created_at":"2026-06-30T00:03:00Z"}],"next_cursor":7}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:             1,
+		Root:                root,
+		RemotePath:          "/workspace",
+		ServerURL:           server.URL,
+		UserID:              "u1",
+		UserEmail:           "user@example.com",
+		DeviceID:            sourceDeviceID,
+		LastAppliedChangeID: 4,
+	})
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL:            server.URL,
+		User:                 clientUser("u1", "user@example.com"),
+		Tokens:               client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+		AccessTokenExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"status",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--show-remote",
+		"--remote-limit", "10",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status remote changes: %v", err)
+	}
+	if !changesRequested {
+		t.Fatal("changes endpoint was not called")
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"pending changes: 0",
+		"remote changes: 2",
+		"update /workspace/a.txt version=3 id=6",
+		"move /workspace/old.txt -> /workspace/b.txt version=4 id=7",
+		"remote next cursor: 7",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "/workspace/own.txt") {
+		t.Fatalf("stdout includes own change: %s", out)
+	}
+}
+
+func TestRunSyncStatusSkipsRemoteChangesWithoutDevice(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("status without device must not call server: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	})
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"status",
+		"--path", root,
+		"--config", filepath.Join(root, ".synchub", "missing-login.json"),
+		"--show-remote",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status remote without device: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "remote changes: skipped (workspace device is not registered)") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{"sync", "help"}, &stdout, &bytes.Buffer{})
@@ -286,6 +412,7 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 	out := stdout.String()
 	for _, want := range []string{
 		"synchub-cli sync once --path . --dry-run",
+		"synchub-cli sync status --path . --show-remote",
 		"synchub-cli sync push --path . --dry-run",
 		"synchub-cli sync pull --path . --dry-run",
 		"synchub-cli sync trash --path .",

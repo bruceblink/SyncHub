@@ -139,10 +139,15 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 	loginConfigPath := fs.String("config", defaultConfigPath(), "login config file path")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	manifestPath := fs.String("manifest", "", "manifest file path")
+	showRemote := fs.Bool("show-remote", false, "include pending remote changes")
+	remoteLimit := fs.Int("remote-limit", 100, "maximum remote changes to fetch")
 	showConflicts := fs.Bool("show-conflicts", false, "include pending remote conflicts")
 	conflictLimit := fs.Int("conflict-limit", 100, "maximum conflicts to fetch")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *remoteLimit <= 0 {
+		return errors.New("remote limit must be positive")
 	}
 	if *conflictLimit <= 0 {
 		return errors.New("conflict limit must be positive")
@@ -204,6 +209,11 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 	if err := printSyncStatusTrash(stdout, root); err != nil {
 		return err
 	}
+	if *showRemote {
+		if err := printSyncStatusRemote(ctx, stdout, root, workspace, *loginConfigPath, *remoteLimit); err != nil {
+			return err
+		}
+	}
 	if *showConflicts {
 		if err := printSyncStatusConflicts(ctx, stdout, workspace, *loginConfigPath, *conflictLimit); err != nil {
 			return err
@@ -222,6 +232,35 @@ func printSyncStatusTrash(stdout io.Writer, root string) error {
 		entry := entries[0]
 		fmt.Fprintf(stdout, "latest trash: %s %s\n", entry.Batch, entry.Path)
 	}
+	return nil
+}
+
+func printSyncStatusRemote(ctx context.Context, stdout io.Writer, root string, workspace workspaceConfig, configPath string, limit int) error {
+	if strings.TrimSpace(workspace.DeviceID) == "" {
+		fmt.Fprintln(stdout, "remote changes: skipped (workspace device is not registered)")
+		return nil
+	}
+	loginConfig, err := readConfigWithRefresh(ctx, configPath)
+	if err != nil {
+		return err
+	}
+	serverURL := workspace.ServerURL
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = loginConfig.ServerURL
+	}
+	changes, err := client.New(serverURL).ListChanges(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, workspace.LastAppliedChangeID, int32(limit))
+	if err != nil {
+		if isAPIErrorCode(err, "SYNC_CURSOR_EXPIRED") {
+			return fmt.Errorf("sync cursor expired; run synchub-cli sync pull --path %s --reset-cursor to replay the available change feed", root)
+		}
+		return err
+	}
+	pending := previewPullChanges(workspace, changes.Items)
+	fmt.Fprintf(stdout, "remote changes: %d\n", len(pending))
+	for _, event := range pending {
+		fmt.Fprintln(stdout, formatPullPreviewChange(event))
+	}
+	fmt.Fprintf(stdout, "remote next cursor: %d\n", pullNextCursor(changes))
 	return nil
 }
 
