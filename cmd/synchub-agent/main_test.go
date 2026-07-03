@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,15 +61,33 @@ func TestRunOnceReturnsSyncError(t *testing.T) {
 	}
 }
 
+func TestRunHelpPrintsUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run help: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for help")
+	}
+	if !strings.Contains(stdout.String(), "synchub-agent --path . --once") {
+		t.Fatalf("usage output = %q", stdout.String())
+	}
+}
+
 func TestParseOptionsRejectsInvalidInterval(t *testing.T) {
-	_, err := parseOptions([]string{"--interval", "0s"}, &bytes.Buffer{})
+	_, err := parseOptions([]string{"--interval", "0s"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected invalid interval error")
 	}
 }
 
 func TestParseOptionsRejectsInvalidLimit(t *testing.T) {
-	_, err := parseOptions([]string{"--limit", "0"}, &bytes.Buffer{})
+	_, err := parseOptions([]string{"--limit", "0"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected invalid limit error")
 	}

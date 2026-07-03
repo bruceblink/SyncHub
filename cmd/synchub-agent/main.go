@@ -43,8 +43,11 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner syncOnceRunner) error {
-	opts, err := parseOptions(args, stderr)
+	opts, err := parseOptions(args, stdout, stderr)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if runner == nil {
@@ -74,9 +77,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 	}
 }
 
-func parseOptions(args []string, stderr io.Writer) (agentOptions, error) {
+func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error) {
 	fs := flag.NewFlagSet("synchub-agent", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		printUsage(stderr)
+	}
 	opts := agentOptions{}
 	fs.StringVar(&opts.RootPath, "path", ".", "local workspace root")
 	fs.StringVar(&opts.ConfigPath, "config", defaultConfigPath(), "login config file path")
@@ -88,6 +94,13 @@ func parseOptions(args []string, stderr io.Writer) (agentOptions, error) {
 	fs.StringVar(&opts.DevicePlatform, "platform", "", "device platform")
 	fs.IntVar(&opts.Limit, "limit", 500, "maximum changes to pull per sync cycle")
 	fs.BoolVar(&opts.Once, "once", false, "run one sync cycle and exit")
+	if len(args) > 0 {
+		switch args[0] {
+		case "help", "-h", "--help":
+			printUsage(stdout)
+			return agentOptions{}, flag.ErrHelp
+		}
+	}
 	if err := fs.Parse(args); err != nil {
 		return agentOptions{}, err
 	}
@@ -101,6 +114,13 @@ func parseOptions(args []string, stderr io.Writer) (agentOptions, error) {
 		return agentOptions{}, errors.New("workspace path is required")
 	}
 	return opts, nil
+}
+
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  synchub-agent --path .")
+	fmt.Fprintln(w, "  synchub-agent --path . --once")
+	fmt.Fprintln(w, "  synchub-agent --path . --interval 30s --device-name laptop --platform windows --limit 500")
 }
 
 func runSyncOnceCommand(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
