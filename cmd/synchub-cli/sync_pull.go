@@ -322,7 +322,7 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 		if err != nil || !ok {
 			return pullApplyResult{}, err
 		}
-		conflictKept, err := keepLocalDeleteConflictIfChanged(localPath, event.Path, workspace, previousEntries)
+		conflictKept, err := keepLocalTreeConflictIfChanged(localPath, event.Path, workspace, previousEntries)
 		if err != nil {
 			return pullApplyResult{}, err
 		}
@@ -338,17 +338,19 @@ func applyChangeEvent(ctx context.Context, apiClient *client.Client, accessToken
 		if err != nil || !ok {
 			return pullApplyResult{}, err
 		}
-		conflictKept, err := keepLocalConflictIfChanged(oldLocalPath, *event.OldPath, workspace, previousEntries)
+		conflictKept, err := keepLocalTreeConflictIfChanged(oldLocalPath, *event.OldPath, workspace, previousEntries)
 		if err != nil {
 			return pullApplyResult{}, err
 		}
 		if conflictKept {
-			newLocalPath, ok, err := localPathForRemote(root, workspace.RemotePath, event.Path)
-			if err != nil || !ok {
-				return pullApplyResult{}, err
-			}
-			if err := downloadChangeFile(ctx, apiClient, accessToken, event.FileID, newLocalPath); err != nil {
-				return pullApplyResult{}, err
+			if event.Version != nil {
+				newLocalPath, ok, err := localPathForRemote(root, workspace.RemotePath, event.Path)
+				if err != nil || !ok {
+					return pullApplyResult{}, err
+				}
+				if err := downloadChangeFile(ctx, apiClient, accessToken, event.FileID, newLocalPath); err != nil {
+					return pullApplyResult{}, err
+				}
 			}
 			return pullApplyResult{moved: 1, conflictKept: 1}, nil
 		}
@@ -393,7 +395,7 @@ func keepLocalConflictIfChanged(localPath, remotePath string, workspace workspac
 	return true, nil
 }
 
-func keepLocalDeleteConflictIfChanged(localPath, remotePath string, workspace workspaceConfig, previousEntries map[string]manifest.Entry) (bool, error) {
+func keepLocalTreeConflictIfChanged(localPath, remotePath string, workspace workspaceConfig, previousEntries map[string]manifest.Entry) (bool, error) {
 	info, err := os.Stat(localPath)
 	if err != nil {
 		if os.IsNotExist(err) {
