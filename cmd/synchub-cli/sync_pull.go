@@ -458,6 +458,19 @@ func directoryHasLocalChanges(localPath, remotePath string, previousEntries map[
 	if err != nil {
 		return false, err
 	}
+	unseenTracked := map[string]struct{}{}
+	for path, entry := range previousEntries {
+		if entry.SHA256 == "" {
+			continue
+		}
+		normalized, err := normalizeRemotePath(path)
+		if err != nil {
+			return false, err
+		}
+		if normalized == remotePath || strings.HasPrefix(normalized, remotePath+"/") {
+			unseenTracked[normalized] = struct{}{}
+		}
+	}
 	err = filepath.WalkDir(localPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -477,6 +490,7 @@ func directoryHasLocalChanges(localPath, remotePath string, previousEntries map[
 			return err
 		}
 		childRemotePath := joinRemoteChild(remotePath, filepath.ToSlash(relative))
+		delete(unseenTracked, childRemotePath)
 		previous, ok := previousEntries[childRemotePath]
 		if !ok || previous.SHA256 == "" {
 			return errDirectoryChanged
@@ -493,7 +507,10 @@ func directoryHasLocalChanges(localPath, remotePath string, previousEntries map[
 	if errors.Is(err, errDirectoryChanged) {
 		return true, nil
 	}
-	return false, err
+	if err != nil {
+		return false, err
+	}
+	return len(unseenTracked) > 0, nil
 }
 
 var errDirectoryChanged = errors.New("directory has local changes")

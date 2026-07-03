@@ -3136,6 +3136,41 @@ func TestRunSyncPullDeleteDirectoryKeepsLocalDescendantConflict(t *testing.T) {
 	}
 }
 
+func TestDirectoryHasLocalChangesDetectsDeletedTrackedDescendant(t *testing.T) {
+	root := t.TempDir()
+	localDir := filepath.Join(root, "obsolete")
+	remainingPath := filepath.Join(localDir, "nested", "b.txt")
+	if err := os.MkdirAll(filepath.Dir(remainingPath), 0o755); err != nil {
+		t.Fatalf("mkdir local dir: %v", err)
+	}
+	if err := os.WriteFile(remainingPath, []byte("unchanged"), 0o644); err != nil {
+		t.Fatalf("write remaining file: %v", err)
+	}
+
+	previousEntries := map[string]manifest.Entry{
+		"/workspace/obsolete/nested/a.txt": {
+			Path:         "/workspace/obsolete/nested/a.txt",
+			RelativePath: "obsolete/nested/a.txt",
+			Size:         int64(len("removed")),
+			SHA256:       testSHA([]byte("removed")),
+		},
+		"/workspace/obsolete/nested/b.txt": {
+			Path:         "/workspace/obsolete/nested/b.txt",
+			RelativePath: "obsolete/nested/b.txt",
+			Size:         int64(len("unchanged")),
+			SHA256:       testSHA([]byte("unchanged")),
+		},
+	}
+
+	changed, err := directoryHasLocalChanges(localDir, "/workspace/obsolete", previousEntries)
+	if err != nil {
+		t.Fatalf("directory local changes: %v", err)
+	}
+	if !changed {
+		t.Fatal("directory missing a tracked descendant was not reported as changed")
+	}
+}
+
 func TestRunSyncPullAppliesMoveEvents(t *testing.T) {
 	root := t.TempDir()
 	oldPath := filepath.Join(root, "old.txt")
