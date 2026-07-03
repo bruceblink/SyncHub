@@ -242,6 +242,32 @@ func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
 	if conflictsBody.Data.Items[0].Path != "/workspace/conflict.txt" || conflictsBody.Data.Items[0].Resolution != domain.ConflictResolutionPending {
 		t.Fatalf("conflict response item = %#v", conflictsBody.Data.Items[0])
 	}
+
+	resolveResp := doJSON(t, server, http.MethodPatch, "/api/v1/sync/conflicts/"+conflicts[0].ID, token, map[string]any{
+		"resolution": domain.ConflictResolutionKeepBoth,
+	})
+	if resolveResp.Code != http.StatusOK {
+		t.Fatalf("resolve conflict status = %d body = %s", resolveResp.Code, resolveResp.Body.String())
+	}
+	var resolveBody struct {
+		Data struct {
+			ID         string     `json:"id"`
+			Resolution string     `json:"resolution"`
+			ResolvedAt *time.Time `json:"resolved_at"`
+		} `json:"data"`
+	}
+	decodeBody(t, resolveResp, &resolveBody)
+	if resolveBody.Data.ID != conflicts[0].ID || resolveBody.Data.Resolution != domain.ConflictResolutionKeepBoth || resolveBody.Data.ResolvedAt == nil {
+		t.Fatalf("resolve conflict response = %#v", resolveBody.Data)
+	}
+
+	conflicts, err = repo.ListSyncConflicts(ctx, registerBody.Data.User.ID, domain.ConflictResolutionPending, 10)
+	if err != nil {
+		t.Fatalf("list pending sync conflicts after resolve: %v", err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("pending conflicts after resolve = %#v, want none", conflicts)
+	}
 }
 
 func TestSQLiteFileVersionHistory(t *testing.T) {

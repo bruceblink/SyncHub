@@ -13,6 +13,7 @@ type Repository interface {
 	ListChanges(ctx context.Context, userID, deviceID string, afterChangeID int64, limit int32) ([]domain.ChangeEvent, error)
 	AckDevice(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error)
 	ListSyncConflicts(ctx context.Context, userID, resolution string, limit int32) ([]domain.SyncConflict, error)
+	UpdateSyncConflictResolution(ctx context.Context, userID, conflictID, resolution string) (domain.SyncConflict, error)
 }
 
 type Service struct {
@@ -74,6 +75,18 @@ func (s *Service) Conflicts(ctx context.Context, userID, resolution string, limi
 		limit = 500
 	}
 	return s.repo.ListSyncConflicts(ctx, userID, resolution, limit)
+}
+
+func (s *Service) ResolveConflict(ctx context.Context, userID, conflictID, resolution string) (domain.SyncConflict, error) {
+	conflictID = strings.TrimSpace(conflictID)
+	if conflictID == "" {
+		return domain.SyncConflict{}, domain.E(domain.CodeInvalidArgument, "conflict id is required", nil)
+	}
+	resolution = strings.TrimSpace(resolution)
+	if !validConflictResolution(resolution) || resolution == domain.ConflictResolutionPending {
+		return domain.SyncConflict{}, domain.E(domain.CodeInvalidArgument, "resolution must be keep_local, keep_remote, or keep_both", nil)
+	}
+	return s.repo.UpdateSyncConflictResolution(ctx, userID, conflictID, resolution)
 }
 
 func validConflictResolution(resolution string) bool {

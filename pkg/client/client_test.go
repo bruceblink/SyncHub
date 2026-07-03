@@ -538,6 +538,37 @@ func TestListSyncConflicts(t *testing.T) {
 	}
 }
 
+func TestResolveSyncConflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/sync/conflicts/conf_1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		var req struct {
+			Resolution string `json:"resolution"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Resolution != "keep_both" {
+			t.Fatalf("resolution = %q", req.Resolution)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"conf_1","file_id":"file_1","path":"/workspace/a.txt","local_version":1,"remote_version":2,"resolution":"keep_both","created_at":"2026-06-30T00:00:00Z","resolved_at":"2026-06-30T00:01:00Z"}}`))
+	}))
+	defer server.Close()
+
+	conflict, err := New(server.URL).ResolveSyncConflict(context.Background(), "access-token", "conf_1", "keep_both")
+	if err != nil {
+		t.Fatalf("resolve sync conflict: %v", err)
+	}
+	if conflict.ID != "conf_1" || conflict.Resolution != "keep_both" || conflict.ResolvedAt == nil {
+		t.Fatalf("unexpected conflict: %#v", conflict)
+	}
+}
+
 func TestPutUploadChunk(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/uploads/upl_1/chunks/2" {

@@ -393,6 +393,15 @@ func (c *Client) ListSyncConflicts(ctx context.Context, accessToken, resolution 
 	return data, err
 }
 
+func (c *Client) ResolveSyncConflict(ctx context.Context, accessToken, conflictID, resolution string) (SyncConflict, error) {
+	var data SyncConflict
+	path := fmt.Sprintf("/api/v1/sync/conflicts/%s", url.PathEscape(conflictID))
+	err := c.patchJSONAuth(ctx, path, accessToken, map[string]string{
+		"resolution": resolution,
+	}, &data)
+	return data, err
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, body any, out any) error {
 	return c.postJSONAuth(ctx, path, "", body, nil, out)
 }

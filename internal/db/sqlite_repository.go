@@ -846,6 +846,25 @@ func (r *SQLiteRepository) ListSyncConflicts(ctx context.Context, userID, resolu
 	return conflicts, wrapSQLiteDBErr(rows.Err())
 }
 
+func (r *SQLiteRepository) UpdateSyncConflictResolution(ctx context.Context, userID, conflictID, resolution string) (domain.SyncConflict, error) {
+	resolvedAt := any(time.Now().UTC())
+	if resolution == domain.ConflictResolutionPending {
+		resolvedAt = nil
+	}
+	result, err := r.db.ExecContext(ctx, `
+		update sync_conflicts
+		set resolution = ?, resolved_at = ?
+		where user_id = ? and id = ?
+	`, resolution, resolvedAt, userID, conflictID)
+	if err != nil {
+		return domain.SyncConflict{}, wrapSQLiteDBErr(err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return domain.SyncConflict{}, domain.E(domain.CodeNotFound, "sync conflict not found", nil)
+	}
+	return r.getSyncConflict(ctx, conflictID)
+}
+
 func (r *SQLiteRepository) getSyncConflict(ctx context.Context, conflictID string) (domain.SyncConflict, error) {
 	var conflict domain.SyncConflict
 	err := r.db.QueryRowContext(ctx, `

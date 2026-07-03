@@ -541,6 +541,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SyncConflictListResponse"
+  /api/v1/sync/conflicts/{id}:
+    patch:
+      tags: [Sync]
+      summary: Resolve sync conflict
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution]
+              properties:
+                resolution:
+                  type: string
+                  enum: [keep_local, keep_remote, keep_both]
+      responses:
+        "200":
+          description: Updated sync conflict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncConflictResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -891,3 +919,10 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/SyncConflict"
+    SyncConflictResponse:
+      allOf:
+        - $ref: "#/components/schemas/APIResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/SyncConflict"

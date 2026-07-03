@@ -117,6 +117,7 @@ func (s *Server) routes() {
 	protected.GET("/sync/changes", s.listChanges)
 	protected.POST("/sync/ack", s.ackChanges)
 	protected.GET("/sync/conflicts", s.listSyncConflicts)
+	protected.PATCH("/sync/conflicts/:id", s.resolveSyncConflict)
 }
 
 func (s *Server) register(c *gin.Context) {
@@ -524,6 +525,26 @@ func (s *Server) listSyncConflicts(c *gin.Context) {
 		items = append(items, syncConflictDTO(conflict))
 	}
 	ok(c, gin.H{"items": items})
+}
+
+func (s *Server) resolveSyncConflict(c *gin.Context) {
+	if s.sync == nil {
+		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
+		return
+	}
+	var req struct {
+		Resolution string `json:"resolution"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+		return
+	}
+	conflict, err := s.sync.ResolveConflict(c.Request.Context(), userID(c), c.Param("id"), req.Resolution)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, syncConflictDTO(conflict))
 }
 
 func (s *Server) requireAuth() gin.HandlerFunc {

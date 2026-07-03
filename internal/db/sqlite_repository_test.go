@@ -254,6 +254,28 @@ func TestSQLiteSyncConflictRepository(t *testing.T) {
 	if len(resolved) != 0 {
 		t.Fatalf("keep-both conflicts = %#v, want none", resolved)
 	}
+
+	updated, err := repo.UpdateSyncConflictResolution(ctx, user.ID, created.ID, domain.ConflictResolutionKeepBoth)
+	if err != nil {
+		t.Fatalf("update sync conflict resolution: %v", err)
+	}
+	if updated.Resolution != domain.ConflictResolutionKeepBoth || updated.ResolvedAt == nil {
+		t.Fatalf("updated conflict = %#v, want keep_both with resolved_at", updated)
+	}
+	conflicts, err = repo.ListSyncConflicts(ctx, user.ID, "", 100)
+	if err != nil {
+		t.Fatalf("list pending sync conflicts after resolve: %v", err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("pending conflicts after resolve = %#v, want none", conflicts)
+	}
+	resolved, err = repo.ListSyncConflicts(ctx, user.ID, domain.ConflictResolutionKeepBoth, 100)
+	if err != nil {
+		t.Fatalf("list keep-both sync conflicts after resolve: %v", err)
+	}
+	if len(resolved) != 1 || resolved[0].ID != created.ID {
+		t.Fatalf("keep-both conflicts after resolve = %#v, want updated conflict", resolved)
+	}
 }
 
 func createUploadSession(t *testing.T, repo *SQLiteRepository, userID, targetPath, status string, expiresAt time.Time) domain.UploadSession {

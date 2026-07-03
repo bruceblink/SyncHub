@@ -725,6 +725,18 @@ func (r *Repository) ListSyncConflicts(ctx context.Context, userID, resolution s
 	return conflicts, wrapDBErr(rows.Err())
 }
 
+func (r *Repository) UpdateSyncConflictResolution(ctx context.Context, userID, conflictID, resolution string) (domain.SyncConflict, error) {
+	var conflict domain.SyncConflict
+	err := r.pool.QueryRow(ctx, `
+		update sync_conflicts
+		set resolution = $3,
+		    resolved_at = case when $3 = $4 then null else now() end
+		where user_id = $1 and id = $2
+		returning id, user_id, file_id, path, local_version, remote_version, resolution, created_at, resolved_at
+	`, userID, conflictID, resolution, domain.ConflictResolutionPending).Scan(syncConflictScan(&conflict)...)
+	return conflict, wrapNotFound(err, "sync conflict not found")
+}
+
 func (r *Repository) getDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
 	var device domain.Device
 	err := r.pool.QueryRow(ctx, `
