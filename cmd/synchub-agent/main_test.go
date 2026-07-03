@@ -121,6 +121,60 @@ func TestRunLoopStopsAfterMaxFailures(t *testing.T) {
 	}
 }
 
+func TestRunLoopStopsAfterCycles(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	calls := 0
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"--interval", "1ms",
+		"--cycles", "2",
+	}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run agent cycles: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("sync calls = %d, want 2", calls)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"agent started: .",
+		"sync interval: 1ms",
+		"sync completed: 2026-07-04T01:02:03Z",
+		"agent stopped: sync cycles reached 2",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunLoopReturnsFinalCycleError(t *testing.T) {
+	wantErr := errors.New("sync failed")
+	calls := 0
+	err := run(context.Background(), []string{
+		"--interval", "1ms",
+		"--cycles", "2",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		calls++
+		if calls == 2 {
+			return wantErr
+		}
+		return nil
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want final sync error", err)
+	}
+	if calls != 2 {
+		t.Fatalf("sync calls = %d, want 2", calls)
+	}
+}
+
 func TestShouldStopAfterFailures(t *testing.T) {
 	if shouldStopAfterFailures(agentOptions{MaxFailures: 0}, 100) {
 		t.Fatal("max failures 0 should disable failure stop")
@@ -130,6 +184,18 @@ func TestShouldStopAfterFailures(t *testing.T) {
 	}
 	if !shouldStopAfterFailures(agentOptions{MaxFailures: 3}, 3) {
 		t.Fatal("should stop at threshold")
+	}
+}
+
+func TestShouldStopAfterCycles(t *testing.T) {
+	if shouldStopAfterCycles(agentOptions{Cycles: 0}, 100) {
+		t.Fatal("cycles 0 should disable cycle stop")
+	}
+	if shouldStopAfterCycles(agentOptions{Cycles: 3}, 2) {
+		t.Fatal("should not stop before cycle limit")
+	}
+	if !shouldStopAfterCycles(agentOptions{Cycles: 3}, 3) {
+		t.Fatal("should stop at cycle limit")
 	}
 }
 
@@ -146,7 +212,7 @@ func TestRunHelpPrintsUsage(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for help")
 	}
-	if !strings.Contains(stdout.String(), "synchub-agent --path . --once --dry-run") {
+	if !strings.Contains(stdout.String(), "synchub-agent --path . --once --dry-run") || !strings.Contains(stdout.String(), "synchub-agent --path . --cycles 3") {
 		t.Fatalf("usage output = %q", stdout.String())
 	}
 }
@@ -169,6 +235,20 @@ func TestParseOptionsRejectsInvalidMaxFailures(t *testing.T) {
 	_, err := parseOptions([]string{"--max-failures", "-1"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected invalid max failures error")
+	}
+}
+
+func TestParseOptionsRejectsInvalidCycles(t *testing.T) {
+	_, err := parseOptions([]string{"--cycles", "-1"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected invalid cycles error")
+	}
+}
+
+func TestParseOptionsRejectsCyclesWithOnce(t *testing.T) {
+	_, err := parseOptions([]string{"--once", "--cycles", "1"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "cycles cannot be used with --once") {
+		t.Fatalf("error = %v, want cycles cannot be used with --once", err)
 	}
 }
 

@@ -30,6 +30,7 @@ type agentOptions struct {
 	DevicePlatform      string
 	Limit               int
 	MaxFailures         int
+	Cycles              int
 	Once                bool
 	DryRun              bool
 }
@@ -64,28 +65,30 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 	fmt.Fprintf(stdout, "agent started: %s\n", opts.RootPath)
 	fmt.Fprintf(stdout, "sync interval: %s\n", opts.Interval)
 	consecutiveFailures := 0
-	if err := runSyncCycle(ctx, opts, stdout, stderr, runner); err != nil {
-		consecutiveFailures++
-		if shouldStopAfterFailures(opts, consecutiveFailures) {
-			return maxFailuresError(consecutiveFailures, err)
-		}
-	}
-
+	cyclesRun := 0
+	var lastErr error
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
 	for {
+		if err := runSyncCycle(ctx, opts, stdout, stderr, runner); err != nil {
+			lastErr = err
+			consecutiveFailures++
+			if shouldStopAfterFailures(opts, consecutiveFailures) {
+				return maxFailuresError(consecutiveFailures, err)
+			}
+		} else {
+			lastErr = nil
+			consecutiveFailures = 0
+		}
+		cyclesRun++
+		if shouldStopAfterCycles(opts, cyclesRun) {
+			fmt.Fprintf(stdout, "agent stopped: sync cycles reached %d\n", cyclesRun)
+			return lastErr
+		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := runSyncCycle(ctx, opts, stdout, stderr, runner); err != nil {
-				consecutiveFailures++
-				if shouldStopAfterFailures(opts, consecutiveFailures) {
-					return maxFailuresError(consecutiveFailures, err)
-				}
-				continue
-			}
-			consecutiveFailures = 0
 		}
 	}
 }
@@ -101,6 +104,10 @@ func runSyncCycle(ctx context.Context, opts agentOptions, stdout, stderr io.Writ
 
 func shouldStopAfterFailures(opts agentOptions, consecutiveFailures int) bool {
 	return opts.MaxFailures > 0 && consecutiveFailures >= opts.MaxFailures
+}
+
+func shouldStopAfterCycles(opts agentOptions, cyclesRun int) bool {
+	return opts.Cycles > 0 && cyclesRun >= opts.Cycles
 }
 
 func maxFailuresError(consecutiveFailures int, err error) error {
@@ -124,6 +131,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.StringVar(&opts.DevicePlatform, "platform", "", "device platform")
 	fs.IntVar(&opts.Limit, "limit", 500, "maximum changes to pull per sync cycle")
 	fs.IntVar(&opts.MaxFailures, "max-failures", 0, "maximum consecutive sync failures before exit; 0 disables")
+	fs.IntVar(&opts.Cycles, "cycles", 0, "number of sync cycles to run before exit; 0 runs until interrupted")
 	fs.BoolVar(&opts.Once, "once", false, "run one sync cycle and exit")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state; requires --once")
 	if len(args) > 0 {
@@ -145,6 +153,12 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.MaxFailures < 0 {
 		return agentOptions{}, errors.New("max failures must be non-negative")
 	}
+	if opts.Cycles < 0 {
+		return agentOptions{}, errors.New("cycles must be non-negative")
+	}
+	if opts.Once && opts.Cycles > 0 {
+		return agentOptions{}, errors.New("cycles cannot be used with --once")
+	}
 	if opts.DryRun && !opts.Once {
 		return agentOptions{}, errors.New("dry run requires --once")
 	}
@@ -160,6 +174,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-agent --path . --once")
 	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run")
 	fmt.Fprintln(w, "  synchub-agent --path . --interval 30s --device-name laptop --platform windows --limit 500")
+	fmt.Fprintln(w, "  synchub-agent --path . --cycles 3")
 	fmt.Fprintln(w, "  synchub-agent --path . --max-failures 5")
 }
 

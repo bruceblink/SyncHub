@@ -13,7 +13,8 @@
 - readiness: `GET /readyz` 同时检查数据库和 storage。
 - 过期上传会话由 API 进程内 worker 周期性标记为 `expired`，间隔由 `UPLOAD_CLEANUP_INTERVAL_SECONDS` 控制。
 - 清理任务每轮处理数量由 `CLEANUP_BATCH_LIMIT` 控制，默认 `1000`。
-- Agent 默认会持续重试同步；设置 `synchub-agent --max-failures N` 后，连续失败达到 N 次会退出，便于由 Docker、systemd 或其他 supervisor 重启。
+- Agent 默认会持续重试同步；设置 `synchub-agent --cycles N` 可执行固定轮次后退出，适合本地验证和脚本化 smoke test。
+- 设置 `synchub-agent --max-failures N` 后，连续失败达到 N 次会退出，便于由 Docker、systemd 或其他 supervisor 重启。
 
 ## 本地备份
 
