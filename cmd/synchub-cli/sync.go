@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/bruceblink/SyncHub/internal/watch"
 )
 
 func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -21,7 +23,7 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	case "once":
 		return runSyncOnce(ctx, args[1:], stdout, stderr)
 	case "status":
-		return runSyncStatus(args[1:], stdout, stderr)
+		return runSyncStatus(ctx, args[1:], stdout, stderr)
 	case "push":
 		return runSyncPush(ctx, args[1:], stdout, stderr)
 	case "pull":
@@ -78,7 +80,7 @@ func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	return runSyncPull(ctx, pullArgs, stdout, stderr)
 }
 
-func runSyncStatus(args []string, stdout, stderr io.Writer) error {
+func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("sync status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	rootPath := fs.String("path", ".", "local workspace root")
@@ -127,5 +129,21 @@ func runSyncStatus(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "manifest: %s\n", localManifestPath)
 	fmt.Fprintf(stdout, "files: %d\n", len(m.Items))
 	fmt.Fprintf(stdout, "last scan: %s\n", m.GeneratedAt.Format(time.RFC3339))
+	changes, err := scanManifestChanges(ctx, root, workspace.RemotePath, localManifestPath)
+	if err != nil {
+		return err
+	}
+	printSyncStatusChanges(stdout, changes)
 	return nil
+}
+
+func printSyncStatusChanges(stdout io.Writer, changes []watch.Change) {
+	counts := map[string]int{}
+	for _, change := range changes {
+		counts[change.Type]++
+	}
+	fmt.Fprintf(stdout, "pending changes: %d\n", len(changes))
+	fmt.Fprintf(stdout, "created: %d\n", counts[watch.ChangeCreated])
+	fmt.Fprintf(stdout, "updated: %d\n", counts[watch.ChangeUpdated])
+	fmt.Fprintf(stdout, "deleted: %d\n", counts[watch.ChangeDeleted])
 }

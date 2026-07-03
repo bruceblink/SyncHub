@@ -353,13 +353,16 @@ func TestRunManifestScanRequiresWorkspace(t *testing.T) {
 func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
 	root := t.TempDir()
 	writeTestWorkspaceConfig(t, root)
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
 	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
 		Version:     1,
 		Root:        root,
 		RemotePath:  "/workspace",
 		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
 		Items: []manifest.Entry{
-			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: 5, SHA256: "sha"},
+			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: int64(len("alpha")), SHA256: testSHA([]byte("alpha"))},
 		},
 	}, 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
@@ -377,6 +380,47 @@ func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
 		"user: user@example.com",
 		"files: 1",
 		"last scan: 2026-06-30T01:02:03Z",
+		"pending changes: 0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunSyncStatusShowsPendingLocalChanges(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	if err := os.WriteFile(filepath.Join(root, "new.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("write new file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "modified.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("write modified file: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+		Items: []manifest.Entry{
+			{Path: "/workspace/deleted.txt", RelativePath: "deleted.txt", Size: int64(len("old")), SHA256: testSHA([]byte("old"))},
+			{Path: "/workspace/modified.txt", RelativePath: "modified.txt", Size: int64(len("old")), SHA256: testSHA([]byte("old"))},
+		},
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"pending changes: 3",
+		"created: 1",
+		"updated: 1",
+		"deleted: 1",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
