@@ -185,6 +185,8 @@ func runFileDownload(ctx context.Context, args []string, stdout, stderr io.Write
 	remotePath := fs.String("remote-path", "", "remote file path")
 	fileID := fs.String("file-id", "", "remote file id")
 	outputPath := fs.String("output", "", "local output file path")
+	byteRange := fs.String("range", "", "HTTP byte range, for example bytes=0-1023")
+	ifNoneMatch := fs.String("if-none-match", "", "ETag used for conditional download")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -201,13 +203,29 @@ func runFileDownload(ctx context.Context, args []string, stdout, stderr io.Write
 	if err != nil {
 		return err
 	}
-	written, err := downloadFileToPath(ctx, session.apiClient, session.accessToken, node.ID, output)
+	result, written, err := downloadFileToPath(ctx, session.apiClient, session.accessToken, node.ID, output, client.DownloadOptions{
+		Range:       *byteRange,
+		IfNoneMatch: *ifNoneMatch,
+	})
 	if err != nil {
 		return err
+	}
+	if result.StatusCode == http.StatusNotModified {
+		fmt.Fprintf(stdout, "not modified: %s\n", node.Path)
+		if strings.TrimSpace(result.ETag) != "" {
+			fmt.Fprintf(stdout, "etag: %s\n", result.ETag)
+		}
+		return nil
 	}
 	fmt.Fprintf(stdout, "downloaded: %s\n", node.Path)
 	fmt.Fprintf(stdout, "output: %s\n", output)
 	fmt.Fprintf(stdout, "bytes: %d\n", written)
+	if strings.TrimSpace(result.ContentRange) != "" {
+		fmt.Fprintf(stdout, "content range: %s\n", result.ContentRange)
+	}
+	if strings.TrimSpace(result.ETag) != "" {
+		fmt.Fprintf(stdout, "etag: %s\n", result.ETag)
+	}
 	return nil
 }
 
@@ -474,16 +492,17 @@ func (s fileCommandSession) downloadOutputPath(node client.FileNode, outputPath 
 	return filepath.Clean(abs), nil
 }
 
-func downloadFileToPath(ctx context.Context, apiClient *client.Client, accessToken, fileID, outputPath string) (int64, error) {
-	result, err := apiClient.DownloadFile(ctx, accessToken, fileID, client.DownloadOptions{})
+func downloadFileToPath(ctx context.Context, apiClient *client.Client, accessToken, fileID, outputPath string, opts client.DownloadOptions) (client.DownloadResult, int64, error) {
+	result, err := apiClient.DownloadFile(ctx, accessToken, fileID, opts)
 	if err != nil {
-		return 0, err
+		return client.DownloadResult{}, 0, err
 	}
 	defer result.Body.Close()
 	if result.StatusCode == http.StatusNotModified {
-		return 0, nil
+		return result, 0, nil
 	}
-	return writeStreamAtomically(outputPath, result.Body)
+	written, err := writeStreamAtomically(outputPath, result.Body)
+	return result, written, err
 }
 
 func writeStreamAtomically(outputPath string, r io.Reader) (int64, error) {

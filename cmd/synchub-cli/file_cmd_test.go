@@ -329,6 +329,128 @@ func TestRunFileDownloadByFileIDToOutputDirectory(t *testing.T) {
 	}
 }
 
+func TestRunFileDownloadSupportsRangeAndETag(t *testing.T) {
+	root := t.TempDir()
+	outputPath := filepath.Join(root, "partial.txt")
+	content := []byte("part")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/file_1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"readme.txt","path":"/workspace/readme.txt","node_type":"file","size":10,"sha256":"sha1","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/file_1/content":
+			if got := r.Header.Get("Range"); got != "bytes=0-3" {
+				t.Fatalf("range = %q", got)
+			}
+			if got := r.Header.Get("If-None-Match"); got != `"old"` {
+				t.Fatalf("if-none-match = %q", got)
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Range", "bytes 0-3/10")
+			w.Header().Set("ETag", `"new"`)
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(content)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"download",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--file-id", "file_1",
+		"--output", outputPath,
+		"--range", "bytes=0-3",
+		"--if-none-match", `"old"`,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file download range: %v", err)
+	}
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read partial file: %v", err)
+	}
+	if !bytes.Equal(raw, content) {
+		t.Fatalf("partial content = %q, want %q", string(raw), string(content))
+	}
+	want := fmt.Sprintf("downloaded: /workspace/readme.txt\noutput: %s\nbytes: %d\ncontent range: bytes 0-3/10\netag: \"new\"\n", outputPath, len(content))
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunFileDownloadNotModifiedDoesNotWriteOutput(t *testing.T) {
+	root := t.TempDir()
+	outputPath := filepath.Join(root, "cached.txt")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/file_1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"readme.txt","path":"/workspace/readme.txt","node_type":"file","size":10,"sha256":"sha1","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/file_1/content":
+			if got := r.Header.Get("If-None-Match"); got != `"cached"` {
+				t.Fatalf("if-none-match = %q", got)
+			}
+			w.Header().Set("ETag", `"cached"`)
+			w.WriteHeader(http.StatusNotModified)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigWithServer(t, root, server.URL)
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"download",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--file-id", "file_1",
+		"--output", outputPath,
+		"--if-none-match", `"cached"`,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file download not modified: %v", err)
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("output was written or stat failed: %v", err)
+	}
+	want := "not modified: /workspace/readme.txt\netag: \"cached\"\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestRunFileDownloadRejectsDirectory(t *testing.T) {
 	root := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

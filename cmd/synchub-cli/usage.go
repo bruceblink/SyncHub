@@ -59,6 +59,7 @@ func printFileUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli file list --path . --parent-id dir_1 --cursor file_1")
 	fmt.Fprintln(w, "  synchub-cli file download --path . --remote-path /workspace/readme.txt")
 	fmt.Fprintln(w, "  synchub-cli file download --path . --file-id file_1 --output ./readme.txt")
+	fmt.Fprintln(w, "  synchub-cli file download --path . --file-id file_1 --range bytes=0-1023 --if-none-match '\"etag\"'")
 	fmt.Fprintln(w, "  synchub-cli file delete --path . --remote-path /workspace/readme.txt")
 	fmt.Fprintln(w, "  synchub-cli file delete --path . --file-id file_1")
 	fmt.Fprintln(w, "  synchub-cli file move --path . --remote-path /workspace/readme.txt --to /workspace/docs/readme.txt")
