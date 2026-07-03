@@ -379,12 +379,54 @@ func TestDirectoryHasLocalChangesDetectsDeletedTrackedDescendant(t *testing.T) {
 		},
 	}
 
-	changed, err := directoryHasLocalChanges(localDir, "/workspace/obsolete", previousEntries)
+	changed, err := directoryHasLocalChanges(root, localDir, "/workspace/obsolete", previousEntries, nil)
 	if err != nil {
 		t.Fatalf("directory local changes: %v", err)
 	}
 	if !changed {
 		t.Fatal("directory missing a tracked descendant was not reported as changed")
+	}
+}
+
+func TestDirectoryHasLocalChangesIgnoresIgnoredDescendants(t *testing.T) {
+	root := t.TempDir()
+	localDir := filepath.Join(root, "obsolete")
+	ignoredPath := filepath.Join(localDir, "build", "cache.bin")
+	unchangedPath := filepath.Join(localDir, "nested", "a.txt")
+	if err := os.MkdirAll(filepath.Dir(ignoredPath), 0o755); err != nil {
+		t.Fatalf("mkdir ignored path: %v", err)
+	}
+	if err := os.WriteFile(ignoredPath, []byte("generated"), 0o644); err != nil {
+		t.Fatalf("write ignored file: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(unchangedPath), 0o755); err != nil {
+		t.Fatalf("mkdir unchanged path: %v", err)
+	}
+	if err := os.WriteFile(unchangedPath, []byte("unchanged"), 0o644); err != nil {
+		t.Fatalf("write unchanged file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".synchubignore"), []byte("obsolete/build/\n"), 0o644); err != nil {
+		t.Fatalf("write ignore file: %v", err)
+	}
+	ignoreRules, err := manifest.LoadIgnoreRules(root)
+	if err != nil {
+		t.Fatalf("load ignore rules: %v", err)
+	}
+	previousEntries := map[string]manifest.Entry{
+		"/workspace/obsolete/nested/a.txt": {
+			Path:         "/workspace/obsolete/nested/a.txt",
+			RelativePath: "obsolete/nested/a.txt",
+			Size:         int64(len("unchanged")),
+			SHA256:       testSHA([]byte("unchanged")),
+		},
+	}
+
+	changed, err := directoryHasLocalChanges(root, localDir, "/workspace/obsolete", previousEntries, ignoreRules)
+	if err != nil {
+		t.Fatalf("directory local changes: %v", err)
+	}
+	if changed {
+		t.Fatal("ignored descendant should not be reported as a local directory change")
 	}
 }
 

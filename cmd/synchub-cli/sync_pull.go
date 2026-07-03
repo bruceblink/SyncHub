@@ -456,7 +456,11 @@ func keepLocalTreeConflictIfChanged(localPath, remotePath string, workspace work
 	if !info.IsDir() {
 		return keepLocalConflictIfChanged(localPath, remotePath, workspace, previousEntries)
 	}
-	changed, err := directoryHasLocalChanges(localPath, remotePath, previousEntries)
+	ignoreRules, err := manifest.LoadIgnoreRules(workspace.Root)
+	if err != nil {
+		return "", err
+	}
+	changed, err := directoryHasLocalChanges(workspace.Root, localPath, remotePath, previousEntries, ignoreRules)
 	if err != nil || !changed {
 		return "", err
 	}
@@ -470,7 +474,7 @@ func keepLocalTreeConflictIfChanged(localPath, remotePath string, workspace work
 	return conflictPath, nil
 }
 
-func directoryHasLocalChanges(localPath, remotePath string, previousEntries map[string]manifest.Entry) (bool, error) {
+func directoryHasLocalChanges(root, localPath, remotePath string, previousEntries map[string]manifest.Entry, ignoreRules manifest.IgnoreRules) (bool, error) {
 	remotePath, err := normalizeRemotePath(remotePath)
 	if err != nil {
 		return false, err
@@ -491,6 +495,18 @@ func directoryHasLocalChanges(localPath, remotePath string, previousEntries map[
 	err = filepath.WalkDir(localPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if path != localPath {
+			workspaceRelative, err := safeWorkspaceRelativePath(root, path)
+			if err != nil {
+				return err
+			}
+			if ignoreRules.Match(workspaceRelative, d.IsDir()) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 		}
 		if d.IsDir() {
 			return nil

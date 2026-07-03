@@ -35,7 +35,7 @@ type Entry struct {
 func Scan(ctx context.Context, root, remotePath string) (Manifest, error) {
 	root = filepath.Clean(root)
 	remotePath = normalizeRemotePath(remotePath)
-	ignoreRules, err := loadIgnoreRules(root)
+	ignoreRules, err := LoadIgnoreRules(root)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -106,14 +106,14 @@ func Scan(ctx context.Context, root, remotePath string) (Manifest, error) {
 	return result, nil
 }
 
-type ignoreRules []ignoreRule
+type IgnoreRules []ignoreRule
 
 type ignoreRule struct {
 	pattern   string
 	directory bool
 }
 
-func loadIgnoreRules(root string) (ignoreRules, error) {
+func LoadIgnoreRules(root string) (IgnoreRules, error) {
 	raw, err := os.ReadFile(filepath.Join(root, ignoreFileName))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -122,7 +122,7 @@ func loadIgnoreRules(root string) (ignoreRules, error) {
 		return nil, err
 	}
 	lines := strings.Split(string(raw), "\n")
-	rules := make(ignoreRules, 0, len(lines))
+	rules := make(IgnoreRules, 0, len(lines))
 	for _, line := range lines {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -139,7 +139,7 @@ func loadIgnoreRules(root string) (ignoreRules, error) {
 	return rules, nil
 }
 
-func (rules ignoreRules) Match(relativePath string, directory bool) bool {
+func (rules IgnoreRules) Match(relativePath string, directory bool) bool {
 	relativePath = strings.TrimPrefix(filepath.ToSlash(relativePath), "/")
 	if relativePath == "" {
 		return false
