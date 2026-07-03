@@ -37,6 +37,7 @@ func runManifestScan(ctx context.Context, args []string, stdout, stderr io.Write
 	rootPath := fs.String("path", ".", "local workspace root")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	outputPath := fs.String("output", "", "manifest output file path")
+	dryRun := fs.Bool("dry-run", false, "scan workspace without writing manifest file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -59,6 +60,11 @@ func runManifestScan(ctx context.Context, args []string, stdout, stderr io.Write
 	m, err := manifest.Scan(ctx, root, workspace.RemotePath)
 	if err != nil {
 		return err
+	}
+	if *dryRun {
+		fmt.Fprintf(stdout, "manifest scanned: %d files\n", len(m.Items))
+		fmt.Fprintln(stdout, "dry run: true")
+		return nil
 	}
 	out := *outputPath
 	if strings.TrimSpace(out) == "" {

@@ -340,6 +340,41 @@ func TestRunManifestScanWritesManifest(t *testing.T) {
 	}
 }
 
+func TestRunManifestScanDryRunDoesNotWriteManifest(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  "http://localhost:8765",
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"manifest",
+		"scan",
+		"--path", root,
+		"--dry-run",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("manifest scan dry-run: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "manifest scanned: 1 files") || !strings.Contains(out, "dry run: true") {
+		t.Fatalf("stdout = %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".synchub", "manifest.json")); !os.IsNotExist(err) {
+		t.Fatalf("manifest was written or stat failed: %v", err)
+	}
+}
+
 func TestRunManifestScanRequiresWorkspace(t *testing.T) {
 	err := run(context.Background(), []string{
 		"manifest",
