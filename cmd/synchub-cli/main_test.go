@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -978,6 +979,83 @@ func TestRunSyncPushUploadsManifestFiles(t *testing.T) {
 	}
 	if len(updatedManifest.Items) != 1 || updatedManifest.Items[0].RemoteVersion == nil || *updatedManifest.Items[0].RemoteVersion != 1 {
 		t.Fatalf("updated manifest = %#v", updatedManifest.Items)
+	}
+}
+
+func TestRunSyncPushSkipsAlreadyUploadedChunks(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("hello")
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	var chunkIndexes []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/directories":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"workspace","path":"/workspace","node_type":"directory","version":1}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_resume","path":"/workspace/a.txt","chunk_size":3,"expires_at":"2026-06-30T00:00:00Z","status":"pending","uploaded_chunks":[{"chunk_index":0,"size":3,"sha256":"` + testSHA([]byte("hel")) + `"}]}}`))
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/v1/uploads/upl_resume/chunks/"):
+			chunkIndexes = append(chunkIndexes, pathpkg.Base(r.URL.Path))
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read chunk: %v", err)
+			}
+			if string(body) != "lo" {
+				t.Fatalf("chunk body = %q, want lo", string(body))
+			}
+			if got := r.Header.Get("X-Chunk-Sha256"); got != testSHA([]byte("lo")) {
+				t.Fatalf("chunk sha = %q, want %q", got, testSHA([]byte("lo")))
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"chunk_index":1,"size":2,"sha256":"ok"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads/upl_resume/commit":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file_id":"file_1","version":1,"change_id":2}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"push",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	if stdout.String() != "uploaded: 1 files\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if len(chunkIndexes) != 1 || chunkIndexes[0] != "1" {
+		t.Fatalf("uploaded chunk indexes = %#v, want [1]", chunkIndexes)
 	}
 }
 

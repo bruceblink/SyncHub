@@ -397,7 +397,7 @@ func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessTo
 	if err != nil {
 		return 0, err
 	}
-	if err := uploadFileChunks(ctx, apiClient, accessToken, session.UploadID, localPath, session.ChunkSize); err != nil {
+	if err := uploadFileChunks(ctx, apiClient, accessToken, session.UploadID, localPath, session.ChunkSize, session.UploadedChunks); err != nil {
 		return 0, err
 	}
 	commit, err := apiClient.CommitUpload(ctx, accessToken, session.UploadID)
@@ -489,7 +489,7 @@ func remoteParentDirs(filePath string) []string {
 	return dirs
 }
 
-func uploadFileChunks(ctx context.Context, apiClient *client.Client, accessToken, uploadID, localPath string, chunkSize int64) error {
+func uploadFileChunks(ctx context.Context, apiClient *client.Client, accessToken, uploadID, localPath string, chunkSize int64, uploadedChunks []client.UploadChunk) error {
 	if chunkSize <= 0 {
 		return errors.New("server returned invalid chunk size")
 	}
@@ -503,8 +503,9 @@ func uploadFileChunks(ctx context.Context, apiClient *client.Client, accessToken
 	if err != nil {
 		return err
 	}
+	uploaded := uploadedChunksByIndex(uploadedChunks)
 	if info.Size() == 0 {
-		return uploadChunk(ctx, apiClient, accessToken, uploadID, 0, nil)
+		return uploadChunkIfMissing(ctx, apiClient, accessToken, uploadID, 0, nil, uploaded)
 	}
 
 	buf := make([]byte, int(chunkSize))
@@ -517,7 +518,7 @@ func uploadFileChunks(ctx context.Context, apiClient *client.Client, accessToken
 		if readErr != nil && readErr != io.ErrUnexpectedEOF {
 			return readErr
 		}
-		if err := uploadChunk(ctx, apiClient, accessToken, uploadID, index, buf[:n]); err != nil {
+		if err := uploadChunkIfMissing(ctx, apiClient, accessToken, uploadID, index, buf[:n], uploaded); err != nil {
 			return err
 		}
 		index++
@@ -527,9 +528,21 @@ func uploadFileChunks(ctx context.Context, apiClient *client.Client, accessToken
 	}
 }
 
-func uploadChunk(ctx context.Context, apiClient *client.Client, accessToken, uploadID string, index int32, data []byte) error {
+func uploadedChunksByIndex(chunks []client.UploadChunk) map[int32]client.UploadChunk {
+	uploaded := make(map[int32]client.UploadChunk, len(chunks))
+	for _, chunk := range chunks {
+		uploaded[chunk.ChunkIndex] = chunk
+	}
+	return uploaded
+}
+
+func uploadChunkIfMissing(ctx context.Context, apiClient *client.Client, accessToken, uploadID string, index int32, data []byte, uploaded map[int32]client.UploadChunk) error {
 	sum := sha256.Sum256(data)
-	_, err := apiClient.PutUploadChunk(ctx, accessToken, uploadID, index, bytes.NewReader(data), hex.EncodeToString(sum[:]))
+	sha := hex.EncodeToString(sum[:])
+	if chunk, ok := uploaded[index]; ok && chunk.Size == int32(len(data)) && strings.EqualFold(chunk.SHA256, sha) {
+		return nil
+	}
+	_, err := apiClient.PutUploadChunk(ctx, accessToken, uploadID, index, bytes.NewReader(data), sha)
 	return err
 }
 
