@@ -22,6 +22,8 @@ func runManifest(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	switch args[0] {
 	case "scan":
 		return runManifestScan(ctx, args[1:], stdout, stderr)
+	case "ignores":
+		return runManifestIgnores(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printManifestUsage(stdout)
 		return nil
@@ -75,6 +77,30 @@ func runManifestScan(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 	fmt.Fprintf(stdout, "manifest scanned: %d files\n", len(m.Items))
 	fmt.Fprintf(stdout, "output: %s\n", out)
+	return nil
+}
+
+func runManifestIgnores(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("manifest ignores", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rootPath := fs.String("path", ".", "local workspace root")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	root, err := resolveWorkspaceRoot(*rootPath)
+	if err != nil {
+		return err
+	}
+	rules, err := manifest.LoadIgnoreRules(root)
+	if err != nil {
+		return err
+	}
+	patterns := rules.Patterns()
+	fmt.Fprintf(stdout, "ignore file: %s\n", filepath.Join(root, ".synchubignore"))
+	fmt.Fprintf(stdout, "rules: %d\n", len(patterns))
+	for _, pattern := range patterns {
+		fmt.Fprintf(stdout, "%s\n", pattern)
+	}
 	return nil
 }
 

@@ -155,6 +155,18 @@ func (rules IgnoreRules) Match(relativePath string, directory bool) bool {
 	return false
 }
 
+func (rules IgnoreRules) Patterns() []string {
+	patterns := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		pattern := rule.pattern
+		if rule.directory {
+			pattern += "/"
+		}
+		patterns = append(patterns, pattern)
+	}
+	return patterns
+}
+
 func matchIgnoreRule(pattern, relativePath string) bool {
 	if strings.Contains(pattern, "/") {
 		ok, err := pathpkg.Match(pattern, relativePath)

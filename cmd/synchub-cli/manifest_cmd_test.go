@@ -115,3 +115,49 @@ func TestRunManifestScanRequiresWorkspace(t *testing.T) {
 		t.Fatalf("error = %v, want workspace not initialized", err)
 	}
 }
+
+func TestRunManifestIgnoresListsWorkspaceRules(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".synchubignore"), []byte("# generated files\n*.tmp\nbuild/\nlogs/*.log\n"), 0o644); err != nil {
+		t.Fatalf("write ignore file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"manifest",
+		"ignores",
+		"--path", root,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("manifest ignores: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"ignore file: " + filepath.Join(root, ".synchubignore"),
+		"rules: 3",
+		"*.tmp",
+		"build/",
+		"logs/*.log",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunManifestIgnoresShowsEmptyRules(t *testing.T) {
+	root := t.TempDir()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"manifest",
+		"ignores",
+		"--path", root,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("manifest ignores without file: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "rules: 0") {
+		t.Fatalf("stdout = %q, want rules: 0", stdout.String())
+	}
+}
