@@ -1,0 +1,149 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+)
+
+const defaultAgentInterval = 30 * time.Second
+
+type agentOptions struct {
+	RootPath            string
+	ConfigPath          string
+	WorkspaceConfigPath string
+	ManifestPath        string
+	CLIPath             string
+	Interval            time.Duration
+	Once                bool
+}
+
+type syncOnceRunner func(context.Context, agentOptions, io.Writer, io.Writer) error
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr, runSyncOnceCommand); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner syncOnceRunner) error {
+	opts, err := parseOptions(args, stderr)
+	if err != nil {
+		return err
+	}
+	if runner == nil {
+		return errors.New("sync runner is required")
+	}
+	if opts.Once {
+		return runner(ctx, opts, stdout, stderr)
+	}
+
+	fmt.Fprintf(stdout, "agent started: %s\n", opts.RootPath)
+	fmt.Fprintf(stdout, "sync interval: %s\n", opts.Interval)
+	if err := runner(ctx, opts, stdout, stderr); err != nil {
+		fmt.Fprintf(stderr, "sync failed: %v\n", err)
+	}
+
+	ticker := time.NewTicker(opts.Interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := runner(ctx, opts, stdout, stderr); err != nil {
+				fmt.Fprintf(stderr, "sync failed: %v\n", err)
+			}
+		}
+	}
+}
+
+func parseOptions(args []string, stderr io.Writer) (agentOptions, error) {
+	fs := flag.NewFlagSet("synchub-agent", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	opts := agentOptions{}
+	fs.StringVar(&opts.RootPath, "path", ".", "local workspace root")
+	fs.StringVar(&opts.ConfigPath, "config", defaultConfigPath(), "login config file path")
+	fs.StringVar(&opts.WorkspaceConfigPath, "workspace-config", "", "workspace config file path")
+	fs.StringVar(&opts.ManifestPath, "manifest", "", "manifest file path")
+	fs.StringVar(&opts.CLIPath, "cli", "", "synchub-cli executable path")
+	fs.DurationVar(&opts.Interval, "interval", defaultAgentInterval, "sync interval")
+	fs.BoolVar(&opts.Once, "once", false, "run one sync cycle and exit")
+	if err := fs.Parse(args); err != nil {
+		return agentOptions{}, err
+	}
+	if opts.Interval <= 0 {
+		return agentOptions{}, errors.New("sync interval must be positive")
+	}
+	if strings.TrimSpace(opts.RootPath) == "" {
+		return agentOptions{}, errors.New("workspace path is required")
+	}
+	return opts, nil
+}
+
+func runSyncOnceCommand(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
+	name, baseArgs := syncCommand(opts.CLIPath)
+	args := append(baseArgs, buildSyncOnceArgs(opts)...)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	return cmd.Run()
+}
+
+func syncCommand(cliPath string) (string, []string) {
+	if cliPath = strings.TrimSpace(cliPath); cliPath != "" {
+		return cliPath, nil
+	}
+	if cliPath = strings.TrimSpace(os.Getenv("SYNCHUB_CLI")); cliPath != "" {
+		return cliPath, nil
+	}
+	if path, err := exec.LookPath("synchub-cli"); err == nil {
+		return path, nil
+	}
+	if _, err := os.Stat(filepath.Join("cmd", "synchub-cli")); err == nil {
+		return "go", []string{"run", "./cmd/synchub-cli"}
+	}
+	return "synchub-cli", nil
+}
+
+func buildSyncOnceArgs(opts agentOptions) []string {
+	args := []string{
+		"sync",
+		"once",
+		"--path",
+		opts.RootPath,
+		"--config",
+		opts.ConfigPath,
+	}
+	if strings.TrimSpace(opts.WorkspaceConfigPath) != "" {
+		args = append(args, "--workspace-config", opts.WorkspaceConfigPath)
+	}
+	if strings.TrimSpace(opts.ManifestPath) != "" {
+		args = append(args, "--manifest", opts.ManifestPath)
+	}
+	return args
+}
+
+func defaultConfigPath() string {
+	if v := os.Getenv("SYNCHUB_CONFIG"); v != "" {
+		return v
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		return filepath.Join(".synchub", "config.json")
+	}
+	return filepath.Join(dir, "SyncHub", "config.json")
+}

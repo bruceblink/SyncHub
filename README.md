@@ -78,6 +78,14 @@ go run ./cmd/synchub-cli sync once --path .
 go run ./cmd/synchub-cli sync status --path .
 ```
 
+Run the agent loop for an initialized workspace:
+
+```bash
+go run ./cmd/synchub-agent --path .
+```
+
+For a single agent sync cycle, add `--once`.
+
 For a containerized local server:
 
 ```bash
