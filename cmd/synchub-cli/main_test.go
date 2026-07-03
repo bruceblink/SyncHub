@@ -639,6 +639,7 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
+		"synchub-cli sync once --path . --dry-run",
 		"synchub-cli sync push --path . --dry-run",
 		"synchub-cli sync pull --path . --dry-run",
 		"synchub-cli sync devices --path .",
@@ -2555,6 +2556,160 @@ func TestRunSyncOncePushesAndPulls(t *testing.T) {
 	}
 	if _, err := readManifest(filepath.Join(root, ".synchub", "manifest.json")); err != nil {
 		t.Fatalf("read manifest after sync once: %v", err)
+	}
+}
+
+func TestRunSyncOnceDryRunPreviewsPushAndPull(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("local preview")
+	if err := os.WriteFile(filepath.Join(root, "local.txt"), content, 0o644); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/changes":
+			if got := r.URL.Query().Get("device_id"); got != "dev_1" {
+				t.Fatalf("device_id = %q", got)
+			}
+			if got := r.URL.Query().Get("after_change_id"); got != "4" {
+				t.Fatalf("after_change_id = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":5,"file_id":"file_1","event_type":"update","version":2,"path":"/workspace/remote.txt","created_at":"2026-06-30T00:02:00Z"}],"next_cursor":5}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices",
+			r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/uploads"),
+			r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/chunks/"),
+			r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/files/"),
+			r.Method == http.MethodPost && r.URL.Path == "/api/v1/sync/ack":
+			t.Fatalf("dry run must not mutate remote state: %s %s", r.Method, r.URL.String())
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	workspacePath := filepath.Join(root, ".synchub", "workspace.json")
+	if err := writeJSONFile(workspacePath, workspaceConfig{
+		Version:             1,
+		Root:                root,
+		RemotePath:          "/workspace",
+		ServerURL:           server.URL,
+		UserID:              "u1",
+		UserEmail:           "user@example.com",
+		DeviceID:            "dev_1",
+		LastAppliedChangeID: 4,
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	manifestPath := filepath.Join(root, ".synchub", "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	beforeManifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest before dry run: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err = run(context.Background(), []string{
+		"sync",
+		"once",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--dry-run",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync once dry run: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"create /workspace/local.txt size=13 base_version=-",
+		"uploaded: 1 files",
+		"update /workspace/remote.txt version=2 id=5",
+		"current cursor: 4",
+		"next cursor: 5",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+	afterManifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest after dry run: %v", err)
+	}
+	if !bytes.Equal(afterManifest, beforeManifest) {
+		t.Fatalf("dry run changed manifest")
+	}
+	var workspace workspaceConfig
+	workspaceRaw, err := os.ReadFile(workspacePath)
+	if err != nil {
+		t.Fatalf("read workspace config: %v", err)
+	}
+	if err := json.Unmarshal(workspaceRaw, &workspace); err != nil {
+		t.Fatalf("decode workspace config: %v", err)
+	}
+	if workspace.LastAppliedChangeID != 4 {
+		t.Fatalf("last applied change id = %d, want 4", workspace.LastAppliedChangeID)
+	}
+}
+
+func TestRunSyncOnceDryRunSkipsPullWhenDeviceMissing(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "local.txt"), []byte("local preview"), 0o644); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dry run without device must not call server: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "workspace.json"), workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"once",
+		"--path", root,
+		"--config", filepath.Join(root, ".synchub", "missing-login.json"),
+		"--dry-run",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync once dry run without device: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"create /workspace/local.txt size=13 base_version=-",
+		"uploaded: 1 files",
+		"pull dry run skipped: workspace device is not registered",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
 	}
 }
 

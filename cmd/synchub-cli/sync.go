@@ -55,6 +55,7 @@ func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	deviceName := fs.String("device-name", "", "device name")
 	devicePlatform := fs.String("platform", "", "device platform")
 	limit := fs.Int("limit", 500, "maximum changes to pull")
+	dryRun := fs.Bool("dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -68,6 +69,24 @@ func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	if strings.TrimSpace(*manifestPath) != "" {
 		commonArgs = append(commonArgs, "--manifest", *manifestPath)
+	}
+	if *dryRun {
+		pushArgs := append([]string{}, commonArgs...)
+		pushArgs = append(pushArgs, "--dry-run")
+		if err := runSyncPush(ctx, pushArgs, stdout, stderr); err != nil {
+			return err
+		}
+		_, workspace, _, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(workspace.DeviceID) == "" {
+			fmt.Fprintln(stdout, "pull dry run skipped: workspace device is not registered")
+			return nil
+		}
+		pullArgs := append([]string{}, commonArgs...)
+		pullArgs = append(pullArgs, "--limit", fmt.Sprintf("%d", *limit), "--dry-run")
+		return runSyncPullWithDeviceEnsure(ctx, pullArgs, stdout, stderr, false)
 	}
 	if err := ensureSyncOnceDevice(ctx, *rootPath, *workspaceConfigPath, *configPath, *deviceName, *devicePlatform); err != nil {
 		return err
