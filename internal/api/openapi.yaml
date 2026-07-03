@@ -16,6 +16,23 @@ tags:
   - name: Download
   - name: Sync
 paths:
+  /version:
+    get:
+      tags: [Health]
+      summary: Version information
+      security: []
+      responses:
+        "200":
+          description: Running service version.
+          headers:
+            X-Trace-ID:
+              description: Request trace identifier.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
   /healthz:
     get:
       tags: [Health]

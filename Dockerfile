@@ -1,14 +1,16 @@
 FROM golang:1.26-alpine AS build
 
+ARG VERSION=dev
+
 WORKDIR /src
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/synchub-api ./cmd/synchub-api
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/synchub-cli ./cmd/synchub-cli
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/synchub-agent ./cmd/synchub-agent
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-api ./cmd/synchub-api
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-cli ./cmd/synchub-cli
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-agent ./cmd/synchub-agent
 
 FROM alpine:3.22
 

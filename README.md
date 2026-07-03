@@ -56,6 +56,7 @@ The server listens on `http://localhost:8765` by default.
 
 Useful endpoints:
 
+- `GET /version`
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`

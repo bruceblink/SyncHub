@@ -59,6 +59,31 @@ func TestReadyzChecksDatabaseAndStorage(t *testing.T) {
 	}
 }
 
+func TestVersionEndpoint(t *testing.T) {
+	server := New(nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/version", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("version status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Code float64 `json:"code"`
+		Data struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode version response: %v", err)
+	}
+	if body.Code != 0 || body.Data.Name != "SyncHub" || body.Data.Version == "" {
+		t.Fatalf("version response = %#v", body)
+	}
+}
+
 func TestRequestLogIncludesTraceAndStatus(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()

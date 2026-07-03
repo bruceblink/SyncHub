@@ -65,6 +65,8 @@ Later adapter 配置：
 - `golang:1.26-alpine`
 - `alpine:3.22`
 
+构建时可以通过 `--build-arg VERSION=0.0.1` 写入 `/version` 返回的版本号。
+
 如果 `docker build` 在 `load metadata` 阶段失败，并出现 `failed to resolve source metadata`、`registry-1.docker.io` 连接超时或代理提示，通常说明 Docker Desktop 无法访问 Docker Hub，而不是项目编译失败。优先检查：
 
 - Docker Desktop proxy / registry mirror 配置。
@@ -73,6 +75,7 @@ Later adapter 配置：
 
 ## 健康检查
 
+- `GET /version`: 当前服务名称和版本。
 - `GET /healthz`: 进程存活。
 - `GET /readyz`: 数据库、storage 可用。
 

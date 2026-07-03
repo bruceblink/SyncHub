@@ -14,6 +14,7 @@ import (
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
 	"github.com/bruceblink/SyncHub/internal/storage"
 	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
+	"github.com/bruceblink/SyncHub/internal/version"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -114,6 +115,9 @@ func (s *Server) routes() {
 			}
 		}
 		ok(c, gin.H{"status": "ready"})
+	})
+	s.router.GET("/version", func(c *gin.Context) {
+		ok(c, gin.H{"name": version.Name, "version": version.Version})
 	})
 	s.router.GET("/metrics", s.metricsHandler)
 	s.router.GET("/swagger", swaggerRedirect)
