@@ -188,6 +188,11 @@ func normalizeRemotePath(p string) (string, error) {
 	if strings.ContainsRune(p, 0) {
 		return "", errors.New("remote path contains null byte")
 	}
+	for _, segment := range strings.Split(p, "/") {
+		if segment == ".." {
+			return "", errors.New("remote path traversal is not allowed")
+		}
+	}
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}

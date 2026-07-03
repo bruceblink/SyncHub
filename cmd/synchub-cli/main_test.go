@@ -280,6 +280,31 @@ func TestRunWorkspaceInitRequiresLogin(t *testing.T) {
 	}
 }
 
+func TestNormalizeRemotePathRejectsTraversal(t *testing.T) {
+	for _, input := range []string{
+		"../secret.txt",
+		"/workspace/../secret.txt",
+		`workspace\..\secret.txt`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			_, err := normalizeRemotePath(input)
+			if err == nil || !strings.Contains(err.Error(), "remote path traversal is not allowed") {
+				t.Fatalf("normalizeRemotePath(%q) error = %v, want traversal error", input, err)
+			}
+		})
+	}
+}
+
+func TestNormalizeRemotePathCleansSafePath(t *testing.T) {
+	got, err := normalizeRemotePath(`workspace//docs\guide.md`)
+	if err != nil {
+		t.Fatalf("normalize remote path: %v", err)
+	}
+	if got != "/workspace/docs/guide.md" {
+		t.Fatalf("path = %q, want /workspace/docs/guide.md", got)
+	}
+}
+
 func TestRunManifestScanWritesManifest(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha"), 0o644); err != nil {
