@@ -246,6 +246,39 @@ func TestRunManifestIgnoresListsWorkspaceRules(t *testing.T) {
 	}
 }
 
+func TestRunManifestIgnoresCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".synchubignore"), []byte("# generated files\n*.tmp\nbuild/\nlogs/*.log\n"), 0o644); err != nil {
+		t.Fatalf("write ignore file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"manifest",
+		"ignores",
+		"--path", root,
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("manifest ignores json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "ignore file:") {
+		t.Fatalf("json output includes text ignores output: %s", stdout.String())
+	}
+
+	var snapshot manifestIgnoresSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode manifest ignores json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Root != root || snapshot.IgnoreFile != filepath.Join(root, ".synchubignore") {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	wantRules := []string{"*.tmp", "build/", "logs/*.log"}
+	if strings.Join(snapshot.Rules, ",") != strings.Join(wantRules, ",") {
+		t.Fatalf("rules = %#v, want %#v", snapshot.Rules, wantRules)
+	}
+}
+
 func TestRunManifestIgnoresShowsEmptyRules(t *testing.T) {
 	root := t.TempDir()
 
@@ -263,13 +296,45 @@ func TestRunManifestIgnoresShowsEmptyRules(t *testing.T) {
 	}
 }
 
+func TestRunManifestIgnoresEmptyRulesCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"manifest",
+		"ignores",
+		"--path", root,
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("manifest ignores empty json: %v", err)
+	}
+
+	var snapshot manifestIgnoresSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode manifest ignores json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Root != root || snapshot.IgnoreFile != filepath.Join(root, ".synchubignore") {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if snapshot.Rules == nil || len(snapshot.Rules) != 0 {
+		t.Fatalf("rules = %#v, want empty non-nil slice", snapshot.Rules)
+	}
+}
+
 func TestRunManifestHelpIncludesScanJSONCommand(t *testing.T) {
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{"manifest", "help"}, &stdout, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("manifest help: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "synchub-cli manifest scan --path . --json") {
-		t.Fatalf("manifest help missing scan json command: %s", stdout.String())
+	out := stdout.String()
+	for _, want := range []string{
+		"synchub-cli manifest scan --path . --json",
+		"synchub-cli manifest ignores --path . --json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("manifest help missing %q: %s", want, out)
+		}
 	}
 }

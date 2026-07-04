@@ -26,6 +26,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path . --json")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path . --dry-run")
 	fmt.Fprintln(w, "  synchub-cli manifest ignores --path .")
+	fmt.Fprintln(w, "  synchub-cli manifest ignores --path . --json")
 	fmt.Fprintln(w, "  synchub-cli file list --path .")
 	fmt.Fprintln(w, "  synchub-cli file list --path . --json")
 	fmt.Fprintln(w, "  synchub-cli file download --path . --remote-path /workspace/readme.txt")
@@ -92,6 +93,7 @@ func printManifestUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path . --json")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path . --dry-run")
 	fmt.Fprintln(w, "  synchub-cli manifest ignores --path .")
+	fmt.Fprintln(w, "  synchub-cli manifest ignores --path . --json")
 }
 
 func printFileUsage(w io.Writer) {

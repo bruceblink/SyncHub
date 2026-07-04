@@ -125,6 +125,7 @@ func runManifestIgnores(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("manifest ignores", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	rootPath := fs.String("path", ".", "local workspace root")
+	jsonOutput := fs.Bool("json", false, "print ignore rules as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -137,12 +138,36 @@ func runManifestIgnores(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	patterns := rules.Patterns()
-	fmt.Fprintf(stdout, "ignore file: %s\n", filepath.Join(root, ".synchubignore"))
+	ignoreFile := filepath.Join(root, ".synchubignore")
+	if *jsonOutput {
+		return writeManifestIgnoresJSON(stdout, root, ignoreFile, patterns)
+	}
+	fmt.Fprintf(stdout, "ignore file: %s\n", ignoreFile)
 	fmt.Fprintf(stdout, "rules: %d\n", len(patterns))
 	for _, pattern := range patterns {
 		fmt.Fprintf(stdout, "%s\n", pattern)
 	}
 	return nil
+}
+
+type manifestIgnoresSnapshot struct {
+	Root       string   `json:"root"`
+	IgnoreFile string   `json:"ignore_file"`
+	Rules      []string `json:"rules"`
+}
+
+func writeManifestIgnoresJSON(stdout io.Writer, root, ignoreFile string, patterns []string) error {
+	if patterns == nil {
+		patterns = []string{}
+	}
+	snapshot := manifestIgnoresSnapshot{
+		Root:       root,
+		IgnoreFile: ignoreFile,
+		Rules:      patterns,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func readManifest(path string) (manifest.Manifest, error) {
