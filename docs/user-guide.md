@@ -332,6 +332,7 @@ go run .\cmd\synchub-cli sync doctor --path $deviceA --config $login
 go run .\cmd\synchub-cli sync status --path $deviceA --config $login --show-remote --show-conflicts
 go run .\cmd\synchub-cli sync devices --path $deviceA --config $login
 go run .\cmd\synchub-cli sync conflicts --path $deviceA --config $login
+go run .\cmd\synchub-cli sync conflicts resolve --path $deviceA --config $login --id conf_1 --resolution keep_both --json
 go run .\cmd\synchub-cli sync trash --path $deviceA
 go run .\cmd\synchub-cli sync trash --path $deviceA --json
 go run .\cmd\synchub-cli sync trash restore --path $deviceA --batch 20260702T010000.000000000Z --entry docs/readme.txt --json

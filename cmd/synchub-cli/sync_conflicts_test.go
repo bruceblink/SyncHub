@@ -190,3 +190,77 @@ func TestRunSyncConflictResolve(t *testing.T) {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 }
+
+func TestRunSyncConflictResolveCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/sync/conflicts/conf_1" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		var req struct {
+			Resolution string `json:"resolution"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Resolution != "keep_remote" {
+			t.Fatalf("resolution = %q", req.Resolution)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"conf_1","file_id":"file_1","path":"/workspace/a.txt","local_version":1,"remote_version":2,"resolution":"keep_remote","created_at":"2026-06-30T00:00:00Z","resolved_at":"2026-06-30T00:01:00Z"}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
+	})
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"conflicts",
+		"resolve",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--id", "conf_1",
+		"--resolution", "keep_remote",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync conflicts resolve json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "resolved:") {
+		t.Fatalf("json output includes text resolve output: %s", stdout.String())
+	}
+
+	var snapshot syncConflictResolveSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode resolve json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Workspace.Root != root || snapshot.Workspace.RemotePath != "/workspace" || snapshot.Workspace.UserEmail != "user@example.com" || snapshot.Workspace.DeviceID != "dev_1" {
+		t.Fatalf("workspace = %#v", snapshot.Workspace)
+	}
+	if snapshot.Action != "resolve" {
+		t.Fatalf("action = %q", snapshot.Action)
+	}
+	if snapshot.Resolved.ID != "conf_1" || snapshot.Resolved.FileID == nil || *snapshot.Resolved.FileID != "file_1" || snapshot.Resolved.Resolution != "keep_remote" || snapshot.Resolved.ResolvedAt == nil {
+		t.Fatalf("resolved = %#v", snapshot.Resolved)
+	}
+}

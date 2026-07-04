@@ -70,6 +70,7 @@ func runSyncConflictResolve(ctx context.Context, args []string, stdout, stderr i
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	conflictID := fs.String("id", "", "conflict id")
 	resolution := fs.String("resolution", "", "resolution: keep_local, keep_remote, or keep_both")
+	jsonOutput := fs.Bool("json", false, "print resolved conflict as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -98,6 +99,9 @@ func runSyncConflictResolve(ctx context.Context, args []string, stdout, stderr i
 	if err != nil {
 		return err
 	}
+	if *jsonOutput {
+		return writeSyncConflictResolveJSON(stdout, workspace, conflict)
+	}
 	fmt.Fprintf(stdout, "resolved: %s %s id=%s\n", conflict.Resolution, conflict.Path, conflict.ID)
 	return nil
 }
@@ -111,6 +115,12 @@ type syncConflictsSnapshot struct {
 	Workspace  syncConflictsWorkspace `json:"workspace"`
 	Resolution string                 `json:"resolution"`
 	Items      []client.SyncConflict  `json:"items"`
+}
+
+type syncConflictResolveSnapshot struct {
+	Workspace syncConflictsWorkspace `json:"workspace"`
+	Action    string                 `json:"action"`
+	Resolved  client.SyncConflict    `json:"resolved"`
 }
 
 type syncConflictsWorkspace struct {
@@ -130,6 +140,22 @@ func writeSyncConflictsJSON(stdout io.Writer, workspace workspaceConfig, resolut
 		},
 		Resolution: resolution,
 		Items:      conflicts,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
+}
+
+func writeSyncConflictResolveJSON(stdout io.Writer, workspace workspaceConfig, conflict client.SyncConflict) error {
+	snapshot := syncConflictResolveSnapshot{
+		Workspace: syncConflictsWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		Action:   "resolve",
+		Resolved: conflict,
 	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
