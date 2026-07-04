@@ -18,6 +18,7 @@
 - 设置 `synchub-agent --max-failures N` 后，连续失败达到 N 次会退出，便于由 Docker、systemd 或其他 supervisor 重启。
 - 使用 `synchub-agent --path . --status` 可查看该工作区最近一次 Agent 运行状态、失败次数和最后错误；加 `--json` 可输出机器可读状态。
 - 使用 `synchub-agent --path . --pause` / `--resume` 可通过工作区内控制文件暂停或恢复同步循环；加 `--json` 可输出机器可读控制结果。
+- 使用 `synchub-agent --path . --reset-state` 可删除该工作区的 Agent 状态和暂停控制文件，适合本地重新验证同步循环；加 `--json` 可输出机器可读重置结果。
 
 ## 本地备份
 

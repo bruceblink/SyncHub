@@ -399,6 +399,105 @@ func TestRunResumeCanOutputJSON(t *testing.T) {
 	}
 }
 
+func TestRunResetStateRemovesStateAndControl(t *testing.T) {
+	root := t.TempDir()
+	if err := writeAgentState(agentState{
+		Version:   1,
+		Root:      root,
+		Status:    "paused",
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write agent state: %v", err)
+	}
+	if err := writeAgentControl(root, agentControl{
+		Version:   1,
+		Paused:    true,
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write agent control: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--path", root, "--reset-state"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("reset agent state: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for reset state")
+	}
+	want := "agent state reset: " + root + "\nremoved: agent-state.json, agent-control.json\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+	for _, path := range []string{
+		filepath.Join(root, ".synchub", "agent-state.json"),
+		filepath.Join(root, ".synchub", "agent-control.json"),
+	} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s still exists or stat failed: %v", path, err)
+		}
+	}
+}
+
+func TestRunResetStateCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	if err := writeAgentState(agentState{
+		Version:   1,
+		Root:      root,
+		Status:    "ok",
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write agent state: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--path", root, "--reset-state", "--json"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("reset agent state json: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for reset state")
+	}
+	if strings.Contains(stdout.String(), "agent state reset:") {
+		t.Fatalf("json output includes text reset output: %s", stdout.String())
+	}
+	var snapshot agentResetSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode reset json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Action != "reset_state" || snapshot.Workspace.Root != root || !reflect.DeepEqual(snapshot.Removed, []string{"agent-state.json"}) {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".synchub", "agent-state.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state file still exists or stat failed: %v", err)
+	}
+}
+
+func TestRunResetStateReportsNoRemovedFiles(t *testing.T) {
+	root := t.TempDir()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"--path", root, "--reset-state"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		t.Fatal("runner should not be called for reset state")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("reset missing agent state: %v", err)
+	}
+	want := "agent state reset: " + root + "\nremoved: none\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestRunWatchTriggersSyncOnLocalChanges(t *testing.T) {
 	originalNow := agentNow
 	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
@@ -702,6 +801,7 @@ func TestRunHelpPrintsUsage(t *testing.T) {
 	for _, want := range []string{
 		"synchub-agent --path . --pause --json",
 		"synchub-agent --path . --resume --json",
+		"synchub-agent --path . --reset-state --json",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("usage output missing %q: %q", want, stdout.String())
@@ -793,8 +893,8 @@ func TestParseOptionsRejectsStatusWithWatch(t *testing.T) {
 
 func TestParseOptionsRejectsJSONWithoutStatus(t *testing.T) {
 	_, err := parseOptions([]string{"--json"}, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "json output requires --status, --pause, or --resume") {
-		t.Fatalf("error = %v, want json output requires status pause or resume", err)
+	if err == nil || !strings.Contains(err.Error(), "json output requires --status, --pause, --resume, or --reset-state") {
+		t.Fatalf("error = %v, want json output requires status pause resume or reset state", err)
 	}
 }
 
@@ -807,9 +907,11 @@ func TestParseOptionsRejectsPauseResumeCombinations(t *testing.T) {
 		{name: "pause resume", args: []string{"--pause", "--resume"}, want: "pause cannot be used with --resume"},
 		{name: "pause status", args: []string{"--pause", "--status"}, want: "pause cannot be used with --status"},
 		{name: "resume status", args: []string{"--resume", "--status"}, want: "resume cannot be used with --status"},
-		{name: "pause once", args: []string{"--pause", "--once"}, want: "pause and resume cannot be used with --once"},
-		{name: "resume watch", args: []string{"--resume", "--watch"}, want: "pause and resume cannot be used with --watch"},
-		{name: "pause cycles", args: []string{"--pause", "--cycles", "1"}, want: "pause and resume cannot be used with --cycles"},
+		{name: "reset status", args: []string{"--reset-state", "--status"}, want: "reset state cannot be used with --pause, --resume, or --status"},
+		{name: "pause once", args: []string{"--pause", "--once"}, want: "pause, resume, and reset state cannot be used with --once"},
+		{name: "resume watch", args: []string{"--resume", "--watch"}, want: "pause, resume, and reset state cannot be used with --watch"},
+		{name: "reset watch", args: []string{"--reset-state", "--watch"}, want: "pause, resume, and reset state cannot be used with --watch"},
+		{name: "pause cycles", args: []string{"--pause", "--cycles", "1"}, want: "pause, resume, and reset state cannot be used with --cycles"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
