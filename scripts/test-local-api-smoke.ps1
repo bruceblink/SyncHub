@@ -92,6 +92,19 @@ function Assert-FileContent {
     }
 }
 
+function Assert-PathMissing {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    if (Test-Path -LiteralPath $Path) {
+        throw "$Message path should not exist: $Path"
+    }
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "synchub-api-smoke-$([System.Guid]::NewGuid().ToString('N'))"
 $apiOut = Join-Path $tempRoot "api.out.log"
 $apiErr = Join-Path $tempRoot "api.err.log"
@@ -133,11 +146,15 @@ try {
     Assert-OutputContains -Output $openapi -Expected "openapi: 3.0.3" -Message "openapi output missing version"
 
     $workspaceRoot = Join-Path $tempRoot "workspace"
+    $peerWorkspaceRoot = Join-Path $tempRoot "peer-workspace"
     New-Item -ItemType Directory -Path $workspaceRoot | Out-Null
+    New-Item -ItemType Directory -Path $peerWorkspaceRoot | Out-Null
     $loginConfig = Join-Path $tempRoot "login.json"
     $email = "smoke-$([System.Guid]::NewGuid().ToString('N'))@example.com"
     $password = "password123"
     $historyPath = Join-Path $workspaceRoot "history.txt"
+    $sharedPath = Join-Path $workspaceRoot "shared.txt"
+    $peerSharedPath = Join-Path $peerWorkspaceRoot "shared.txt"
     $restoredPath = Join-Path $tempRoot "restored-history.txt"
 
     Invoke-Checked -FilePath $cliBinary -Arguments @("register", "--server", $serverURL, "--email", $email, "--password", $password, "--config", $loginConfig) | Out-Null
@@ -145,6 +162,24 @@ try {
 
     [System.IO.File]::WriteAllText($historyPath, "version one")
     Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "once", "--path", $workspaceRoot, "--config", $loginConfig, "--device-name", "smoke-device", "--platform", "smoke") | Out-Null
+
+    Invoke-Checked -FilePath $cliBinary -Arguments @("workspace", "init", "--path", $peerWorkspaceRoot, "--remote-path", "/workspace", "--config", $loginConfig) | Out-Null
+    [System.IO.File]::WriteAllText($sharedPath, "shared version one")
+    Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "once", "--path", $workspaceRoot, "--config", $loginConfig, "--device-name", "smoke-device", "--platform", "smoke") | Out-Null
+    Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "once", "--path", $peerWorkspaceRoot, "--config", $loginConfig, "--device-name", "smoke-peer", "--platform", "smoke") | Out-Null
+    Assert-FileContent -Path $peerSharedPath -Expected "shared version one" -Message "peer workspace did not pull created file"
+
+    [System.IO.File]::WriteAllText($sharedPath, "shared version two")
+    Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "once", "--path", $workspaceRoot, "--config", $loginConfig, "--device-name", "smoke-device", "--platform", "smoke") | Out-Null
+    Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "once", "--path", $peerWorkspaceRoot, "--config", $loginConfig, "--device-name", "smoke-peer", "--platform", "smoke") | Out-Null
+    Assert-FileContent -Path $peerSharedPath -Expected "shared version two" -Message "peer workspace did not pull updated file"
+
+    Remove-Item -LiteralPath $sharedPath
+    Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "once", "--path", $workspaceRoot, "--config", $loginConfig, "--device-name", "smoke-device", "--platform", "smoke") | Out-Null
+    Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "once", "--path", $peerWorkspaceRoot, "--config", $loginConfig, "--device-name", "smoke-peer", "--platform", "smoke") | Out-Null
+    Assert-PathMissing -Path $peerSharedPath -Message "peer workspace did not apply remote delete"
+    $trash = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "trash", "--path", $peerWorkspaceRoot)
+    Assert-OutputContains -Output $trash -Expected "shared.txt" -Message "peer trash output missing deleted file"
 
     $agentStatus = Invoke-Checked -FilePath $agentBinary -Arguments @("--path", $workspaceRoot, "--status")
     Assert-OutputContains -Output $agentStatus -Expected "agent: not run" -Message "agent status should start as not run"
