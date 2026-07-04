@@ -655,6 +655,7 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 		"synchub-cli sync trash --path .",
 		"synchub-cli sync trash restore --path . --batch 20260702T010000.000000000Z --entry docs/",
 		"synchub-cli sync devices --path .",
+		"synchub-cli sync devices --path . --json",
 		"synchub-cli sync conflicts --path .",
 	} {
 		if !strings.Contains(out, want) {
