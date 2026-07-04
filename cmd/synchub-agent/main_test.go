@@ -15,6 +15,7 @@ import (
 )
 
 func TestRunOnceInvokesSyncOnce(t *testing.T) {
+	root := t.TempDir()
 	var got agentOptions
 	runner := func(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
 		_ = ctx
@@ -26,7 +27,7 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{
-		"--path", ".",
+		"--path", root,
 		"--config", "login.json",
 		"--workspace-config", "workspace.json",
 		"--manifest", "manifest.json",
@@ -45,7 +46,7 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 	if stdout.String() != "synced\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if !got.Once || !got.DryRun || got.RootPath != "." || got.ConfigPath != "login.json" || got.WorkspaceConfigPath != "workspace.json" || got.ManifestPath != "manifest.json" || got.CLIPath != "synchub-cli-test" || got.DeviceName != "laptop" || got.DevicePlatform != "windows" {
+	if !got.Once || !got.DryRun || got.RootPath != root || got.ConfigPath != "login.json" || got.WorkspaceConfigPath != "workspace.json" || got.ManifestPath != "manifest.json" || got.CLIPath != "synchub-cli-test" || got.DeviceName != "laptop" || got.DevicePlatform != "windows" {
 		t.Fatalf("options = %#v", got)
 	}
 	if got.Interval != 5*time.Second {
@@ -59,6 +60,54 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 	}
 	if got.MaxFailures != 3 {
 		t.Fatalf("max failures = %d, want 3", got.MaxFailures)
+	}
+}
+
+func TestRunOnceWritesAgentState(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	err := run(context.Background(), []string{
+		"--path", root,
+		"--once",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run agent once: %v", err)
+	}
+
+	state := readAgentState(t, root)
+	if state.Root != root || state.Status != "ok" || state.CyclesRun != 1 || state.ConsecutiveFailures != 0 || state.LastSuccessAt == nil || state.LastError != "" {
+		t.Fatalf("agent state = %#v", state)
+	}
+	if got := state.LastSuccessAt.UTC().Format(time.RFC3339); got != "2026-07-04T01:02:03Z" {
+		t.Fatalf("last success = %s", got)
+	}
+}
+
+func TestRunOnceWritesFailureAgentState(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	wantErr := errors.New("sync failed")
+	err := run(context.Background(), []string{
+		"--path", root,
+		"--once",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+
+	state := readAgentState(t, root)
+	if state.Root != root || state.Status != "error" || state.CyclesRun != 1 || state.ConsecutiveFailures != 1 || state.LastFailureAt == nil || state.LastError != "sync failed" {
+		t.Fatalf("agent state = %#v", state)
 	}
 }
 
@@ -117,8 +166,9 @@ func TestRunWatchTriggersSyncOnLocalChanges(t *testing.T) {
 }
 
 func TestRunOnceReturnsSyncError(t *testing.T) {
+	root := t.TempDir()
 	wantErr := errors.New("sync failed")
-	err := run(context.Background(), []string{"--once"}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+	err := run(context.Background(), []string{"--path", root, "--once"}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
 		return wantErr
 	})
 	if !errors.Is(err, wantErr) {
@@ -166,8 +216,10 @@ func TestRunSyncCycleReportsErrorWithoutCompletion(t *testing.T) {
 }
 
 func TestRunLoopStopsAfterMaxFailures(t *testing.T) {
+	root := t.TempDir()
 	wantErr := errors.New("sync failed")
 	err := run(context.Background(), []string{
+		"--path", root,
 		"--interval", "1ms",
 		"--max-failures", "2",
 	}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
@@ -186,9 +238,11 @@ func TestRunLoopStopsAfterCycles(t *testing.T) {
 	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
 	defer func() { agentNow = originalNow }()
 
+	root := t.TempDir()
 	calls := 0
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{
+		"--path", root,
 		"--interval", "1ms",
 		"--cycles", "2",
 	}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
@@ -203,7 +257,7 @@ func TestRunLoopStopsAfterCycles(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"agent started: .",
+		"agent started: " + root,
 		"sync interval: 1ms",
 		"sync completed: 2026-07-04T01:02:03Z",
 		"agent stopped: sync cycles reached 2",
@@ -212,12 +266,18 @@ func TestRunLoopStopsAfterCycles(t *testing.T) {
 			t.Fatalf("stdout missing %q: %s", want, out)
 		}
 	}
+	state := readAgentState(t, root)
+	if state.Status != "ok" || state.CyclesRun != 2 || state.LastSuccessAt == nil {
+		t.Fatalf("agent state = %#v", state)
+	}
 }
 
 func TestRunLoopReturnsFinalCycleError(t *testing.T) {
+	root := t.TempDir()
 	wantErr := errors.New("sync failed")
 	calls := 0
 	err := run(context.Background(), []string{
+		"--path", root,
 		"--interval", "1ms",
 		"--cycles", "2",
 	}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
@@ -366,6 +426,19 @@ func writeAgentWorkspaceConfig(path string, cfg agentWorkspaceConfig) error {
 		return err
 	}
 	return os.WriteFile(path, raw, 0o600)
+}
+
+func readAgentState(t *testing.T, root string) agentState {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, ".synchub", "agent-state.json"))
+	if err != nil {
+		t.Fatalf("read agent state: %v", err)
+	}
+	var state agentState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("decode agent state: %v", err)
+	}
+	return state
 }
 
 func TestBuildSyncOnceArgsOmitsEmptyOptionalPaths(t *testing.T) {

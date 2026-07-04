@@ -49,6 +49,18 @@ type agentWorkspaceConfig struct {
 	RemotePath string `json:"remote_path"`
 }
 
+type agentState struct {
+	Version             int        `json:"version"`
+	Root                string     `json:"root"`
+	Status              string     `json:"status"`
+	CyclesRun           int        `json:"cycles_run"`
+	ConsecutiveFailures int        `json:"consecutive_failures"`
+	LastSuccessAt       *time.Time `json:"last_success_at,omitempty"`
+	LastFailureAt       *time.Time `json:"last_failure_at,omitempty"`
+	LastError           string     `json:"last_error,omitempty"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -71,7 +83,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 		return errors.New("sync runner is required")
 	}
 	if opts.Once {
-		return runner(ctx, opts, stdout, stderr)
+		return runOnce(ctx, opts, stdout, stderr, runner)
 	}
 
 	fmt.Fprintf(stdout, "agent started: %s\n", opts.RootPath)
@@ -80,6 +92,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 		return runWatchLoop(ctx, opts, stdout, stderr, runner)
 	}
 	return runPeriodicLoop(ctx, opts, stdout, stderr, runner)
+}
+
+func runOnce(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) error {
+	err := runner(ctx, opts, stdout, stderr)
+	if err != nil {
+		if stateErr := writeAgentState(agentFailureState(opts, 1, 1, err)); stateErr != nil {
+			fmt.Fprintf(stderr, "write agent state failed: %v\n", stateErr)
+		}
+		return err
+	}
+	if stateErr := writeAgentState(agentSuccessState(opts, 1)); stateErr != nil {
+		fmt.Fprintf(stderr, "write agent state failed: %v\n", stateErr)
+	}
+	return nil
 }
 
 type syncLoopState struct {
@@ -163,12 +189,18 @@ func (s *syncLoopState) runCycle(ctx context.Context, opts agentOptions, stdout,
 	if err := runSyncCycle(ctx, opts, stdout, stderr, runner); err != nil {
 		s.lastErr = err
 		s.consecutiveFailures++
+		if stateErr := writeAgentState(agentFailureState(opts, s.consecutiveFailures, s.cyclesRun+1, err)); stateErr != nil {
+			fmt.Fprintf(stderr, "write agent state failed: %v\n", stateErr)
+		}
 		if shouldStopAfterFailures(opts, s.consecutiveFailures) {
 			return true, maxFailuresError(s.consecutiveFailures, err)
 		}
 	} else {
 		s.lastErr = nil
 		s.consecutiveFailures = 0
+		if err := writeAgentState(agentSuccessState(opts, s.cyclesRun+1)); err != nil {
+			fmt.Fprintf(stderr, "write agent state failed: %v\n", err)
+		}
 	}
 	s.cyclesRun++
 	if shouldStopAfterCycles(opts, s.cyclesRun) {
@@ -176,6 +208,59 @@ func (s *syncLoopState) runCycle(ctx context.Context, opts agentOptions, stdout,
 		return true, s.lastErr
 	}
 	return false, nil
+}
+
+func agentSuccessState(opts agentOptions, cyclesRun int) agentState {
+	now := agentNow().UTC()
+	return agentState{
+		Version:             1,
+		Root:                opts.RootPath,
+		Status:              "ok",
+		CyclesRun:           cyclesRun,
+		ConsecutiveFailures: 0,
+		LastSuccessAt:       &now,
+		UpdatedAt:           now,
+	}
+}
+
+func agentFailureState(opts agentOptions, consecutiveFailures, cyclesRun int, err error) agentState {
+	now := agentNow().UTC()
+	return agentState{
+		Version:             1,
+		Root:                opts.RootPath,
+		Status:              "error",
+		CyclesRun:           cyclesRun,
+		ConsecutiveFailures: consecutiveFailures,
+		LastFailureAt:       &now,
+		LastError:           err.Error(),
+		UpdatedAt:           now,
+	}
+}
+
+func writeAgentState(state agentState) error {
+	statePath, err := agentStatePath(state.Root)
+	if err != nil {
+		return err
+	}
+	root := filepath.Dir(filepath.Dir(statePath))
+	state.Root = root
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(statePath, raw, 0o600)
+}
+
+func agentStatePath(root string) (string, error) {
+	root, err := resolveAgentRoot(root)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ".synchub", "agent-state.json"), nil
 }
 
 func runSyncCycle(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) error {
