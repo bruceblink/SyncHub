@@ -29,6 +29,12 @@ type syncAgentState struct {
 	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
+type syncAgentControl struct {
+	Version   int       `json:"version"`
+	Paused    bool      `json:"paused"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		printSyncUsage(stderr)
@@ -244,12 +250,19 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 }
 
 func printSyncStatusAgent(stdout io.Writer, root string) error {
+	control, controlOK, err := readSyncAgentControl(root)
+	if err != nil {
+		return err
+	}
 	state, ok, err := readSyncAgentState(root)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		fmt.Fprintln(stdout, "agent: not run")
+		if controlOK {
+			printSyncAgentControl(stdout, control)
+		}
 		return nil
 	}
 	fmt.Fprintf(stdout, "agent: %s\n", state.Status)
@@ -261,7 +274,19 @@ func printSyncStatusAgent(stdout io.Writer, root string) error {
 		fmt.Fprintf(stdout, "agent last error: %s\n", state.LastError)
 	}
 	fmt.Fprintf(stdout, "agent updated: %s\n", state.UpdatedAt.UTC().Format(time.RFC3339))
+	if controlOK {
+		printSyncAgentControl(stdout, control)
+	}
 	return nil
+}
+
+func printSyncAgentControl(stdout io.Writer, control syncAgentControl) {
+	paused := "no"
+	if control.Paused {
+		paused = "yes"
+	}
+	fmt.Fprintf(stdout, "agent paused: %s\n", paused)
+	fmt.Fprintf(stdout, "agent control updated: %s\n", control.UpdatedAt.UTC().Format(time.RFC3339))
 }
 
 func readSyncAgentState(root string) (syncAgentState, bool, error) {
@@ -278,6 +303,22 @@ func readSyncAgentState(root string) (syncAgentState, bool, error) {
 		return syncAgentState{}, false, fmt.Errorf("read agent state: %w", err)
 	}
 	return state, true, nil
+}
+
+func readSyncAgentControl(root string) (syncAgentControl, bool, error) {
+	path := filepath.Join(root, ".synchub", "agent-control.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return syncAgentControl{}, false, nil
+		}
+		return syncAgentControl{}, false, err
+	}
+	var control syncAgentControl
+	if err := json.Unmarshal(raw, &control); err != nil {
+		return syncAgentControl{}, false, fmt.Errorf("read agent control: %w", err)
+	}
+	return control, true, nil
 }
 
 func printSyncStatusTrash(stdout io.Writer, root string) error {

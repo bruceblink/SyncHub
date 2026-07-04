@@ -140,6 +140,13 @@ func TestRunSyncStatusShowsAgentState(t *testing.T) {
 	}, 0o600); err != nil {
 		t.Fatalf("write agent state: %v", err)
 	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+		Version:   1,
+		Paused:    true,
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write agent control: %v", err)
+	}
 
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
@@ -155,6 +162,44 @@ func TestRunSyncStatusShowsAgentState(t *testing.T) {
 		"agent last failure: 2026-07-04T01:02:03Z",
 		"agent last error: sync failed",
 		"agent updated: 2026-07-04T01:02:04Z",
+		"agent paused: yes",
+		"agent control updated: 2026-07-04T01:02:05Z",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunSyncStatusShowsAgentControlWithoutState(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+		Version:   1,
+		Paused:    true,
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write agent control: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"agent: not run",
+		"agent paused: yes",
+		"agent control updated: 2026-07-04T01:02:05Z",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
