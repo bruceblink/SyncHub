@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bruceblink/SyncHub/internal/manifest"
 	"github.com/bruceblink/SyncHub/internal/watch"
 )
 
@@ -21,6 +23,7 @@ func runSyncWatch(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	manifestPath := fs.String("manifest", "", "manifest file path")
 	interval := fs.Duration("interval", time.Second, "watch polling interval")
 	once := fs.Bool("once", false, "scan once against the current manifest and exit")
+	jsonOutput := fs.Bool("json", false, "print watch changes as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -37,6 +40,9 @@ func runSyncWatch(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		if err != nil {
 			return err
 		}
+		if *jsonOutput {
+			return writeWatchChangesJSON(stdout, workspace, changes)
+		}
 		printWatchChanges(stdout, changes)
 		return nil
 	}
@@ -47,6 +53,9 @@ func runSyncWatch(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	fmt.Fprintf(stdout, "watching: %s\n", root)
 	return poller.Run(ctx, *interval, func(changes []watch.Change) error {
+		if *jsonOutput {
+			return writeWatchChangesJSON(stdout, workspace, changes)
+		}
 		printWatchChanges(stdout, changes)
 		return nil
 	})
@@ -85,4 +94,46 @@ func displayWatchPath(change watch.Change) string {
 		return change.RelativePath
 	}
 	return change.Path
+}
+
+type watchChangesSnapshot struct {
+	Workspace syncFileWorkspace         `json:"workspace"`
+	Count     int                       `json:"count"`
+	Counts    syncStatusChangeSummary   `json:"counts"`
+	Items     []watchChangeSnapshotItem `json:"items"`
+}
+
+type watchChangeSnapshotItem struct {
+	Type         string          `json:"type"`
+	Path         string          `json:"path"`
+	RelativePath string          `json:"relative_path"`
+	Before       *manifest.Entry `json:"before,omitempty"`
+	After        *manifest.Entry `json:"after,omitempty"`
+}
+
+func writeWatchChangesJSON(stdout io.Writer, workspace workspaceConfig, changes []watch.Change) error {
+	items := make([]watchChangeSnapshotItem, 0, len(changes))
+	for _, change := range changes {
+		items = append(items, watchChangeSnapshotItem{
+			Type:         change.Type,
+			Path:         change.Path,
+			RelativePath: change.RelativePath,
+			Before:       change.Before,
+			After:        change.After,
+		})
+	}
+	snapshot := watchChangesSnapshot{
+		Workspace: syncFileWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		Count:  len(changes),
+		Counts: syncStatusChangeSummaryFromChanges(changes),
+		Items:  items,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
