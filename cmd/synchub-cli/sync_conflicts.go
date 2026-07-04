@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ func runSyncConflicts(ctx context.Context, args []string, stdout, stderr io.Writ
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	resolution := fs.String("resolution", "pending", "conflict resolution filter")
 	limit := fs.Int("limit", 100, "maximum conflicts to list")
+	jsonOutput := fs.Bool("json", false, "print conflicts as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -52,6 +54,9 @@ func runSyncConflicts(ctx context.Context, args []string, stdout, stderr io.Writ
 	conflicts, err := apiClient.ListSyncConflicts(ctx, loginConfig.Tokens.AccessToken, *resolution, int32(*limit))
 	if err != nil {
 		return err
+	}
+	if *jsonOutput {
+		return writeSyncConflictsJSON(stdout, workspace, *resolution, conflicts.Items)
 	}
 	printSyncConflicts(stdout, conflicts.Items)
 	return nil
@@ -100,6 +105,35 @@ func runSyncConflictResolve(ctx context.Context, args []string, stdout, stderr i
 func printSyncConflicts(stdout io.Writer, conflicts []client.SyncConflict) {
 	fmt.Fprintf(stdout, "conflicts: %d\n", len(conflicts))
 	printSyncConflictItems(stdout, conflicts)
+}
+
+type syncConflictsSnapshot struct {
+	Workspace  syncConflictsWorkspace `json:"workspace"`
+	Resolution string                 `json:"resolution"`
+	Items      []client.SyncConflict  `json:"items"`
+}
+
+type syncConflictsWorkspace struct {
+	Root       string `json:"root"`
+	RemotePath string `json:"remote_path"`
+	UserEmail  string `json:"user_email"`
+	DeviceID   string `json:"device_id,omitempty"`
+}
+
+func writeSyncConflictsJSON(stdout io.Writer, workspace workspaceConfig, resolution string, conflicts []client.SyncConflict) error {
+	snapshot := syncConflictsSnapshot{
+		Workspace: syncConflictsWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		Resolution: resolution,
+		Items:      conflicts,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func printSyncConflictItems(stdout io.Writer, conflicts []client.SyncConflict) {

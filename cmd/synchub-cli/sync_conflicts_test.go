@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bruceblink/SyncHub/pkg/client"
@@ -65,6 +66,76 @@ func TestRunSyncConflictsShowsPendingConflicts(t *testing.T) {
 	want := "conflicts: 1\npending /workspace/a.txt local=1 remote=2 id=conf_1\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunSyncConflictsCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sync/conflicts" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("resolution"); got != "keep_both" {
+			t.Fatalf("resolution = %q", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "20" {
+			t.Fatalf("limit = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"conf_1","file_id":"file_1","path":"/workspace/a.txt","local_version":1,"remote_version":2,"resolution":"keep_both","created_at":"2026-06-30T00:00:00Z","resolved_at":"2026-06-30T00:01:00Z"}]}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
+	})
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"conflicts",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--resolution", "keep_both",
+		"--limit", "20",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync conflicts json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "conflicts:") {
+		t.Fatalf("json output includes text conflicts output: %s", stdout.String())
+	}
+
+	var snapshot syncConflictsSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode conflicts json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Workspace.Root != root || snapshot.Workspace.RemotePath != "/workspace" || snapshot.Workspace.UserEmail != "user@example.com" || snapshot.Workspace.DeviceID != "dev_1" {
+		t.Fatalf("workspace = %#v", snapshot.Workspace)
+	}
+	if snapshot.Resolution != "keep_both" {
+		t.Fatalf("resolution = %q", snapshot.Resolution)
+	}
+	if len(snapshot.Items) != 1 || snapshot.Items[0].ID != "conf_1" || snapshot.Items[0].FileID == nil || *snapshot.Items[0].FileID != "file_1" || snapshot.Items[0].ResolvedAt == nil {
+		t.Fatalf("items = %#v", snapshot.Items)
 	}
 }
 

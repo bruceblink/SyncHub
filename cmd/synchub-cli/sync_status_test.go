@@ -657,6 +657,7 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 		"synchub-cli sync devices --path .",
 		"synchub-cli sync devices --path . --json",
 		"synchub-cli sync conflicts --path .",
+		"synchub-cli sync conflicts --path . --json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("sync help missing %q: %s", want, out)
