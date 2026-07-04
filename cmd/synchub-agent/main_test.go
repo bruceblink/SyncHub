@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bruceblink/SyncHub/internal/version"
 )
 
 func TestRunOnceInvokesSyncOnce(t *testing.T) {
@@ -334,6 +336,25 @@ func TestRunHelpPrintsUsage(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "synchub-agent --path . --once --dry-run") || !strings.Contains(stdout.String(), "synchub-agent --path . --cycles 3") {
 		t.Fatalf("usage output = %q", stdout.String())
+	}
+}
+
+func TestRunVersionPrintsVersion(t *testing.T) {
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--version"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run version: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for version")
+	}
+	want := version.Name + " " + version.Version + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 }
 

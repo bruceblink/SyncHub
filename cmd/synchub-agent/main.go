@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bruceblink/SyncHub/internal/version"
 	"github.com/bruceblink/SyncHub/internal/watch"
 )
 
@@ -308,6 +309,9 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.BoolVar(&opts.Watch, "watch", false, "trigger sync when local workspace changes are detected")
 	if len(args) > 0 {
 		switch args[0] {
+		case "--version":
+			printVersion(stdout)
+			return agentOptions{}, flag.ErrHelp
 		case "help", "-h", "--help":
 			printUsage(stdout)
 			return agentOptions{}, flag.ErrHelp
@@ -348,6 +352,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  synchub-agent --version")
 	fmt.Fprintln(w, "  synchub-agent --path .")
 	fmt.Fprintln(w, "  synchub-agent --path . --once")
 	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run")
@@ -355,6 +360,10 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-agent --path . --watch --watch-interval 1s")
 	fmt.Fprintln(w, "  synchub-agent --path . --cycles 3")
 	fmt.Fprintln(w, "  synchub-agent --path . --max-failures 5")
+}
+
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "%s %s\n", version.Name, version.Version)
 }
 
 func runSyncOnceCommand(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {

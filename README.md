@@ -54,6 +54,13 @@ go run ./cmd/synchub-api
 
 The server listens on `http://localhost:8765` by default.
 
+Check local binary versions:
+
+```bash
+go run ./cmd/synchub-cli version
+go run ./cmd/synchub-agent --version
+```
+
 Useful endpoints:
 
 - `GET /version`
