@@ -37,3 +37,14 @@ jobs:
       - name: Test local backup scripts
         shell: pwsh
         run: ./scripts/test-local-backup-restore.ps1
+
+  docker-compose:
+    runs-on: ubuntu-latest
+    needs: go
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test Docker Compose smoke flow
+        shell: pwsh
+        run: ./scripts/test-docker-compose.ps1
