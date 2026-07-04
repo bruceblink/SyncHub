@@ -322,9 +322,11 @@ go run .\cmd\synchub-cli sync trash --path $deviceA
 
 ## 10. Docker Compose
 
-如果网络可以正常拉取基础镜像，可以用 Docker Compose 启动：
+推荐使用 Docker Compose 启动本地服务：
 
 ```powershell
+$env:SYNCHUB_VERSION = "0.0.1"
+$env:GOPROXY = "https://goproxy.cn,direct"
 docker compose up --build
 ```
 
@@ -334,7 +336,28 @@ docker compose up --build
 go run .\cmd\synchub-cli server status --server http://localhost:8765
 ```
 
-如果 Docker build 卡在 `golang:*` 或 `alpine:*` 镜像元数据拉取，优先使用本地 `go run .\cmd\synchub-api` 方式测试。当前 MVP 不依赖 Docker 才能完成验证。
+如果只想构建镜像，不启动 compose：
+
+```powershell
+docker build --network=host --pull=false `
+  --build-arg VERSION=0.0.1 `
+  --build-arg GOPROXY=https://goproxy.cn,direct `
+  -t synchub:0.0.1 .
+```
+
+如果 Docker build 卡在 `golang:*` 或 `alpine:*` 镜像元数据拉取，先检查 Docker registry mirror。当前本地验证可用配置为：
+
+```powershell
+docker info --format '{{json .RegistryConfig.Mirrors}}'
+```
+
+期望包含：
+
+```json
+["https://hub.rat.dev/"]
+```
+
+如果 Go module 下载在容器内超时或 EOF，优先保留 compose 中的 `build.network: host`，或在单独构建时使用 `--network=host`。当前 MVP 也可以不依赖 Docker，通过 `go run .\cmd\synchub-api` 完成本地功能验证。
 
 ## 11. 备份和恢复本地数据
 

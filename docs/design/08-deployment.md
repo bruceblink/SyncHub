@@ -67,12 +67,15 @@ Later adapter 配置：
 - `alpine:3.22`
 
 构建时可以通过 `--build-arg VERSION=0.0.1` 写入 `/version` 返回的版本号。
+构建时可以通过 `--build-arg GOPROXY=https://goproxy.cn,direct` 指定 Go module proxy；`docker-compose.yml` 默认使用 `${GOPROXY:-https://goproxy.cn,direct}`。
+本地网络对容器 NAT 不稳定时，compose 构建阶段使用 `build.network: host`，单独构建可使用 `docker build --network=host ...`。
 
 如果 `docker build` 在 `load metadata` 阶段失败，并出现 `failed to resolve source metadata`、`registry-1.docker.io` 连接超时或代理提示，通常说明 Docker Desktop 无法访问 Docker Hub，而不是项目编译失败。优先检查：
 
 - Docker Desktop proxy / registry mirror 配置。
 - 当前网络是否能访问 Docker Hub。
 - 本机是否已有可用的基础镜像缓存。
+- 构建容器内访问 Go module proxy 是否稳定。
 
 ## 健康检查
 

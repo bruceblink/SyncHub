@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
+      args:
+        VERSION: ${SYNCHUB_VERSION:-dev}
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
     image: synchub-api:dev
     container_name: synchub-api
     ports:
