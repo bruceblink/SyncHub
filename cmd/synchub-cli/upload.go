@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -35,6 +36,7 @@ func runUploadStatus(ctx context.Context, args []string, stdout, stderr io.Write
 	configPath := fs.String("config", defaultConfigPath(), "login config file path")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	uploadID := fs.String("id", "", "upload session id")
+	jsonOutput := fs.Bool("json", false, "print upload status as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -50,6 +52,9 @@ func runUploadStatus(ctx context.Context, args []string, stdout, stderr io.Write
 	if err != nil {
 		return err
 	}
+	if *jsonOutput {
+		return writeUploadStatusJSON(stdout, session.workspace, upload)
+	}
 	printUploadStatus(stdout, upload)
 	return nil
 }
@@ -57,6 +62,7 @@ func runUploadStatus(ctx context.Context, args []string, stdout, stderr io.Write
 type uploadCommandSession struct {
 	apiClient   *client.Client
 	accessToken string
+	workspace   workspaceConfig
 }
 
 func openUploadCommandSession(ctx context.Context, rootPath, workspaceConfigPath, configPath string) (uploadCommandSession, error) {
@@ -75,6 +81,7 @@ func openUploadCommandSession(ctx context.Context, rootPath, workspaceConfigPath
 	return uploadCommandSession{
 		apiClient:   client.New(serverURL),
 		accessToken: loginConfig.Tokens.AccessToken,
+		workspace:   workspace,
 	}, nil
 }
 
@@ -88,4 +95,34 @@ func printUploadStatus(stdout io.Writer, upload client.UploadSession) {
 	for _, chunk := range upload.UploadedChunks {
 		fmt.Fprintf(stdout, "chunk %d size=%d sha256=%s\n", chunk.ChunkIndex, chunk.Size, chunk.SHA256)
 	}
+}
+
+type uploadStatusSnapshot struct {
+	Workspace uploadStatusWorkspace `json:"workspace"`
+	Upload    client.UploadSession  `json:"upload"`
+}
+
+type uploadStatusWorkspace struct {
+	Root       string `json:"root"`
+	RemotePath string `json:"remote_path"`
+	UserEmail  string `json:"user_email"`
+	DeviceID   string `json:"device_id,omitempty"`
+}
+
+func writeUploadStatusJSON(stdout io.Writer, workspace workspaceConfig, upload client.UploadSession) error {
+	if upload.UploadedChunks == nil {
+		upload.UploadedChunks = []client.UploadChunk{}
+	}
+	snapshot := uploadStatusSnapshot{
+		Workspace: uploadStatusWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		Upload: upload,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
