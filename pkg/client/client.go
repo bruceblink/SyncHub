@@ -29,6 +29,15 @@ type TokenPair struct {
 	ExpiresIn    int64  `json:"expires_in"`
 }
 
+type VersionInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type StatusInfo struct {
+	Status string `json:"status"`
+}
+
 type LoginData struct {
 	User   User      `json:"user"`
 	Tokens TokenPair `json:"tokens"`
@@ -174,6 +183,24 @@ func (e *Error) Error() string {
 
 func New(baseURL string) *Client {
 	return &Client{BaseURL: normalizeBaseURL(baseURL), HTTPClient: http.DefaultClient}
+}
+
+func (c *Client) Version(ctx context.Context) (VersionInfo, error) {
+	var data VersionInfo
+	err := c.getJSONAuth(ctx, "/version", "", &data)
+	return data, err
+}
+
+func (c *Client) Health(ctx context.Context) (StatusInfo, error) {
+	var data StatusInfo
+	err := c.getJSONAuth(ctx, "/healthz", "", &data)
+	return data, err
+}
+
+func (c *Client) Ready(ctx context.Context) (StatusInfo, error) {
+	var data StatusInfo
+	err := c.getJSONAuth(ctx, "/readyz", "", &data)
+	return data, err
 }
 
 func (c *Client) Register(ctx context.Context, email, password string) (LoginData, error) {

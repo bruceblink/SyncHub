@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -105,6 +106,51 @@ func TestNewDefaultsToLocalMVPServer(t *testing.T) {
 	client := New("")
 	if client.BaseURL != "http://localhost:8765" {
 		t.Fatalf("base url = %q, want http://localhost:8765", client.BaseURL)
+	}
+}
+
+func TestServiceStatusEndpoints(t *testing.T) {
+	requests := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/version":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"name":"SyncHub","version":"0.1.0"}}`))
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ok"}}`))
+		case "/readyz":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready"}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	api := New(server.URL)
+	version, err := api.Version(context.Background())
+	if err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if version.Name != "SyncHub" || version.Version != "0.1.0" {
+		t.Fatalf("version = %#v", version)
+	}
+	health, err := api.Health(context.Background())
+	if err != nil {
+		t.Fatalf("health: %v", err)
+	}
+	if health.Status != "ok" {
+		t.Fatalf("health = %#v", health)
+	}
+	ready, err := api.Ready(context.Background())
+	if err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	if ready.Status != "ready" {
+		t.Fatalf("ready = %#v", ready)
+	}
+	if want := []string{"/version", "/healthz", "/readyz"}; !reflect.DeepEqual(requests, want) {
+		t.Fatalf("requests = %#v, want %#v", requests, want)
 	}
 }
 

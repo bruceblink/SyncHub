@@ -28,6 +28,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "version", "--version":
 		printVersion(stdout)
 		return nil
+	case "server":
+		return runServer(ctx, args[1:], stdout, stderr)
 	case "register":
 		return runRegister(ctx, args[1:], stdout, stderr)
 	case "login":

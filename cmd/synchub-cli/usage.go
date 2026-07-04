@@ -8,6 +8,7 @@ import (
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli version")
+	fmt.Fprintln(w, "  synchub-cli server status --server http://localhost:8765")
 	fmt.Fprintln(w, "  synchub-cli register --server http://localhost:8765 --email user@example.com --password password")
 	fmt.Fprintln(w, "  synchub-cli login --server http://localhost:8765 --email user@example.com --password password")
 	fmt.Fprintln(w, "  synchub-cli logout")
@@ -46,6 +47,11 @@ func printUsage(w io.Writer) {
 func printWorkspaceUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace")
+}
+
+func printServerUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  synchub-cli server status --server http://localhost:8765")
 }
 
 func printManifestUsage(w io.Writer) {
