@@ -17,6 +17,7 @@
 - Agent 默认会持续重试同步；设置 `synchub-agent --cycles N` 可执行固定轮次后退出，适合本地验证和脚本化 smoke test。
 - 设置 `synchub-agent --max-failures N` 后，连续失败达到 N 次会退出，便于由 Docker、systemd 或其他 supervisor 重启。
 - 使用 `synchub-agent --path . --status` 可查看该工作区最近一次 Agent 运行状态、失败次数和最后错误。
+- 使用 `synchub-agent --path . --pause` / `--resume` 可通过工作区内控制文件暂停或恢复同步循环。
 
 ## 本地备份
 

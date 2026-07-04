@@ -45,7 +45,7 @@ func TestRunOnceInvokesSyncOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent once: %v", err)
 	}
-	if stdout.String() != "synced\n" {
+	if !strings.Contains(stdout.String(), "synced\nsync completed:") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if !got.Once || !got.DryRun || got.RootPath != root || got.ConfigPath != "login.json" || got.WorkspaceConfigPath != "workspace.json" || got.ManifestPath != "manifest.json" || got.CLIPath != "synchub-cli-test" || got.DeviceName != "laptop" || got.DevicePlatform != "windows" {
@@ -175,6 +175,84 @@ func TestRunStatusShowsNotRunWithoutState(t *testing.T) {
 	want := "agent: not run\nworkspace: " + root + "\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunPauseWritesControlAndPausedState(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--path", root, "--pause"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("pause agent: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for pause")
+	}
+	want := "agent paused: " + root + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+	control := readAgentControl(t, root)
+	if !control.Paused || control.UpdatedAt.UTC().Format(time.RFC3339) != "2026-07-04T01:02:03Z" {
+		t.Fatalf("control = %#v", control)
+	}
+	state := readAgentState(t, root)
+	if state.Status != "paused" || state.CyclesRun != 0 || state.ConsecutiveFailures != 0 {
+		t.Fatalf("agent state = %#v", state)
+	}
+}
+
+func TestRunResumeClearsControlAndWritesIdleState(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 4, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	lastSuccess := time.Date(2026, 7, 4, 1, 1, 1, 0, time.UTC)
+	if err := writeAgentControl(root, agentControl{Version: 1, Paused: true, UpdatedAt: lastSuccess}); err != nil {
+		t.Fatalf("write control: %v", err)
+	}
+	if err := writeAgentState(agentState{
+		Version:       1,
+		Root:          root,
+		Status:        "paused",
+		CyclesRun:     4,
+		LastSuccessAt: &lastSuccess,
+		UpdatedAt:     lastSuccess,
+	}); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--path", root, "--resume"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("resume agent: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for resume")
+	}
+	want := "agent resumed: " + root + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".synchub", "agent-control.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("control file still exists or stat failed: %v", err)
+	}
+	state := readAgentState(t, root)
+	if state.Status != "idle" || state.CyclesRun != 4 || state.LastSuccessAt == nil || state.LastSuccessAt.UTC().Format(time.RFC3339) != "2026-07-04T01:01:01Z" {
+		t.Fatalf("agent state = %#v", state)
 	}
 }
 
@@ -339,6 +417,79 @@ func TestRunLoopStopsAfterCycles(t *testing.T) {
 	}
 }
 
+func TestRunLoopSkipsSyncWhenPaused(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	if err := writeAgentControl(root, agentControl{Version: 1, Paused: true, UpdatedAt: agentNow().UTC()}); err != nil {
+		t.Fatalf("write control: %v", err)
+	}
+	called := false
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"--path", root,
+		"--interval", "1ms",
+		"--cycles", "1",
+	}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run paused agent: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called while paused")
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"sync skipped: agent is paused",
+		"agent stopped: sync cycles reached 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+	state := readAgentState(t, root)
+	if state.Status != "paused" || state.CyclesRun != 1 || state.LastSuccessAt != nil {
+		t.Fatalf("agent state = %#v", state)
+	}
+}
+
+func TestRunOnceSkipsSyncWhenPaused(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	if err := writeAgentControl(root, agentControl{Version: 1, Paused: true, UpdatedAt: agentNow().UTC()}); err != nil {
+		t.Fatalf("write control: %v", err)
+	}
+	called := false
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"--path", root,
+		"--once",
+	}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run paused once: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called while paused")
+	}
+	if stdout.String() != "sync skipped: agent is paused\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	state := readAgentState(t, root)
+	if state.Status != "paused" || state.CyclesRun != 1 {
+		t.Fatalf("agent state = %#v", state)
+	}
+}
+
 func TestRunLoopReturnsFinalCycleError(t *testing.T) {
 	root := t.TempDir()
 	wantErr := errors.New("sync failed")
@@ -486,6 +637,29 @@ func TestParseOptionsRejectsStatusWithWatch(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsPauseResumeCombinations(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "pause resume", args: []string{"--pause", "--resume"}, want: "pause cannot be used with --resume"},
+		{name: "pause status", args: []string{"--pause", "--status"}, want: "pause cannot be used with --status"},
+		{name: "resume status", args: []string{"--resume", "--status"}, want: "resume cannot be used with --status"},
+		{name: "pause once", args: []string{"--pause", "--once"}, want: "pause and resume cannot be used with --once"},
+		{name: "resume watch", args: []string{"--resume", "--watch"}, want: "pause and resume cannot be used with --watch"},
+		{name: "pause cycles", args: []string{"--pause", "--cycles", "1"}, want: "pause and resume cannot be used with --cycles"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseOptions(tt.args, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseOptionsRejectsDryRunWithoutOnce(t *testing.T) {
 	_, err := parseOptions([]string{"--dry-run"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "dry run requires --once") {
@@ -546,6 +720,19 @@ func readAgentState(t *testing.T, root string) agentState {
 		t.Fatalf("decode agent state: %v", err)
 	}
 	return state
+}
+
+func readAgentControl(t *testing.T, root string) agentControl {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, ".synchub", "agent-control.json"))
+	if err != nil {
+		t.Fatalf("read agent control: %v", err)
+	}
+	var control agentControl
+	if err := json.Unmarshal(raw, &control); err != nil {
+		t.Fatalf("decode agent control: %v", err)
+	}
+	return control
 }
 
 func testAgentTimePtr(value time.Time) *time.Time {

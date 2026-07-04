@@ -114,6 +114,7 @@ Use `--cycles N` to run a fixed number of agent sync cycles and then exit.
 Use `--max-failures N` to make the agent exit after N consecutive sync failures, so an external supervisor can restart it.
 Use `--watch` to trigger an extra sync cycle when local workspace changes are detected between scheduled intervals.
 Use `--status` to print the last recorded agent state for the workspace.
+Use `--pause` and `--resume` to stop or restart sync cycles for a workspace without changing its configuration.
 
 For a containerized local server:
 
