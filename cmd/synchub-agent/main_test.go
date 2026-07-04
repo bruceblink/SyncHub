@@ -145,6 +145,7 @@ func TestRunStatusShowsAgentState(t *testing.T) {
 	for _, want := range []string{
 		"agent: error",
 		"workspace: " + root,
+		"paused: false",
 		"cycles: 3",
 		"consecutive failures: 2",
 		"last success: 2026-07-04T01:01:01Z",
@@ -172,7 +173,31 @@ func TestRunStatusShowsNotRunWithoutState(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for status")
 	}
-	want := "agent: not run\nworkspace: " + root + "\n"
+	want := "agent: not run\nworkspace: " + root + "\npaused: false\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunStatusShowsPausedControlWithoutState(t *testing.T) {
+	root := t.TempDir()
+	if err := writeAgentControl(root, agentControl{
+		Version:   1,
+		Paused:    true,
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write agent control: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"--path", root, "--status"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		t.Fatal("runner should not be called for status")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run agent status: %v", err)
+	}
+	want := "agent: not run\nworkspace: " + root + "\npaused: true\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -213,7 +238,7 @@ func TestRunStatusCanOutputJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
 		t.Fatalf("decode status json: %v\n%s", err, stdout.String())
 	}
-	if !snapshot.HasRun || snapshot.Workspace.Root != root || snapshot.State == nil {
+	if !snapshot.HasRun || snapshot.Paused || snapshot.Workspace.Root != root || snapshot.State == nil || snapshot.Control != nil {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
 	if snapshot.State.Status != "error" || snapshot.State.CyclesRun != 3 || snapshot.State.ConsecutiveFailures != 2 || snapshot.State.LastError != "sync failed" {
@@ -235,7 +260,34 @@ func TestRunStatusNotRunCanOutputJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
 		t.Fatalf("decode status json: %v\n%s", err, stdout.String())
 	}
-	if snapshot.HasRun || snapshot.State != nil || snapshot.Workspace.Root != root {
+	if snapshot.HasRun || snapshot.Paused || snapshot.State != nil || snapshot.Control != nil || snapshot.Workspace.Root != root {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestRunStatusJSONIncludesPausedControl(t *testing.T) {
+	root := t.TempDir()
+	if err := writeAgentControl(root, agentControl{
+		Version:   1,
+		Paused:    true,
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write agent control: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"--path", root, "--status", "--json"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		t.Fatal("runner should not be called for status")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run agent status json: %v", err)
+	}
+	var snapshot agentStatusSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode status json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.HasRun || !snapshot.Paused || snapshot.State != nil || snapshot.Control == nil || !snapshot.Control.Paused || snapshot.Workspace.Root != root {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
 }

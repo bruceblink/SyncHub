@@ -250,6 +250,8 @@ go run .\cmd\synchub-agent --path $deviceA --status
 go run .\cmd\synchub-agent --path $deviceA --status --json
 ```
 
+状态输出中的 `paused` 表示当前工作区是否存在暂停控制文件；即使 Agent 尚未运行过，也可以用它确认暂停开关是否生效。
+
 暂停同步：
 
 ```powershell

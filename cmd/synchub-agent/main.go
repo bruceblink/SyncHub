@@ -76,7 +76,9 @@ type agentControl struct {
 type agentStatusSnapshot struct {
 	Workspace agentStatusWorkspace `json:"workspace"`
 	State     *agentState          `json:"state,omitempty"`
+	Control   *agentControl        `json:"control,omitempty"`
 	HasRun    bool                 `json:"has_run"`
+	Paused    bool                 `json:"paused"`
 }
 
 type agentStatusWorkspace struct {
@@ -151,21 +153,34 @@ func runOnce(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, r
 }
 
 func runStatus(opts agentOptions, stdout io.Writer, jsonOutput bool) error {
+	root, err := resolveAgentRoot(opts.RootPath)
+	if err != nil {
+		return err
+	}
+	control, hasControl, err := loadAgentControl(root)
+	if err != nil {
+		return err
+	}
+	var controlPtr *agentControl
+	if hasControl {
+		controlPtr = &control
+	}
+	paused := hasControl && control.Paused
+
 	state, err := loadAgentState(opts.RootPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			root, rootErr := resolveAgentRoot(opts.RootPath)
-			if rootErr != nil {
-				return rootErr
-			}
 			if jsonOutput {
 				return writeAgentStatusJSON(stdout, agentStatusSnapshot{
 					Workspace: agentStatusWorkspace{Root: root},
+					Control:   controlPtr,
 					HasRun:    false,
+					Paused:    paused,
 				})
 			}
 			fmt.Fprintf(stdout, "agent: not run\n")
 			fmt.Fprintf(stdout, "workspace: %s\n", root)
+			fmt.Fprintf(stdout, "paused: %t\n", paused)
 			return nil
 		}
 		return err
@@ -174,11 +189,14 @@ func runStatus(opts agentOptions, stdout io.Writer, jsonOutput bool) error {
 		return writeAgentStatusJSON(stdout, agentStatusSnapshot{
 			Workspace: agentStatusWorkspace{Root: state.Root},
 			State:     &state,
+			Control:   controlPtr,
 			HasRun:    true,
+			Paused:    paused,
 		})
 	}
 	fmt.Fprintf(stdout, "agent: %s\n", state.Status)
 	fmt.Fprintf(stdout, "workspace: %s\n", state.Root)
+	fmt.Fprintf(stdout, "paused: %t\n", paused)
 	fmt.Fprintf(stdout, "cycles: %d\n", state.CyclesRun)
 	fmt.Fprintf(stdout, "consecutive failures: %d\n", state.ConsecutiveFailures)
 	fmt.Fprintf(stdout, "last success: %s\n", formatAgentTime(state.LastSuccessAt))
