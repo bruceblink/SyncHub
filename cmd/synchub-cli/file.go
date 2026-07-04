@@ -97,6 +97,7 @@ func runFileDelete(ctx context.Context, args []string, stdout, stderr io.Writer)
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	remotePath := fs.String("remote-path", "", "remote file or directory path")
 	fileID := fs.String("file-id", "", "remote file or directory id")
+	jsonOutput := fs.Bool("json", false, "print delete result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -115,6 +116,9 @@ func runFileDelete(ctx context.Context, args []string, stdout, stderr io.Writer)
 	if err := session.apiClient.DeleteFileWithDevice(ctx, session.accessToken, node.ID, session.workspace.DeviceID); err != nil {
 		return err
 	}
+	if *jsonOutput {
+		return writeFileMutationJSON(stdout, session.workspace, "delete", client.FileNode{}, node)
+	}
 	fmt.Fprintf(stdout, "deleted: %s\n", node.Path)
 	fmt.Fprintf(stdout, "id: %s\n", node.ID)
 	return nil
@@ -129,6 +133,7 @@ func runFileMove(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	remotePath := fs.String("remote-path", "", "source remote file or directory path")
 	fileID := fs.String("file-id", "", "source remote file or directory id")
 	targetPath := fs.String("to", "", "target remote file or directory path")
+	jsonOutput := fs.Bool("json", false, "print move result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -152,6 +157,9 @@ func runFileMove(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
+	if *jsonOutput {
+		return writeFileMutationJSON(stdout, session.workspace, "move", node, moved)
+	}
 	fmt.Fprintf(stdout, "moved: %s -> %s\n", node.Path, moved.Path)
 	fmt.Fprintf(stdout, "id: %s\n", moved.ID)
 	fmt.Fprintf(stdout, "version: %d\n", moved.Version)
@@ -165,6 +173,7 @@ func runFileMkdir(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	configPath := fs.String("config", defaultConfigPath(), "login config file path")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	remotePath := fs.String("remote-path", "", "remote directory path")
+	jsonOutput := fs.Bool("json", false, "print mkdir result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -183,6 +192,9 @@ func runFileMkdir(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	node, err := session.apiClient.CreateDirectoryWithDevice(ctx, session.accessToken, remote, session.workspace.DeviceID)
 	if err != nil {
 		return err
+	}
+	if *jsonOutput {
+		return writeFileMutationJSON(stdout, session.workspace, "mkdir", client.FileNode{}, node)
 	}
 	fmt.Fprintf(stdout, "created directory: %s\n", node.Path)
 	fmt.Fprintf(stdout, "id: %s\n", node.ID)
@@ -654,6 +666,13 @@ type fileListSnapshot struct {
 	Items      []client.FileNode `json:"items"`
 }
 
+type fileMutationSnapshot struct {
+	Workspace syncFileWorkspace `json:"workspace"`
+	Action    string            `json:"action"`
+	Source    *client.FileNode  `json:"source,omitempty"`
+	File      client.FileNode   `json:"file"`
+}
+
 type fileRestoreSnapshot struct {
 	Workspace syncFileWorkspace             `json:"workspace"`
 	File      fileVersionsTarget            `json:"file"`
@@ -696,6 +715,29 @@ func writeFileListJSON(stdout io.Writer, workspace workspaceConfig, parentID *st
 	}
 	if snapshot.Items == nil {
 		snapshot.Items = []client.FileNode{}
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
+}
+
+func writeFileMutationJSON(stdout io.Writer, workspace workspaceConfig, action string, source, file client.FileNode) error {
+	snapshot := fileMutationSnapshot{
+		Workspace: syncFileWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		Action: action,
+		File:   file,
+	}
+	if strings.TrimSpace(source.ID) != "" {
+		source := source
+		snapshot.Source = &source
+		if strings.TrimSpace(file.ID) == "" {
+			snapshot.File = source
+		}
 	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
