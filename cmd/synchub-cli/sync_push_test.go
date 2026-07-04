@@ -161,6 +161,125 @@ func TestRunSyncPushUploadsManifestFiles(t *testing.T) {
 	}
 }
 
+func TestRunSyncPushCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	content := []byte("hello")
+	if err := os.WriteFile(filepath.Join(root, "nested", "a.txt"), content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	committed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/directories":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"dir","path":"/workspace","node_type":"directory","version":1}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads":
+			var req client.InitUploadRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode init upload request: %v", err)
+			}
+			if req.Path != "/workspace/nested/a.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) || req.DeviceID != "dev_1" {
+				t.Fatalf("unexpected init upload request: %#v", req)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_1","path":"/workspace/nested/a.txt","chunk_size":1024,"expires_at":"2026-06-30T00:00:00Z","status":"pending","uploaded_chunks":[]}}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/uploads/upl_1/chunks/0":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read chunk: %v", err)
+			}
+			if string(body) != string(content) {
+				t.Fatalf("chunk body = %q", string(body))
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"chunk_index":0,"size":5,"sha256":"ok"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads/upl_1/commit":
+			committed = true
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file_id":"file_1","version":9,"change_id":10}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
+	})
+	manifestPath := filepath.Join(root, ".synchub", "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Now().UTC(),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"push",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync push json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "uploaded:") {
+		t.Fatalf("json output includes text push output: %s", stdout.String())
+	}
+
+	var snapshot syncPushSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode push json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Workspace.Root != root || snapshot.Workspace.RemotePath != "/workspace" || snapshot.Workspace.UserEmail != "user@example.com" || snapshot.Workspace.DeviceID != "dev_1" {
+		t.Fatalf("workspace = %#v", snapshot.Workspace)
+	}
+	if snapshot.DryRun {
+		t.Fatalf("dry_run = true")
+	}
+	if snapshot.Summary.Changes != 1 || snapshot.Summary.Uploaded != 1 || snapshot.Summary.Deleted != 0 || snapshot.Summary.Moved != 0 || snapshot.Summary.ConflictsKept != 0 {
+		t.Fatalf("summary = %#v", snapshot.Summary)
+	}
+	if len(snapshot.Uploads) != 1 || snapshot.Uploads[0].Action != "create" || snapshot.Uploads[0].Path != "/workspace/nested/a.txt" || snapshot.Uploads[0].RelativePath != "nested/a.txt" || snapshot.Uploads[0].Size != int64(len(content)) || snapshot.Uploads[0].SHA256 != testSHA(content) || snapshot.Uploads[0].Version != 9 {
+		t.Fatalf("uploads = %#v", snapshot.Uploads)
+	}
+	if len(snapshot.Deletes) != 0 || len(snapshot.Moves) != 0 {
+		t.Fatalf("deletes/moves = %#v %#v", snapshot.Deletes, snapshot.Moves)
+	}
+	if !committed {
+		t.Fatal("upload was not committed")
+	}
+	updatedManifest, err := readManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read updated manifest: %v", err)
+	}
+	if len(updatedManifest.Items) != 1 || updatedManifest.Items[0].RemoteVersion == nil || *updatedManifest.Items[0].RemoteVersion != 9 {
+		t.Fatalf("updated manifest = %#v", updatedManifest.Items)
+	}
+}
+
 func TestRunSyncPushSkipsAlreadyUploadedChunks(t *testing.T) {
 	root := t.TempDir()
 	content := []byte("hello")

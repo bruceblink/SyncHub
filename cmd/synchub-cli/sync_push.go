@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -42,6 +43,7 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	deviceName := fs.String("device-name", "", "device name")
 	devicePlatform := fs.String("platform", runtime.GOOS, "device platform")
 	dryRun := fs.Bool("dry-run", false, "preview local push changes without contacting the server")
+	jsonOutput := fs.Bool("json", false, "print push result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -95,6 +97,9 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		if err != nil {
 			return err
 		}
+		if *jsonOutput {
+			return writePushPreviewJSON(stdout, workspace, plan)
+		}
 		printPushPreview(stdout, plan)
 		return nil
 	}
@@ -114,6 +119,9 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	deleted := 0
 	moved := 0
 	conflictKept := 0
+	uploadItems := []syncPushUploadItem{}
+	deleteItems := []syncPushDeleteItem{}
+	moveItems := []syncPushMoveItem{}
 	manifestChanged := manifestMissing
 	hasPushChanges := len(plannedMoves) > 0 || hasDeletedManifestEntries(m, currentPaths)
 	if !hasPushChanges {
@@ -146,11 +154,13 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 			return err
 		}
 		if result.conflictKept {
+			moveItems = append(moveItems, syncPushMoveItemFromPlan(move, 0, true))
 			moveSources[move.sourcePath] = struct{}{}
 			moveConflictTargets[move.targetPath] = struct{}{}
 			conflictKept++
 			continue
 		}
+		moveItems = append(moveItems, syncPushMoveItemFromPlan(move, result.version, false))
 		moveSources[move.sourcePath] = struct{}{}
 		if result.version > 0 {
 			moveTargets[move.targetPath] = result.version
@@ -172,9 +182,11 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 				return err
 			}
 			if result.conflictKept {
+				deleteItems = append(deleteItems, syncPushDeleteItemFromEntry(item, true))
 				conflictKept++
 				continue
 			}
+			deleteItems = append(deleteItems, syncPushDeleteItemFromEntry(item, false))
 			deleted++
 			manifestChanged = true
 		}
@@ -196,10 +208,15 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		if existed && previousItem.RemoteVersion != nil && !manifestContentChanged(previousItem, item) {
 			continue
 		}
+		action := "create"
+		if existed && previousItem.RemoteVersion != nil {
+			action = "update"
+		}
 		result, err := pushManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, item, createdDirs)
 		if err != nil {
 			return err
 		}
+		uploadItems = append(uploadItems, syncPushUploadItemFromEntry(action, item, result.version, result.conflictKept))
 		uploaded++
 		if result.version > 0 && (item.RemoteVersion == nil || *item.RemoteVersion != result.version) {
 			version := result.version
@@ -215,6 +232,15 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 			return err
 		}
 	}
+	if *jsonOutput {
+		return writeSyncPushJSON(stdout, workspace, false, syncPushSummary{
+			Changes:       len(uploadItems) + len(deleteItems) + len(moveItems),
+			Uploaded:      uploaded,
+			Deleted:       deleted,
+			Moved:         moved,
+			ConflictsKept: conflictKept,
+		}, uploadItems, deleteItems, moveItems)
+	}
 	fmt.Fprintf(stdout, "uploaded: %d files\n", uploaded)
 	if deleted > 0 {
 		fmt.Fprintf(stdout, "deleted: %d files\n", deleted)
@@ -226,6 +252,141 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		fmt.Fprintf(stdout, "conflicts kept: %d\n", conflictKept)
 	}
 	return nil
+}
+
+type syncPushSnapshot struct {
+	Workspace syncPushWorkspace    `json:"workspace"`
+	DryRun    bool                 `json:"dry_run"`
+	Summary   syncPushSummary      `json:"summary"`
+	Uploads   []syncPushUploadItem `json:"uploads"`
+	Deletes   []syncPushDeleteItem `json:"deletes"`
+	Moves     []syncPushMoveItem   `json:"moves"`
+}
+
+type syncPushWorkspace struct {
+	Root       string `json:"root"`
+	RemotePath string `json:"remote_path"`
+	UserEmail  string `json:"user_email"`
+	DeviceID   string `json:"device_id,omitempty"`
+}
+
+type syncPushSummary struct {
+	Changes       int `json:"changes"`
+	Uploaded      int `json:"uploaded"`
+	Deleted       int `json:"deleted"`
+	Moved         int `json:"moved"`
+	ConflictsKept int `json:"conflicts_kept"`
+}
+
+type syncPushUploadItem struct {
+	Action       string `json:"action"`
+	Path         string `json:"path"`
+	RelativePath string `json:"relative_path"`
+	Size         int64  `json:"size"`
+	SHA256       string `json:"sha256"`
+	BaseVersion  *int64 `json:"base_version,omitempty"`
+	Version      int64  `json:"version,omitempty"`
+	ConflictKept bool   `json:"conflict_kept,omitempty"`
+}
+
+type syncPushDeleteItem struct {
+	Path         string `json:"path"`
+	RelativePath string `json:"relative_path"`
+	BaseVersion  *int64 `json:"base_version,omitempty"`
+	ConflictKept bool   `json:"conflict_kept,omitempty"`
+}
+
+type syncPushMoveItem struct {
+	From         string `json:"from"`
+	To           string `json:"to"`
+	RelativeFrom string `json:"relative_from"`
+	RelativeTo   string `json:"relative_to"`
+	BaseVersion  *int64 `json:"base_version,omitempty"`
+	Version      int64  `json:"version,omitempty"`
+	ConflictKept bool   `json:"conflict_kept,omitempty"`
+}
+
+func writePushPreviewJSON(stdout io.Writer, workspace workspaceConfig, plan pushPreviewPlan) error {
+	uploads := make([]syncPushUploadItem, 0, len(plan.uploads))
+	for _, upload := range plan.uploads {
+		uploads = append(uploads, syncPushUploadItemFromEntry(upload.action, upload.item, 0, false))
+	}
+	deletes := make([]syncPushDeleteItem, 0, len(plan.deletes))
+	for _, item := range plan.deletes {
+		deletes = append(deletes, syncPushDeleteItemFromEntry(item, false))
+	}
+	moves := make([]syncPushMoveItem, 0, len(plan.moves))
+	for _, move := range plan.moves {
+		moves = append(moves, syncPushMoveItemFromPlan(move, 0, false))
+	}
+	return writeSyncPushJSON(stdout, workspace, true, syncPushSummary{
+		Changes:  len(uploads) + len(deletes) + len(moves),
+		Uploaded: len(uploads),
+		Deleted:  len(deletes),
+		Moved:    len(moves),
+	}, uploads, deletes, moves)
+}
+
+func writeSyncPushJSON(stdout io.Writer, workspace workspaceConfig, dryRun bool, summary syncPushSummary, uploads []syncPushUploadItem, deletes []syncPushDeleteItem, moves []syncPushMoveItem) error {
+	if uploads == nil {
+		uploads = []syncPushUploadItem{}
+	}
+	if deletes == nil {
+		deletes = []syncPushDeleteItem{}
+	}
+	if moves == nil {
+		moves = []syncPushMoveItem{}
+	}
+	snapshot := syncPushSnapshot{
+		Workspace: syncPushWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		DryRun:  dryRun,
+		Summary: summary,
+		Uploads: uploads,
+		Deletes: deletes,
+		Moves:   moves,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
+}
+
+func syncPushUploadItemFromEntry(action string, item manifest.Entry, version int64, conflictKept bool) syncPushUploadItem {
+	return syncPushUploadItem{
+		Action:       action,
+		Path:         item.Path,
+		RelativePath: item.RelativePath,
+		Size:         item.Size,
+		SHA256:       item.SHA256,
+		BaseVersion:  item.RemoteVersion,
+		Version:      version,
+		ConflictKept: conflictKept,
+	}
+}
+
+func syncPushDeleteItemFromEntry(item manifest.Entry, conflictKept bool) syncPushDeleteItem {
+	return syncPushDeleteItem{
+		Path:         item.Path,
+		RelativePath: item.RelativePath,
+		BaseVersion:  item.RemoteVersion,
+		ConflictKept: conflictKept,
+	}
+}
+
+func syncPushMoveItemFromPlan(move pushMovePlan, version int64, conflictKept bool) syncPushMoveItem {
+	return syncPushMoveItem{
+		From:         move.sourcePath,
+		To:           move.targetPath,
+		RelativeFrom: move.from.RelativePath,
+		RelativeTo:   move.to.RelativePath,
+		BaseVersion:  move.from.RemoteVersion,
+		Version:      version,
+		ConflictKept: conflictKept,
+	}
 }
 
 type pushPreviewPlan struct {

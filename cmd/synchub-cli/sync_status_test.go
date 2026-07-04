@@ -731,6 +731,7 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 		"synchub-cli sync status --path . --show-remote",
 		"synchub-cli sync doctor --path .",
 		"synchub-cli sync push --path . --dry-run",
+		"synchub-cli sync push --path . --dry-run --json",
 		"synchub-cli sync pull --path . --dry-run",
 		"synchub-cli sync pull --path . --dry-run --json",
 		"synchub-cli sync watch --path . --once --json",
