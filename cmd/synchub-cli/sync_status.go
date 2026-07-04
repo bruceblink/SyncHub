@@ -205,6 +205,7 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 		}
 		status.Conflicts = &conflicts
 	}
+	status.Next = syncStatusNextAction(status)
 	if *jsonOutput {
 		return writeSyncStatusJSON(stdout, status)
 	}
@@ -276,6 +277,37 @@ func printSyncStatusNext(stdout io.Writer, status syncStatusSnapshot) {
 	if strings.TrimSpace(status.Next) != "" {
 		fmt.Fprintf(stdout, "next: %s\n", status.Next)
 	}
+}
+
+func syncStatusNextAction(status syncStatusSnapshot) string {
+	if status.Manifest.Missing {
+		return "run synchub-cli sync once --path ."
+	}
+	if status.Conflicts != nil && len(status.Conflicts.Items) > 0 {
+		return "run synchub-cli sync conflicts --path ."
+	}
+	if status.PendingChanges.Total > 0 {
+		return "run synchub-cli sync once --path . --dry-run"
+	}
+	if status.Remote != nil {
+		if status.Remote.Skipped {
+			if strings.Contains(status.Remote.Reason, "device") {
+				return "run synchub-cli sync once --path ."
+			}
+		} else if len(status.Remote.Changes) > 0 {
+			return "run synchub-cli sync pull --path ."
+		}
+	}
+	if status.Agent.Paused {
+		return "run synchub-agent --path . --resume"
+	}
+	if status.Trash.Entries > 0 {
+		return "run synchub-cli sync trash --path ."
+	}
+	if strings.TrimSpace(status.Workspace.DeviceID) == "" {
+		return "run synchub-cli sync once --path ."
+	}
+	return ""
 }
 
 func syncStatusChangeSummaryFromChanges(changes []watch.Change) syncStatusChangeSummary {

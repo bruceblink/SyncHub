@@ -251,6 +251,7 @@ func TestRunSyncStatusShowsPendingLocalChanges(t *testing.T) {
 		"updated: 1",
 		"deleted: 1",
 		"moved: 0",
+		"next: run synchub-cli sync once --path . --dry-run",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -369,6 +370,7 @@ func TestRunSyncStatusCanShowRemoteConflicts(t *testing.T) {
 		"pending changes: 0",
 		"remote conflicts: 1",
 		"pending /workspace/a.txt local=1 remote=2 id=conf_1",
+		"next: run synchub-cli sync conflicts --path .",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -452,6 +454,7 @@ func TestRunSyncStatusCanShowRemoteChanges(t *testing.T) {
 		"update /workspace/a.txt version=3 id=6",
 		"move /workspace/old.txt -> /workspace/b.txt version=4 id=7",
 		"remote next cursor: 7",
+		"next: run synchub-cli sync pull --path .",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -598,6 +601,9 @@ func TestRunSyncStatusCanOutputJSON(t *testing.T) {
 	if status.Conflicts == nil || len(status.Conflicts.Items) != 1 || status.Conflicts.Items[0].ID != "conf_1" {
 		t.Fatalf("conflicts = %#v", status.Conflicts)
 	}
+	if status.Next != "run synchub-cli sync conflicts --path ." {
+		t.Fatalf("next = %q", status.Next)
+	}
 }
 
 func TestRunSyncStatusSkipsRemoteChangesWithoutDevice(t *testing.T) {
@@ -637,6 +643,79 @@ func TestRunSyncStatusSkipsRemoteChangesWithoutDevice(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "remote changes: skipped (workspace device is not registered)") {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "next: run synchub-cli sync once --path .") {
+		t.Fatalf("stdout missing next action: %q", stdout.String())
+	}
+}
+
+func TestRunSyncStatusSuggestsResumeWhenAgentPaused(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+		Version:   1,
+		Paused:    true,
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write agent control: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"agent paused: yes",
+		"next: run synchub-agent --path . --resume",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunSyncStatusSuggestsTrashWhenOnlyTrashExists(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	trashBatch := filepath.Join(root, ".synchub", "trash", "20260702T010000.000000000Z")
+	if err := os.MkdirAll(trashBatch, 0o755); err != nil {
+		t.Fatalf("mkdir trash: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trashBatch, "old.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("write trash: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"trash entries: 1",
+		"next: run synchub-cli sync trash --path .",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
 	}
 }
 
