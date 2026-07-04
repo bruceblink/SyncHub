@@ -336,6 +336,12 @@ docker compose up --build
 go run .\cmd\synchub-cli server status --server http://localhost:8765
 ```
 
+也可以用脚本一次性验证 compose 构建、启动和 readyz：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-compose.ps1
+```
+
 如果只想构建镜像，不启动 compose：
 
 ```powershell

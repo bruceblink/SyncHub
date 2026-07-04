@@ -10,7 +10,7 @@ services:
     image: synchub-api:dev
     container_name: synchub-api
     ports:
-      - "8765:8765"
+      - "${SYNCHUB_PORT:-8765}:8765"
     environment:
       HTTP_ADDR: ":8765"
       DATABASE_DRIVER: sqlite

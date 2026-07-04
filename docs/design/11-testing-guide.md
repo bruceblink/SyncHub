@@ -39,6 +39,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
 
 `scripts/test-mvp.ps1` 串联 `go fmt ./...`、`go vet ./...`、`go test ./...`、本地 API smoke test 和本地备份恢复 smoke test。
 
+Docker Compose 部署链路可以单独验证：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-compose.ps1
+```
+
+该脚本会使用独立 compose project、临时端口和独立 volume，执行 `docker compose build`、`up`、`GET /readyz`，最后自动 `down --volumes` 清理。它依赖 Docker Desktop 和当前网络可拉取基础镜像，因此不放入默认 MVP 检查链路。
+
 ## 测试数据原则
 
 - 每个测试独立用户和独立根目录。
