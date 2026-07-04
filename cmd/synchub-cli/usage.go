@@ -28,7 +28,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli file versions --path . --remote-path /workspace/readme.txt")
 	fmt.Fprintln(w, "  synchub-cli file versions --path . --remote-path /workspace/readme.txt --json")
 	fmt.Fprintln(w, "  synchub-cli file restore --path . --remote-path /workspace/readme.txt --version 1")
+	fmt.Fprintln(w, "  synchub-cli file restore --path . --remote-path /workspace/readme.txt --version 1 --json")
 	fmt.Fprintln(w, "  synchub-cli file pin --path . --remote-path /workspace/readme.txt --version 1")
+	fmt.Fprintln(w, "  synchub-cli file pin --path . --remote-path /workspace/readme.txt --version 1 --json")
 	fmt.Fprintln(w, "  synchub-cli upload status --path . --id upl_1")
 	fmt.Fprintln(w, "  synchub-cli sync once --path .")
 	fmt.Fprintln(w, "  synchub-cli sync once --path . --dry-run")
@@ -92,8 +94,11 @@ func printFileUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli file versions --path . --file-id file_1")
 	fmt.Fprintln(w, "  synchub-cli file restore --path . --remote-path /workspace/readme.txt --version 1")
 	fmt.Fprintln(w, "  synchub-cli file restore --path . --file-id file_1 --version 1")
+	fmt.Fprintln(w, "  synchub-cli file restore --path . --file-id file_1 --version 1 --json")
 	fmt.Fprintln(w, "  synchub-cli file pin --path . --remote-path /workspace/readme.txt --version 1")
+	fmt.Fprintln(w, "  synchub-cli file pin --path . --remote-path /workspace/readme.txt --version 1 --json")
 	fmt.Fprintln(w, "  synchub-cli file unpin --path . --file-id file_1 --version 1")
+	fmt.Fprintln(w, "  synchub-cli file unpin --path . --file-id file_1 --version 1 --json")
 }
 
 func printUploadUsage(w io.Writer) {

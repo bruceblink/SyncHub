@@ -151,6 +151,9 @@ func TestRunFileHelpIncludesVersionJSONCommand(t *testing.T) {
 		"synchub-cli file versions --path . --remote-path /workspace/readme.txt",
 		"synchub-cli file versions --path . --remote-path /workspace/readme.txt --json",
 		"synchub-cli file restore --path . --remote-path /workspace/readme.txt --version 1",
+		"synchub-cli file restore --path . --file-id file_1 --version 1 --json",
+		"synchub-cli file pin --path . --remote-path /workspace/readme.txt --version 1 --json",
+		"synchub-cli file unpin --path . --file-id file_1 --version 1 --json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("file help missing %q: %s", want, out)
@@ -269,6 +272,79 @@ func TestRunFileRestoreByRemotePath(t *testing.T) {
 	}
 }
 
+func TestRunFileRestoreCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/files/file_1/versions/1/restore" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		var req struct {
+			DeviceID string `json:"device_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode restore request: %v", err)
+		}
+		if req.DeviceID != "dev_1" {
+			t.Fatalf("restore device id = %q", req.DeviceID)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file":{"id":"file_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":5,"sha256":"sha1","version":3,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:04:00Z"},"change_id":9}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
+	})
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"restore",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--file-id", "file_1",
+		"--version", "1",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file restore json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "restored:") {
+		t.Fatalf("json output includes text restore output: %s", stdout.String())
+	}
+
+	var snapshot fileRestoreSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode restore json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Workspace.Root != root || snapshot.Workspace.RemotePath != "/workspace" || snapshot.Workspace.UserEmail != "user@example.com" || snapshot.Workspace.DeviceID != "dev_1" {
+		t.Fatalf("workspace = %#v", snapshot.Workspace)
+	}
+	if snapshot.File.ID != "file_1" || snapshot.File.Path != "/workspace/a.txt" {
+		t.Fatalf("file = %#v", snapshot.File)
+	}
+	if snapshot.Restored.File.ID != "file_1" || snapshot.Restored.File.Version != 3 || snapshot.Restored.ChangeID != 9 {
+		t.Fatalf("restored = %#v", snapshot.Restored)
+	}
+}
+
 func TestRunFilePinByRemotePath(t *testing.T) {
 	root := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +394,77 @@ func TestRunFilePinByRemotePath(t *testing.T) {
 	}
 }
 
+func TestRunFilePinCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/by-path":
+			if got := r.URL.Query().Get("path"); got != "/workspace/a.txt" {
+				t.Fatalf("path = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"a.txt","path":"/workspace/a.txt","node_type":"file","size":5,"sha256":"sha1","version":1,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/file_1/versions/1/pin":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"ver_1","file_id":"file_1","version":1,"size":5,"sha256":"sha1","pinned_at":"2026-06-30T00:03:00Z","created_at":"2026-06-30T00:01:00Z"}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
+	})
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"pin",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--remote-path", "/workspace/a.txt",
+		"--version", "1",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file pin json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "pinned:") {
+		t.Fatalf("json output includes text pin output: %s", stdout.String())
+	}
+
+	var snapshot filePinSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode pin json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Action != "pinned" || snapshot.File.ID != "file_1" || snapshot.File.Path != "/workspace/a.txt" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if snapshot.Workspace.Root != root || snapshot.Workspace.RemotePath != "/workspace" || snapshot.Workspace.UserEmail != "user@example.com" || snapshot.Workspace.DeviceID != "dev_1" {
+		t.Fatalf("workspace = %#v", snapshot.Workspace)
+	}
+	if snapshot.Version.ID != "ver_1" || snapshot.Version.PinnedAt == nil {
+		t.Fatalf("version = %#v", snapshot.Version)
+	}
+}
+
 func TestRunFileUnpinByFileID(t *testing.T) {
 	root := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -357,5 +504,69 @@ func TestRunFileUnpinByFileID(t *testing.T) {
 	want := "unpinned: file_1 v1\npinned at: -\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunFileUnpinCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/files/file_1/versions/1/pin" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"ver_1","file_id":"file_1","version":1,"size":5,"sha256":"sha1","pinned_at":null,"created_at":"2026-06-30T00:01:00Z"}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
+	})
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"file",
+		"unpin",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--file-id", "file_1",
+		"--version", "1",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("file unpin json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "unpinned:") {
+		t.Fatalf("json output includes text unpin output: %s", stdout.String())
+	}
+
+	var snapshot filePinSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode unpin json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Action != "unpinned" || snapshot.File.ID != "file_1" || snapshot.File.Path != "" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if snapshot.Workspace.Root != root || snapshot.Workspace.RemotePath != "/workspace" || snapshot.Workspace.UserEmail != "user@example.com" || snapshot.Workspace.DeviceID != "dev_1" {
+		t.Fatalf("workspace = %#v", snapshot.Workspace)
+	}
+	if snapshot.Version.ID != "ver_1" || snapshot.Version.PinnedAt != nil {
+		t.Fatalf("version = %#v", snapshot.Version)
 	}
 }

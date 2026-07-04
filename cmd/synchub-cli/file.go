@@ -275,6 +275,7 @@ func runFileRestore(ctx context.Context, args []string, stdout, stderr io.Writer
 	remotePath := fs.String("remote-path", "", "remote file path")
 	fileID := fs.String("file-id", "", "remote file id")
 	version := fs.String("version", "", "version number to restore")
+	jsonOutput := fs.Bool("json", false, "print restore result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -295,6 +296,9 @@ func runFileRestore(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err != nil {
 		return err
 	}
+	if *jsonOutput {
+		return writeFileRestoreJSON(stdout, session.workspace, id, restored)
+	}
 	fmt.Fprintf(stdout, "restored: %s\n", restored.File.Path)
 	fmt.Fprintf(stdout, "version: %d\n", restored.File.Version)
 	fmt.Fprintf(stdout, "change id: %d\n", restored.ChangeID)
@@ -314,6 +318,7 @@ func runFilePin(ctx context.Context, args []string, stdout, stderr io.Writer, pi
 	remotePath := fs.String("remote-path", "", "remote file path")
 	fileID := fs.String("file-id", "", "remote file id")
 	version := fs.String("version", "", "version number to update")
+	jsonOutput := fs.Bool("json", false, "print pin or unpin result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -339,12 +344,15 @@ func runFilePin(ctx context.Context, args []string, stdout, stderr io.Writer, pi
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(remote) != "" {
-		fmt.Fprintf(stdout, "file: %s\n", remote)
-	}
 	action := "pinned"
 	if !pin {
 		action = "unpinned"
+	}
+	if *jsonOutput {
+		return writeFilePinJSON(stdout, session.workspace, action, remote, updated)
+	}
+	if strings.TrimSpace(remote) != "" {
+		fmt.Fprintf(stdout, "file: %s\n", remote)
 	}
 	fmt.Fprintf(stdout, "%s: %s v%d\n", action, updated.FileID, updated.Version)
 	fmt.Fprintf(stdout, "pinned at: %s\n", formatOptionalTime(updated.PinnedAt))
@@ -606,6 +614,19 @@ type fileVersionsSnapshot struct {
 	Items     []client.FileVersion `json:"items"`
 }
 
+type fileRestoreSnapshot struct {
+	Workspace syncFileWorkspace             `json:"workspace"`
+	File      fileVersionsTarget            `json:"file"`
+	Restored  client.RestoreFileVersionData `json:"restored"`
+}
+
+type filePinSnapshot struct {
+	Workspace syncFileWorkspace  `json:"workspace"`
+	Action    string             `json:"action"`
+	File      fileVersionsTarget `json:"file"`
+	Version   client.FileVersion `json:"version"`
+}
+
 type syncFileWorkspace struct {
 	Root       string `json:"root"`
 	RemotePath string `json:"remote_path"`
@@ -631,6 +652,45 @@ func writeFileVersionsJSON(stdout io.Writer, workspace workspaceConfig, remotePa
 			Path: remotePath,
 		},
 		Items: versions,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
+}
+
+func writeFileRestoreJSON(stdout io.Writer, workspace workspaceConfig, fileID string, restored client.RestoreFileVersionData) error {
+	snapshot := fileRestoreSnapshot{
+		Workspace: syncFileWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		File: fileVersionsTarget{
+			ID:   fileID,
+			Path: restored.File.Path,
+		},
+		Restored: restored,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
+}
+
+func writeFilePinJSON(stdout io.Writer, workspace workspaceConfig, action, remotePath string, version client.FileVersion) error {
+	snapshot := filePinSnapshot{
+		Workspace: syncFileWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		Action: action,
+		File: fileVersionsTarget{
+			ID:   version.FileID,
+			Path: remotePath,
+		},
+		Version: version,
 	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
