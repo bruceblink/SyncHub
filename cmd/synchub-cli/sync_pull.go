@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -36,6 +37,7 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 	limit := fs.Int("limit", 500, "maximum changes to pull")
 	resetCursor := fs.Bool("reset-cursor", false, "reset local change cursor and replay the available change feed")
 	dryRun := fs.Bool("dry-run", false, "preview remote changes without modifying local files or cursor")
+	jsonOutput := fs.Bool("json", false, "print pull result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -83,7 +85,14 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 		return err
 	}
 	if *dryRun {
-		printSyncPullPreview(stdout, previewPullChanges(workspace, changes.Items), workspace.LastAppliedChangeID, pullNextCursor(changes))
+		preview := previewPullChanges(workspace, changes.Items)
+		nextCursor := pullNextCursor(changes)
+		if *jsonOutput {
+			return writeSyncPullJSON(stdout, workspace, true, afterChangeID, nextCursor, preview, syncPullSummary{
+				Changes: len(preview),
+			}, nil, nil)
+		}
+		printSyncPullPreview(stdout, preview, workspace.LastAppliedChangeID, nextCursor)
 		return nil
 	}
 
@@ -102,10 +111,12 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 	files, dirs, deleted, moved := 0, 0, 0, 0
 	conflictPaths := []string{}
 	trashPaths := []string{}
+	appliedChanges := make([]client.ChangeEvent, 0, len(changes.Items))
 	for _, event := range changes.Items {
 		if isOwnChangeEvent(workspace, event) {
 			continue
 		}
+		appliedChanges = append(appliedChanges, event)
 		result, err := applyChangeEvent(ctx, apiClient, loginConfig.Tokens.AccessToken, root, workspace, event, previousEntries)
 		if err != nil {
 			return err
@@ -136,6 +147,17 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 			return err
 		}
 	}
+	if *jsonOutput {
+		return writeSyncPullJSON(stdout, workspace, false, afterChangeID, nextCursor, appliedChanges, syncPullSummary{
+			Changes:       len(appliedChanges),
+			Files:         files,
+			Directories:   dirs,
+			Deleted:       deleted,
+			Moved:         moved,
+			ConflictsKept: len(conflictPaths),
+			Trashed:       len(trashPaths),
+		}, conflictPaths, trashPaths)
+	}
 	fmt.Fprintf(stdout, "pulled: %d files\n", files)
 	fmt.Fprintf(stdout, "directories: %d\n", dirs)
 	fmt.Fprintf(stdout, "deleted: %d\n", deleted)
@@ -154,6 +176,60 @@ func runSyncPullWithDeviceEnsure(ctx context.Context, args []string, stdout, std
 	}
 	fmt.Fprintf(stdout, "cursor: %d\n", workspace.LastAppliedChangeID)
 	return nil
+}
+
+type syncPullSnapshot struct {
+	Workspace     syncPullWorkspace    `json:"workspace"`
+	DryRun        bool                 `json:"dry_run"`
+	CurrentCursor int64                `json:"current_cursor"`
+	NextCursor    int64                `json:"next_cursor"`
+	Cursor        int64                `json:"cursor"`
+	Summary       syncPullSummary      `json:"summary"`
+	Changes       []client.ChangeEvent `json:"changes"`
+	ConflictPaths []string             `json:"conflict_paths,omitempty"`
+	TrashPaths    []string             `json:"trash_paths,omitempty"`
+}
+
+type syncPullWorkspace struct {
+	Root       string `json:"root"`
+	RemotePath string `json:"remote_path"`
+	UserEmail  string `json:"user_email"`
+	DeviceID   string `json:"device_id,omitempty"`
+}
+
+type syncPullSummary struct {
+	Changes       int `json:"changes"`
+	Files         int `json:"files"`
+	Directories   int `json:"directories"`
+	Deleted       int `json:"deleted"`
+	Moved         int `json:"moved"`
+	ConflictsKept int `json:"conflicts_kept"`
+	Trashed       int `json:"trashed"`
+}
+
+func writeSyncPullJSON(stdout io.Writer, workspace workspaceConfig, dryRun bool, currentCursor, nextCursor int64, changes []client.ChangeEvent, summary syncPullSummary, conflictPaths, trashPaths []string) error {
+	if changes == nil {
+		changes = []client.ChangeEvent{}
+	}
+	snapshot := syncPullSnapshot{
+		Workspace: syncPullWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		DryRun:        dryRun,
+		CurrentCursor: currentCursor,
+		NextCursor:    nextCursor,
+		Cursor:        workspace.LastAppliedChangeID,
+		Summary:       summary,
+		Changes:       changes,
+		ConflictPaths: conflictPaths,
+		TrashPaths:    trashPaths,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func isOwnChangeEvent(workspace workspaceConfig, event client.ChangeEvent) bool {
