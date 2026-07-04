@@ -213,6 +213,7 @@ func runFileDownload(ctx context.Context, args []string, stdout, stderr io.Write
 	outputPath := fs.String("output", "", "local output file path")
 	byteRange := fs.String("range", "", "HTTP byte range, for example bytes=0-1023")
 	ifNoneMatch := fs.String("if-none-match", "", "ETag used for conditional download")
+	jsonOutput := fs.Bool("json", false, "print download result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -237,11 +238,17 @@ func runFileDownload(ctx context.Context, args []string, stdout, stderr io.Write
 		return err
 	}
 	if result.StatusCode == http.StatusNotModified {
+		if *jsonOutput {
+			return writeFileDownloadJSON(stdout, session.workspace, node, output, written, result)
+		}
 		fmt.Fprintf(stdout, "not modified: %s\n", node.Path)
 		if strings.TrimSpace(result.ETag) != "" {
 			fmt.Fprintf(stdout, "etag: %s\n", result.ETag)
 		}
 		return nil
+	}
+	if *jsonOutput {
+		return writeFileDownloadJSON(stdout, session.workspace, node, output, written, result)
 	}
 	fmt.Fprintf(stdout, "downloaded: %s\n", node.Path)
 	fmt.Fprintf(stdout, "output: %s\n", output)
@@ -686,6 +693,17 @@ type filePinSnapshot struct {
 	Version   client.FileVersion `json:"version"`
 }
 
+type fileDownloadSnapshot struct {
+	Workspace    syncFileWorkspace `json:"workspace"`
+	File         client.FileNode   `json:"file"`
+	Output       string            `json:"output"`
+	Bytes        int64             `json:"bytes"`
+	NotModified  bool              `json:"not_modified"`
+	StatusCode   int               `json:"status_code"`
+	ETag         string            `json:"etag,omitempty"`
+	ContentRange string            `json:"content_range,omitempty"`
+}
+
 type syncFileWorkspace struct {
 	Root       string `json:"root"`
 	RemotePath string `json:"remote_path"`
@@ -776,6 +794,27 @@ func writeFileRestoreJSON(stdout io.Writer, workspace workspaceConfig, fileID st
 			Path: restored.File.Path,
 		},
 		Restored: restored,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
+}
+
+func writeFileDownloadJSON(stdout io.Writer, workspace workspaceConfig, file client.FileNode, output string, written int64, result client.DownloadResult) error {
+	snapshot := fileDownloadSnapshot{
+		Workspace: syncFileWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		File:         file,
+		Output:       output,
+		Bytes:        written,
+		NotModified:  result.StatusCode == http.StatusNotModified,
+		StatusCode:   result.StatusCode,
+		ETag:         strings.TrimSpace(result.ETag),
+		ContentRange: strings.TrimSpace(result.ContentRange),
 	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")

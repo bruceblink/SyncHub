@@ -145,8 +145,14 @@ func TestRunFileHelpIncludesFileListJSONCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("file help: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "synchub-cli file list --path . --json") {
-		t.Fatalf("file help missing list json command: %s", stdout.String())
+	out := stdout.String()
+	for _, want := range []string{
+		"synchub-cli file list --path . --json",
+		"synchub-cli file download --path . --file-id file_1 --output ./readme.txt --json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("file help missing %q: %s", want, out)
+		}
 	}
 }
 
