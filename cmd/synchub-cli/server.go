@@ -22,6 +22,8 @@ func runServer(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return runServerStatus(ctx, args[1:], stdout, stderr)
 	case "wait":
 		return runServerWait(ctx, args[1:], stdout, stderr)
+	case "metrics":
+		return runServerMetrics(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printServerUsage(stdout)
 		return nil
@@ -108,4 +110,23 @@ func runServerWait(ctx context.Context, args []string, stdout, stderr io.Writer)
 		}
 	}
 	return fmt.Errorf("server was not ready before timeout %s: %w", timeout.String(), lastErr)
+}
+
+func runServerMetrics(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("server metrics", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	serverURL := fs.String("server", defaultServerURL, "server base URL")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*serverURL) == "" {
+		return errors.New("server URL is required")
+	}
+
+	metrics, err := client.New(*serverURL).Metrics(ctx)
+	if err != nil {
+		return fmt.Errorf("metrics check failed: %w", err)
+	}
+	fmt.Fprint(stdout, metrics)
+	return nil
 }

@@ -123,3 +123,38 @@ func TestRunServerWaitTimesOut(t *testing.T) {
 		t.Fatalf("error = %v, want timeout with readiness reason", err)
 	}
 }
+
+func TestRunServerMetricsPrintsPrometheusText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/metrics" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_, _ = w.Write([]byte("# TYPE synchub_http_requests_total counter\nsynchub_http_requests_total 1\n"))
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"server", "metrics", "--server", server.URL}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server metrics: %v", err)
+	}
+	want := "# TYPE synchub_http_requests_total counter\nsynchub_http_requests_total 1\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunServerMetricsReportsFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":"INTERNAL","message":"metrics unavailable"}`))
+	}))
+	defer server.Close()
+
+	err := run(context.Background(), []string{"server", "metrics", "--server", server.URL}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "metrics check failed: metrics unavailable") {
+		t.Fatalf("error = %v, want metrics failure", err)
+	}
+}

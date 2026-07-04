@@ -203,6 +203,26 @@ func (c *Client) Ready(ctx context.Context) (StatusInfo, error) {
 	return data, err
 }
 
+func (c *Client) Metrics(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint("/metrics"), nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", decodeAPIError(resp)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
 func (c *Client) Register(ctx context.Context, email, password string) (LoginData, error) {
 	var data LoginData
 	err := c.postJSON(ctx, "/api/v1/auth/register", map[string]string{

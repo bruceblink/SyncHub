@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -151,6 +152,46 @@ func TestServiceStatusEndpoints(t *testing.T) {
 	}
 	if want := []string{"/version", "/healthz", "/readyz"}; !reflect.DeepEqual(requests, want) {
 		t.Fatalf("requests = %#v, want %#v", requests, want)
+	}
+}
+
+func TestMetrics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/metrics" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_, _ = w.Write([]byte("# TYPE synchub_http_requests_total counter\nsynchub_http_requests_total 1\n"))
+	}))
+	defer server.Close()
+
+	metrics, err := New(server.URL).Metrics(context.Background())
+	if err != nil {
+		t.Fatalf("metrics: %v", err)
+	}
+	if !strings.Contains(metrics, "synchub_http_requests_total 1") {
+		t.Fatalf("metrics = %q", metrics)
+	}
+}
+
+func TestMetricsReturnsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":"INTERNAL","message":"metrics unavailable"}`))
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL).Metrics(context.Background())
+	if err == nil {
+		t.Fatal("expected metrics error")
+	}
+	apiErr, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *Error", err)
+	}
+	if apiErr.StatusCode != http.StatusInternalServerError || apiErr.Message != "metrics unavailable" {
+		t.Fatalf("unexpected api error: %#v", apiErr)
 	}
 }
 
