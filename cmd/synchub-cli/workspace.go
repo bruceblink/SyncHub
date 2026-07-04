@@ -52,6 +52,7 @@ func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 	remotePath := fs.String("remote-path", "", "remote workspace path")
 	configPath := fs.String("config", defaultConfigPath(), "login config file path")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
+	jsonOutput := fs.Bool("json", false, "print workspace init result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -91,10 +92,28 @@ func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 	if err := writeJSONFile(outputPath, cfg, 0o600); err != nil {
 		return err
 	}
+	if *jsonOutput {
+		return writeWorkspaceInitJSON(stdout, cfg, outputPath)
+	}
 	fmt.Fprintf(stdout, "workspace initialized: %s\n", root)
 	fmt.Fprintf(stdout, "remote path: %s\n", normalizedRemote)
 	fmt.Fprintf(stdout, "config: %s\n", outputPath)
 	return nil
+}
+
+type workspaceInitSnapshot struct {
+	Config    string          `json:"config"`
+	Workspace workspaceConfig `json:"workspace"`
+}
+
+func writeWorkspaceInitJSON(stdout io.Writer, workspace workspaceConfig, configPath string) error {
+	snapshot := workspaceInitSnapshot{
+		Config:    configPath,
+		Workspace: workspace,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func loadWorkspace(rootPath, workspaceConfigPath string) (string, workspaceConfig, string, error) {
