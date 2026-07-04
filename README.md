@@ -114,6 +114,7 @@ Use `--watch` to trigger an extra sync cycle when local workspace changes are de
 Use `--status` to print the last recorded agent state for the workspace.
 Use `--status --json` to print the last recorded agent state in a machine-readable format.
 Use `--pause` and `--resume` to stop or restart sync cycles for a workspace without changing its configuration.
+Use `--pause --json` or `--resume --json` when an external client needs a machine-readable control result.
 
 For a containerized local server:
 

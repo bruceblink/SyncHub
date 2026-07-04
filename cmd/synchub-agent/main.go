@@ -82,6 +82,13 @@ type agentStatusWorkspace struct {
 	Root string `json:"root"`
 }
 
+type agentControlSnapshot struct {
+	Action    string               `json:"action"`
+	Workspace agentStatusWorkspace `json:"workspace"`
+	State     agentState           `json:"state"`
+	Control   *agentControl        `json:"control,omitempty"`
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -101,10 +108,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 		return err
 	}
 	if opts.Pause {
-		return pauseAgent(opts, stdout)
+		return pauseAgent(opts, stdout, opts.JSON)
 	}
 	if opts.Resume {
-		return resumeAgent(opts, stdout)
+		return resumeAgent(opts, stdout, opts.JSON)
 	}
 	if opts.Status {
 		return runStatus(opts, stdout, opts.JSON)
@@ -179,12 +186,13 @@ func writeAgentStatusJSON(stdout io.Writer, snapshot agentStatusSnapshot) error 
 	return encoder.Encode(snapshot)
 }
 
-func pauseAgent(opts agentOptions, stdout io.Writer) error {
+func pauseAgent(opts agentOptions, stdout io.Writer, jsonOutput bool) error {
 	root, err := resolveAgentRoot(opts.RootPath)
 	if err != nil {
 		return err
 	}
-	if err := writeAgentControl(root, agentControl{Version: 1, Paused: true, UpdatedAt: agentNow().UTC()}); err != nil {
+	control := agentControl{Version: 1, Paused: true, UpdatedAt: agentNow().UTC()}
+	if err := writeAgentControl(root, control); err != nil {
 		return err
 	}
 	previous, ok, err := loadOptionalAgentState(root)
@@ -195,14 +203,23 @@ func pauseAgent(opts agentOptions, stdout io.Writer) error {
 	if ok {
 		previousPtr = &previous
 	}
-	if err := writeAgentState(agentPausedState(agentOptions{RootPath: root}, cyclesFromState(previousPtr), previousPtr)); err != nil {
+	state := agentPausedState(agentOptions{RootPath: root}, cyclesFromState(previousPtr), previousPtr)
+	if err := writeAgentState(state); err != nil {
 		return err
+	}
+	if jsonOutput {
+		return writeAgentControlJSON(stdout, agentControlSnapshot{
+			Action:    "paused",
+			Workspace: agentStatusWorkspace{Root: root},
+			State:     state,
+			Control:   &control,
+		})
 	}
 	fmt.Fprintf(stdout, "agent paused: %s\n", root)
 	return nil
 }
 
-func resumeAgent(opts agentOptions, stdout io.Writer) error {
+func resumeAgent(opts agentOptions, stdout io.Writer, jsonOutput bool) error {
 	root, err := resolveAgentRoot(opts.RootPath)
 	if err != nil {
 		return err
@@ -222,11 +239,25 @@ func resumeAgent(opts agentOptions, stdout io.Writer) error {
 	if ok {
 		previousPtr = &previous
 	}
-	if err := writeAgentState(agentIdleState(agentOptions{RootPath: root}, previousPtr)); err != nil {
+	state := agentIdleState(agentOptions{RootPath: root}, previousPtr)
+	if err := writeAgentState(state); err != nil {
 		return err
+	}
+	if jsonOutput {
+		return writeAgentControlJSON(stdout, agentControlSnapshot{
+			Action:    "resumed",
+			Workspace: agentStatusWorkspace{Root: root},
+			State:     state,
+		})
 	}
 	fmt.Fprintf(stdout, "agent resumed: %s\n", root)
 	return nil
+}
+
+func writeAgentControlJSON(stdout io.Writer, snapshot agentControlSnapshot) error {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 type syncLoopState struct {
@@ -582,7 +613,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state; requires --once")
 	fs.BoolVar(&opts.Watch, "watch", false, "trigger sync when local workspace changes are detected")
 	fs.BoolVar(&opts.Status, "status", false, "print the last agent state and exit")
-	fs.BoolVar(&opts.JSON, "json", false, "print status output as JSON; requires --status")
+	fs.BoolVar(&opts.JSON, "json", false, "print status, pause, or resume output as JSON")
 	fs.BoolVar(&opts.Pause, "pause", false, "pause sync cycles for this workspace and exit")
 	fs.BoolVar(&opts.Resume, "resume", false, "resume sync cycles for this workspace and exit")
 	if len(args) > 0 {
@@ -625,8 +656,8 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.Status && opts.Watch {
 		return agentOptions{}, errors.New("status cannot be used with --watch")
 	}
-	if opts.JSON && !opts.Status {
-		return agentOptions{}, errors.New("json output requires --status")
+	if opts.JSON && !opts.Status && !opts.Pause && !opts.Resume {
+		return agentOptions{}, errors.New("json output requires --status, --pause, or --resume")
 	}
 	if opts.Pause && opts.Resume {
 		return agentOptions{}, errors.New("pause cannot be used with --resume")
@@ -667,7 +698,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-agent --path . --status")
 	fmt.Fprintln(w, "  synchub-agent --path . --status --json")
 	fmt.Fprintln(w, "  synchub-agent --path . --pause")
+	fmt.Fprintln(w, "  synchub-agent --path . --pause --json")
 	fmt.Fprintln(w, "  synchub-agent --path . --resume")
+	fmt.Fprintln(w, "  synchub-agent --path . --resume --json")
 	fmt.Fprintln(w, "  synchub-agent --path . --interval 30s --device-name laptop --platform windows --limit 500")
 	fmt.Fprintln(w, "  synchub-agent --path . --watch --watch-interval 1s")
 	fmt.Fprintln(w, "  synchub-agent --path . --cycles 3")

@@ -272,6 +272,39 @@ func TestRunPauseWritesControlAndPausedState(t *testing.T) {
 	}
 }
 
+func TestRunPauseCanOutputJSON(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--path", root, "--pause", "--json"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("pause agent json: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for pause")
+	}
+	if strings.Contains(stdout.String(), "agent paused:") {
+		t.Fatalf("json output includes text pause output: %s", stdout.String())
+	}
+	var snapshot agentControlSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode pause json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Action != "paused" || snapshot.Workspace.Root != root || snapshot.State.Status != "paused" || snapshot.Control == nil || !snapshot.Control.Paused {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if got := snapshot.Control.UpdatedAt.UTC().Format(time.RFC3339); got != "2026-07-04T01:02:03Z" {
+		t.Fatalf("control updated at = %s", got)
+	}
+}
+
 func TestRunResumeClearsControlAndWritesIdleState(t *testing.T) {
 	originalNow := agentNow
 	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 4, 0, time.UTC) }
@@ -315,6 +348,54 @@ func TestRunResumeClearsControlAndWritesIdleState(t *testing.T) {
 	state := readAgentState(t, root)
 	if state.Status != "idle" || state.CyclesRun != 4 || state.LastSuccessAt == nil || state.LastSuccessAt.UTC().Format(time.RFC3339) != "2026-07-04T01:01:01Z" {
 		t.Fatalf("agent state = %#v", state)
+	}
+}
+
+func TestRunResumeCanOutputJSON(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 4, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	lastSuccess := time.Date(2026, 7, 4, 1, 1, 1, 0, time.UTC)
+	if err := writeAgentControl(root, agentControl{Version: 1, Paused: true, UpdatedAt: lastSuccess}); err != nil {
+		t.Fatalf("write control: %v", err)
+	}
+	if err := writeAgentState(agentState{
+		Version:       1,
+		Root:          root,
+		Status:        "paused",
+		CyclesRun:     4,
+		LastSuccessAt: &lastSuccess,
+		UpdatedAt:     lastSuccess,
+	}); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--path", root, "--resume", "--json"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("resume agent json: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for resume")
+	}
+	if strings.Contains(stdout.String(), "agent resumed:") {
+		t.Fatalf("json output includes text resume output: %s", stdout.String())
+	}
+	var snapshot agentControlSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode resume json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Action != "resumed" || snapshot.Workspace.Root != root || snapshot.State.Status != "idle" || snapshot.State.CyclesRun != 4 || snapshot.Control != nil {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".synchub", "agent-control.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("control file still exists or stat failed: %v", err)
 	}
 }
 
@@ -618,6 +699,14 @@ func TestRunHelpPrintsUsage(t *testing.T) {
 	if !strings.Contains(stdout.String(), "synchub-agent --path . --status --json") {
 		t.Fatalf("usage output missing status json: %q", stdout.String())
 	}
+	for _, want := range []string{
+		"synchub-agent --path . --pause --json",
+		"synchub-agent --path . --resume --json",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("usage output missing %q: %q", want, stdout.String())
+		}
+	}
 }
 
 func TestRunVersionPrintsVersion(t *testing.T) {
@@ -704,8 +793,8 @@ func TestParseOptionsRejectsStatusWithWatch(t *testing.T) {
 
 func TestParseOptionsRejectsJSONWithoutStatus(t *testing.T) {
 	_, err := parseOptions([]string{"--json"}, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "json output requires --status") {
-		t.Fatalf("error = %v, want json output requires --status", err)
+	if err == nil || !strings.Contains(err.Error(), "json output requires --status, --pause, or --resume") {
+		t.Fatalf("error = %v, want json output requires status pause or resume", err)
 	}
 }
 
