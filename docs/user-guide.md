@@ -232,6 +232,7 @@ go run .\cmd\synchub-cli sync once --path $deviceA --config $login --device-name
 ```powershell
 go run .\cmd\synchub-cli sync once --path $deviceB --config $login --device-name device-b --platform windows
 go run .\cmd\synchub-cli sync trash --path $deviceB
+go run .\cmd\synchub-cli sync trash --path $deviceB --json
 ```
 
 被远端删除影响的本地文件会移动到 `.synchub/trash`，避免直接丢失。
@@ -332,6 +333,8 @@ go run .\cmd\synchub-cli sync status --path $deviceA --config $login --show-remo
 go run .\cmd\synchub-cli sync devices --path $deviceA --config $login
 go run .\cmd\synchub-cli sync conflicts --path $deviceA --config $login
 go run .\cmd\synchub-cli sync trash --path $deviceA
+go run .\cmd\synchub-cli sync trash --path $deviceA --json
+go run .\cmd\synchub-cli sync trash restore --path $deviceA --batch 20260702T010000.000000000Z --entry docs/readme.txt --json
 ```
 
 ## 10. Docker Compose

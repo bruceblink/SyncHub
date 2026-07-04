@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -33,6 +34,7 @@ func runSyncTrash(args []string, stdout, stderr io.Writer) error {
 	rootPath := fs.String("path", ".", "local workspace root")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	limit := fs.Int("limit", 100, "maximum trash entries to list")
+	jsonOutput := fs.Bool("json", false, "print trash entries as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -40,13 +42,16 @@ func runSyncTrash(args []string, stdout, stderr io.Writer) error {
 		return errors.New("limit must be positive")
 	}
 
-	root, _, _, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+	root, workspace, _, err := loadWorkspace(*rootPath, *workspaceConfigPath)
 	if err != nil {
 		return err
 	}
 	entries, err := listTrashEntries(root, *limit)
 	if err != nil {
 		return err
+	}
+	if *jsonOutput {
+		return writeSyncTrashJSON(stdout, root, workspace, entries)
 	}
 	printTrashEntries(stdout, entries)
 	return nil
@@ -59,10 +64,15 @@ func runSyncTrashRestore(args []string, stdout, stderr io.Writer) error {
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	batch := fs.String("batch", "", "trash batch timestamp")
 	entryPath := fs.String("entry", "", "trash entry path")
+	jsonOutput := fs.Bool("json", false, "print trash restore result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	root, _, _, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+	root, workspace, _, err := loadWorkspace(*rootPath, *workspaceConfigPath)
+	if err != nil {
+		return err
+	}
+	cleanedEntry, err := cleanTrashEntryPath(*entryPath)
 	if err != nil {
 		return err
 	}
@@ -70,8 +80,67 @@ func runSyncTrashRestore(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if *jsonOutput {
+		return writeSyncTrashRestoreJSON(stdout, root, workspace, *batch, cleanedEntry, restored)
+	}
 	fmt.Fprintf(stdout, "restored: %s\n", restored)
 	return nil
+}
+
+type syncTrashSnapshot struct {
+	Workspace syncTrashWorkspace `json:"workspace"`
+	Items     []trashEntry       `json:"items"`
+}
+
+type syncTrashRestoreSnapshot struct {
+	Workspace    syncTrashWorkspace `json:"workspace"`
+	Action       string             `json:"action"`
+	Batch        string             `json:"batch"`
+	Entry        string             `json:"entry"`
+	RestoredPath string             `json:"restored_path"`
+}
+
+type syncTrashWorkspace struct {
+	Root       string `json:"root"`
+	RemotePath string `json:"remote_path"`
+	UserEmail  string `json:"user_email"`
+	DeviceID   string `json:"device_id,omitempty"`
+}
+
+func writeSyncTrashJSON(stdout io.Writer, root string, workspace workspaceConfig, entries []trashEntry) error {
+	if entries == nil {
+		entries = []trashEntry{}
+	}
+	snapshot := syncTrashSnapshot{
+		Workspace: syncTrashWorkspace{
+			Root:       root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		Items: entries,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
+}
+
+func writeSyncTrashRestoreJSON(stdout io.Writer, root string, workspace workspaceConfig, batch, entry, restoredPath string) error {
+	snapshot := syncTrashRestoreSnapshot{
+		Workspace: syncTrashWorkspace{
+			Root:       root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		Action:       "restore",
+		Batch:        strings.TrimSpace(batch),
+		Entry:        entry,
+		RestoredPath: restoredPath,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func listTrashEntries(root string, limit int) ([]trashEntry, error) {
