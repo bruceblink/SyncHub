@@ -105,6 +105,9 @@ func runFileDelete(ctx context.Context, args []string, stdout, stderr io.Writer)
 	if err != nil {
 		return err
 	}
+	if err := session.ensureDevice(ctx); err != nil {
+		return err
+	}
 	if err := session.apiClient.DeleteFileWithDevice(ctx, session.accessToken, node.ID, session.workspace.DeviceID); err != nil {
 		return err
 	}
@@ -138,6 +141,9 @@ func runFileMove(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
+	if err := session.ensureDevice(ctx); err != nil {
+		return err
+	}
 	moved, err := session.apiClient.MoveFileWithDevice(ctx, session.accessToken, node.ID, target, session.workspace.DeviceID)
 	if err != nil {
 		return err
@@ -165,6 +171,9 @@ func runFileMkdir(ctx context.Context, args []string, stdout, stderr io.Writer) 
 
 	session, err := openFileCommandSession(ctx, *rootPath, *workspaceConfigPath, *configPath)
 	if err != nil {
+		return err
+	}
+	if err := session.ensureDevice(ctx); err != nil {
 		return err
 	}
 	node, err := session.apiClient.CreateDirectoryWithDevice(ctx, session.accessToken, remote, session.workspace.DeviceID)
@@ -291,6 +300,9 @@ func runFileRestore(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err != nil {
 		return err
 	}
+	if err := session.ensureDevice(ctx); err != nil {
+		return err
+	}
 
 	restored, err := session.apiClient.RestoreFileVersionWithDevice(ctx, session.accessToken, id, parsedVersion, session.workspace.DeviceID)
 	if err != nil {
@@ -360,14 +372,15 @@ func runFilePin(ctx context.Context, args []string, stdout, stderr io.Writer, pi
 }
 
 type fileCommandSession struct {
-	apiClient   *client.Client
-	accessToken string
-	root        string
-	workspace   workspaceConfig
+	apiClient     *client.Client
+	accessToken   string
+	root          string
+	workspacePath string
+	workspace     workspaceConfig
 }
 
 func openFileCommandSession(ctx context.Context, rootPath, workspaceConfigPath, configPath string) (fileCommandSession, error) {
-	root, workspace, _, err := loadWorkspace(rootPath, workspaceConfigPath)
+	root, workspace, workspacePath, err := loadWorkspace(rootPath, workspaceConfigPath)
 	if err != nil {
 		return fileCommandSession{}, err
 	}
@@ -380,11 +393,26 @@ func openFileCommandSession(ctx context.Context, rootPath, workspaceConfigPath, 
 		serverURL = loginConfig.ServerURL
 	}
 	return fileCommandSession{
-		apiClient:   client.New(serverURL),
-		accessToken: loginConfig.Tokens.AccessToken,
-		root:        root,
-		workspace:   workspace,
+		apiClient:     client.New(serverURL),
+		accessToken:   loginConfig.Tokens.AccessToken,
+		root:          root,
+		workspacePath: workspacePath,
+		workspace:     workspace,
 	}, nil
+}
+
+func (s *fileCommandSession) ensureDevice(ctx context.Context) error {
+	if strings.TrimSpace(s.workspace.DeviceID) != "" {
+		return nil
+	}
+	changed, err := ensureWorkspaceDevice(ctx, s.apiClient, s.accessToken, s.root, &s.workspace, "", "")
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	return writeWorkspaceConfig(s.workspacePath, s.workspace)
 }
 
 func (s fileCommandSession) resolveFileListParent(ctx context.Context, parentID, remotePath string) (*string, error) {

@@ -303,6 +303,8 @@ go run .\cmd\synchub-cli logout --config .\.data\login.json
 
 文件操作：
 
+`file mkdir`、`file move`、`file delete` 和 `file restore` 会在工作区缺少设备 ID 时自动注册当前设备，并把设备 ID 写回 `.synchub/workspace.json`。这样这些手动文件操作产生的远端变更也能被后续同步正确识别为本机变更。
+
 ```powershell
 go run .\cmd\synchub-cli file list --path $deviceA --config $login
 go run .\cmd\synchub-cli file mkdir --path $deviceA --config $login --remote-path /workspace/docs

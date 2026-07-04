@@ -90,6 +90,7 @@ func TestRunFileDeleteByRemotePath(t *testing.T) {
 
 func TestRunFileDeleteByFileID(t *testing.T) {
 	root := t.TempDir()
+	registeredDevice := false
 	deleted := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer access" {
@@ -99,7 +100,20 @@ func TestRunFileDeleteByFileID(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/dir_1":
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"docs","path":"/workspace/docs","node_type":"directory","version":2,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices":
+			registeredDevice = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/files/dir_1":
+			var req struct {
+				DeviceID string `json:"device_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode delete request: %v", err)
+			}
+			if req.DeviceID != "dev_1" {
+				t.Fatalf("delete device id = %q", req.DeviceID)
+			}
 			deleted = true
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{}}`))
 		default:
@@ -131,6 +145,16 @@ func TestRunFileDeleteByFileID(t *testing.T) {
 	}
 	if !deleted {
 		t.Fatal("delete endpoint was not called")
+	}
+	if !registeredDevice {
+		t.Fatal("device was not registered")
+	}
+	workspace, err := readWorkspaceConfig(filepath.Join(root, ".synchub", "workspace.json"))
+	if err != nil {
+		t.Fatalf("read workspace config: %v", err)
+	}
+	if workspace.DeviceID != "dev_1" || workspace.DeviceName != "test-device" {
+		t.Fatalf("workspace device = %#v", workspace)
 	}
 	want := "deleted: /workspace/docs\nid: dir_1\n"
 	if stdout.String() != want {

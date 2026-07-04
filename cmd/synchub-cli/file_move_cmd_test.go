@@ -116,6 +116,7 @@ func TestRunFileMoveRequiresTargetPath(t *testing.T) {
 
 func TestRunFileMoveByFileID(t *testing.T) {
 	root := t.TempDir()
+	registeredDevice := false
 	moved := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer access" {
@@ -125,6 +126,10 @@ func TestRunFileMoveByFileID(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/files/dir_1":
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"docs","path":"/workspace/docs","node_type":"directory","version":2,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:01:00Z"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices":
+			registeredDevice = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/files/dir_1":
 			var req struct {
 				Path     string `json:"path"`
@@ -133,7 +138,7 @@ func TestRunFileMoveByFileID(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode move request: %v", err)
 			}
-			if req.Path != "/archive/docs" || req.DeviceID != "" {
+			if req.Path != "/archive/docs" || req.DeviceID != "dev_1" {
 				t.Fatalf("move request = %#v", req)
 			}
 			moved = true
@@ -168,6 +173,16 @@ func TestRunFileMoveByFileID(t *testing.T) {
 	}
 	if !moved {
 		t.Fatal("move endpoint was not called")
+	}
+	if !registeredDevice {
+		t.Fatal("device was not registered")
+	}
+	workspace, err := readWorkspaceConfig(filepath.Join(root, ".synchub", "workspace.json"))
+	if err != nil {
+		t.Fatalf("read workspace config: %v", err)
+	}
+	if workspace.DeviceID != "dev_1" || workspace.DeviceName != "test-device" {
+		t.Fatalf("workspace device = %#v", workspace)
 	}
 	want := "moved: /workspace/docs -> /archive/docs\nid: dir_1\nversion: 3\n"
 	if stdout.String() != want {
