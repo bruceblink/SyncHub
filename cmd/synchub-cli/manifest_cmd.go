@@ -40,6 +40,7 @@ func runManifestScan(ctx context.Context, args []string, stdout, stderr io.Write
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	outputPath := fs.String("output", "", "manifest output file path")
 	dryRun := fs.Bool("dry-run", false, "scan workspace without writing manifest file")
+	jsonOutput := fs.Bool("json", false, "print manifest scan result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -64,6 +65,9 @@ func runManifestScan(ctx context.Context, args []string, stdout, stderr io.Write
 		return err
 	}
 	if *dryRun {
+		if *jsonOutput {
+			return writeManifestScanJSON(stdout, workspace, m, true, "")
+		}
 		fmt.Fprintf(stdout, "manifest scanned: %d files\n", len(m.Items))
 		fmt.Fprintln(stdout, "dry run: true")
 		return nil
@@ -75,9 +79,46 @@ func runManifestScan(ctx context.Context, args []string, stdout, stderr io.Write
 	if err := writeJSONFile(out, m, 0o600); err != nil {
 		return err
 	}
+	if *jsonOutput {
+		return writeManifestScanJSON(stdout, workspace, m, false, out)
+	}
 	fmt.Fprintf(stdout, "manifest scanned: %d files\n", len(m.Items))
 	fmt.Fprintf(stdout, "output: %s\n", out)
 	return nil
+}
+
+type manifestScanSnapshot struct {
+	Workspace manifestScanWorkspace `json:"workspace"`
+	DryRun    bool                  `json:"dry_run"`
+	Output    string                `json:"output,omitempty"`
+	Manifest  manifest.Manifest     `json:"manifest"`
+}
+
+type manifestScanWorkspace struct {
+	Root       string `json:"root"`
+	RemotePath string `json:"remote_path"`
+	UserEmail  string `json:"user_email"`
+	DeviceID   string `json:"device_id,omitempty"`
+}
+
+func writeManifestScanJSON(stdout io.Writer, workspace workspaceConfig, m manifest.Manifest, dryRun bool, output string) error {
+	if m.Items == nil {
+		m.Items = []manifest.Entry{}
+	}
+	snapshot := manifestScanSnapshot{
+		Workspace: manifestScanWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		DryRun:   dryRun,
+		Output:   strings.TrimSpace(output),
+		Manifest: m,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func runManifestIgnores(args []string, stdout, stderr io.Writer) error {
