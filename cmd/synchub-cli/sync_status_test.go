@@ -728,6 +728,7 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 	out := stdout.String()
 	for _, want := range []string{
 		"synchub-cli sync once --path . --dry-run",
+		"synchub-cli sync once --path . --dry-run --json",
 		"synchub-cli sync status --path . --show-remote",
 		"synchub-cli sync doctor --path .",
 		"synchub-cli sync push --path . --dry-run",

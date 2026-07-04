@@ -121,6 +121,108 @@ func TestRunSyncOncePushesAndPulls(t *testing.T) {
 	}
 }
 
+func TestRunSyncOnceCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("sync once")
+	if err := os.WriteFile(filepath.Join(root, "once.txt"), content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/directories":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"workspace","path":"/workspace","node_type":"directory","version":1}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads":
+			var req client.InitUploadRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode init upload request: %v", err)
+			}
+			if req.Path != "/workspace/once.txt" || req.Size != int64(len(content)) || req.SHA256 != testSHA(content) || req.DeviceID != "dev_1" {
+				t.Fatalf("unexpected init upload request: %#v", req)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_once","path":"/workspace/once.txt","chunk_size":1024,"expires_at":"2026-06-30T00:00:00Z","status":"pending","uploaded_chunks":[]}}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/uploads/upl_once/chunks/0":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read chunk: %v", err)
+			}
+			if string(body) != string(content) {
+				t.Fatalf("chunk body = %q", string(body))
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"chunk_index":0,"size":9,"sha256":"ok"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads/upl_once/commit":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file_id":"file_1","version":3,"change_id":4}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/changes":
+			if got := r.URL.Query().Get("device_id"); got != "dev_1" {
+				t.Fatalf("device_id = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[],"next_cursor":0}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	})
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"once",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--device-name", "test-device",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync once json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "uploaded:") || strings.Contains(stdout.String(), "pulled:") {
+		t.Fatalf("json output includes text sync once output: %s", stdout.String())
+	}
+
+	var snapshot syncOnceSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode sync once json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Workspace.Root != root || snapshot.Workspace.RemotePath != "/workspace" || snapshot.Workspace.UserEmail != "user@example.com" || snapshot.Workspace.DeviceID != "dev_1" {
+		t.Fatalf("workspace = %#v", snapshot.Workspace)
+	}
+	if snapshot.DryRun {
+		t.Fatalf("dry_run = true")
+	}
+	if snapshot.Push == nil || snapshot.Push.Summary.Uploaded != 1 || len(snapshot.Push.Uploads) != 1 || snapshot.Push.Uploads[0].Version != 3 {
+		t.Fatalf("push = %#v", snapshot.Push)
+	}
+	if snapshot.Pull == nil || snapshot.Pull.Skipped || snapshot.Pull.Result == nil || snapshot.Pull.Result.Summary.Changes != 0 || snapshot.Pull.Result.Cursor != 0 {
+		t.Fatalf("pull = %#v", snapshot.Pull)
+	}
+	if _, err := readManifest(filepath.Join(root, ".synchub", "manifest.json")); err != nil {
+		t.Fatalf("read manifest after sync once: %v", err)
+	}
+}
+
 func TestRunSyncOnceDryRunPreviewsPushAndPull(t *testing.T) {
 	root := t.TempDir()
 	content := []byte("local preview")
@@ -272,5 +374,55 @@ func TestRunSyncOnceDryRunSkipsPullWhenDeviceMissing(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
 		}
+	}
+}
+
+func TestRunSyncOnceDryRunWithoutDeviceCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "local.txt"), []byte("local preview"), 0o644); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("dry run without device must not call server: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"once",
+		"--path", root,
+		"--config", filepath.Join(root, ".synchub", "missing-login.json"),
+		"--dry-run",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync once dry run json without device: %v", err)
+	}
+	if strings.Contains(stdout.String(), "pull dry run skipped") {
+		t.Fatalf("json output includes text skip output: %s", stdout.String())
+	}
+
+	var snapshot syncOnceSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode sync once dry-run json: %v\n%s", err, stdout.String())
+	}
+	if !snapshot.DryRun {
+		t.Fatalf("dry_run = false")
+	}
+	if snapshot.Push == nil || !snapshot.Push.DryRun || snapshot.Push.Summary.Uploaded != 1 || len(snapshot.Push.Uploads) != 1 || snapshot.Push.Uploads[0].Path != "/workspace/local.txt" {
+		t.Fatalf("push = %#v", snapshot.Push)
+	}
+	if snapshot.Pull == nil || !snapshot.Pull.Skipped || snapshot.Pull.Reason != "workspace device is not registered" || snapshot.Pull.Result != nil {
+		t.Fatalf("pull = %#v", snapshot.Pull)
 	}
 }
