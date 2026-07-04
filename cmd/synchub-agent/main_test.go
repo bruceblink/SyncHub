@@ -113,6 +113,71 @@ func TestRunOnceWritesFailureAgentState(t *testing.T) {
 	}
 }
 
+func TestRunStatusShowsAgentState(t *testing.T) {
+	root := t.TempDir()
+	if err := writeAgentState(agentState{
+		Version:             1,
+		Root:                root,
+		Status:              "error",
+		CyclesRun:           3,
+		ConsecutiveFailures: 2,
+		LastSuccessAt:       testAgentTimePtr(time.Date(2026, 7, 4, 1, 1, 1, 0, time.UTC)),
+		LastFailureAt:       testAgentTimePtr(time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC)),
+		LastError:           "sync failed",
+		UpdatedAt:           time.Date(2026, 7, 4, 1, 2, 4, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write agent state: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--path", root, "--status"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run agent status: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for status")
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"agent: error",
+		"workspace: " + root,
+		"cycles: 3",
+		"consecutive failures: 2",
+		"last success: 2026-07-04T01:01:01Z",
+		"last failure: 2026-07-04T01:02:03Z",
+		"last error: sync failed",
+		"updated: 2026-07-04T01:02:04Z",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunStatusShowsNotRunWithoutState(t *testing.T) {
+	root := t.TempDir()
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--path", root, "--status"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run agent status: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for status")
+	}
+	want := "agent: not run\nworkspace: " + root + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestRunWatchTriggersSyncOnLocalChanges(t *testing.T) {
 	originalNow := agentNow
 	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
@@ -393,10 +458,31 @@ func TestParseOptionsRejectsCyclesWithOnce(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsCyclesWithStatus(t *testing.T) {
+	_, err := parseOptions([]string{"--status", "--cycles", "1"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "cycles cannot be used with --status") {
+		t.Fatalf("error = %v, want cycles cannot be used with --status", err)
+	}
+}
+
 func TestParseOptionsRejectsWatchWithOnce(t *testing.T) {
 	_, err := parseOptions([]string{"--watch", "--once"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "watch cannot be used with --once") {
 		t.Fatalf("error = %v, want watch cannot be used with --once", err)
+	}
+}
+
+func TestParseOptionsRejectsStatusWithOnce(t *testing.T) {
+	_, err := parseOptions([]string{"--status", "--once"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "status cannot be used with --once") {
+		t.Fatalf("error = %v, want status cannot be used with --once", err)
+	}
+}
+
+func TestParseOptionsRejectsStatusWithWatch(t *testing.T) {
+	_, err := parseOptions([]string{"--status", "--watch"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "status cannot be used with --watch") {
+		t.Fatalf("error = %v, want status cannot be used with --watch", err)
 	}
 }
 
@@ -460,6 +546,10 @@ func readAgentState(t *testing.T, root string) agentState {
 		t.Fatalf("decode agent state: %v", err)
 	}
 	return state
+}
+
+func testAgentTimePtr(value time.Time) *time.Time {
+	return &value
 }
 
 func TestBuildSyncOnceArgsOmitsEmptyOptionalPaths(t *testing.T) {

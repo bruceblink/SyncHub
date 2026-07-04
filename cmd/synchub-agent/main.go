@@ -41,6 +41,7 @@ type agentOptions struct {
 	Once                bool
 	DryRun              bool
 	Watch               bool
+	Status              bool
 }
 
 type syncOnceRunner func(context.Context, agentOptions, io.Writer, io.Writer) error
@@ -80,6 +81,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 		}
 		return err
 	}
+	if opts.Status {
+		return runStatus(opts, stdout)
+	}
 	if runner == nil {
 		return errors.New("sync runner is required")
 	}
@@ -106,6 +110,33 @@ func runOnce(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, r
 	if stateErr := writeAgentState(agentSuccessState(opts, 1)); stateErr != nil {
 		fmt.Fprintf(stderr, "write agent state failed: %v\n", stateErr)
 	}
+	return nil
+}
+
+func runStatus(opts agentOptions, stdout io.Writer) error {
+	state, err := loadAgentState(opts.RootPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			root, rootErr := resolveAgentRoot(opts.RootPath)
+			if rootErr != nil {
+				return rootErr
+			}
+			fmt.Fprintf(stdout, "agent: not run\n")
+			fmt.Fprintf(stdout, "workspace: %s\n", root)
+			return nil
+		}
+		return err
+	}
+	fmt.Fprintf(stdout, "agent: %s\n", state.Status)
+	fmt.Fprintf(stdout, "workspace: %s\n", state.Root)
+	fmt.Fprintf(stdout, "cycles: %d\n", state.CyclesRun)
+	fmt.Fprintf(stdout, "consecutive failures: %d\n", state.ConsecutiveFailures)
+	fmt.Fprintf(stdout, "last success: %s\n", formatAgentTime(state.LastSuccessAt))
+	fmt.Fprintf(stdout, "last failure: %s\n", formatAgentTime(state.LastFailureAt))
+	if strings.TrimSpace(state.LastError) != "" {
+		fmt.Fprintf(stdout, "last error: %s\n", state.LastError)
+	}
+	fmt.Fprintf(stdout, "updated: %s\n", state.UpdatedAt.UTC().Format(time.RFC3339))
 	return nil
 }
 
@@ -256,6 +287,25 @@ func writeAgentState(state agentState) error {
 	return os.WriteFile(statePath, raw, 0o600)
 }
 
+func loadAgentState(root string) (agentState, error) {
+	statePath, err := agentStatePath(root)
+	if err != nil {
+		return agentState{}, err
+	}
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		return agentState{}, err
+	}
+	var state agentState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return agentState{}, err
+	}
+	if strings.TrimSpace(state.Root) == "" {
+		state.Root = filepath.Dir(filepath.Dir(statePath))
+	}
+	return state, nil
+}
+
 func agentStatePath(root string) (string, error) {
 	root, err := resolveAgentRoot(root)
 	if err != nil {
@@ -307,6 +357,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.BoolVar(&opts.Once, "once", false, "run one sync cycle and exit")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state; requires --once")
 	fs.BoolVar(&opts.Watch, "watch", false, "trigger sync when local workspace changes are detected")
+	fs.BoolVar(&opts.Status, "status", false, "print the last agent state and exit")
 	if len(args) > 0 {
 		switch args[0] {
 		case "--version":
@@ -335,8 +386,17 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.Once && opts.Cycles > 0 {
 		return agentOptions{}, errors.New("cycles cannot be used with --once")
 	}
+	if opts.Status && opts.Cycles > 0 {
+		return agentOptions{}, errors.New("cycles cannot be used with --status")
+	}
 	if opts.Watch && opts.Once {
 		return agentOptions{}, errors.New("watch cannot be used with --once")
+	}
+	if opts.Status && opts.Once {
+		return agentOptions{}, errors.New("status cannot be used with --once")
+	}
+	if opts.Status && opts.Watch {
+		return agentOptions{}, errors.New("status cannot be used with --watch")
 	}
 	if opts.DryRun && !opts.Once {
 		return agentOptions{}, errors.New("dry run requires --once")
@@ -356,6 +416,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-agent --path .")
 	fmt.Fprintln(w, "  synchub-agent --path . --once")
 	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run")
+	fmt.Fprintln(w, "  synchub-agent --path . --status")
 	fmt.Fprintln(w, "  synchub-agent --path . --interval 30s --device-name laptop --platform windows --limit 500")
 	fmt.Fprintln(w, "  synchub-agent --path . --watch --watch-interval 1s")
 	fmt.Fprintln(w, "  synchub-agent --path . --cycles 3")
@@ -364,6 +425,13 @@ func printUsage(w io.Writer) {
 
 func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "%s %s\n", version.Name, version.Version)
+}
+
+func formatAgentTime(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return "-"
+	}
+	return value.UTC().Format(time.RFC3339)
 }
 
 func runSyncOnceCommand(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
