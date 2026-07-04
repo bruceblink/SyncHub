@@ -9,6 +9,7 @@ func TestLoadDefaultsToSQLite(t *testing.T) {
 	t.Setenv("DATABASE_DRIVER", "")
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("UPLOAD_CLEANUP_INTERVAL_SECONDS", "")
+	t.Setenv("VERSION_CLEANUP_INTERVAL_SECONDS", "")
 	t.Setenv("CLEANUP_BATCH_LIMIT", "")
 	t.Setenv("VERSION_RETENTION_MIN_VERSIONS", "")
 	t.Setenv("VERSION_RETENTION_MAX_AGE_DAYS", "")
@@ -25,6 +26,9 @@ func TestLoadDefaultsToSQLite(t *testing.T) {
 	}
 	if cfg.UploadCleanupInterval <= 0 {
 		t.Fatalf("upload cleanup interval = %s, want positive duration", cfg.UploadCleanupInterval)
+	}
+	if cfg.VersionCleanupInterval != cfg.UploadCleanupInterval {
+		t.Fatalf("version cleanup interval = %s, want upload cleanup interval %s", cfg.VersionCleanupInterval, cfg.UploadCleanupInterval)
 	}
 	if cfg.CleanupBatchLimit != 1000 {
 		t.Fatalf("cleanup batch limit = %d, want 1000", cfg.CleanupBatchLimit)
@@ -48,11 +52,16 @@ func TestLoadInfersPostgresFromURL(t *testing.T) {
 }
 
 func TestLoadVersionRetentionOverrides(t *testing.T) {
+	t.Setenv("UPLOAD_CLEANUP_INTERVAL_SECONDS", "3600")
+	t.Setenv("VERSION_CLEANUP_INTERVAL_SECONDS", "1800")
 	t.Setenv("VERSION_RETENTION_MIN_VERSIONS", "7")
 	t.Setenv("VERSION_RETENTION_MAX_AGE_DAYS", "14")
 	t.Setenv("CLEANUP_BATCH_LIMIT", "250")
 
 	cfg := Load()
+	if cfg.VersionCleanupInterval != 30*time.Minute {
+		t.Fatalf("version cleanup interval = %s, want 30m", cfg.VersionCleanupInterval)
+	}
 	if cfg.CleanupBatchLimit != 250 {
 		t.Fatalf("cleanup batch limit = %d, want 250", cfg.CleanupBatchLimit)
 	}

@@ -52,7 +52,7 @@ func main() {
 	go workerService.RunUploadChunkCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.CleanupBatchLimit, func(err error) {
 		slog.Error("upload chunk cleanup failed", "error", err)
 	})
-	go workerService.RunFileVersionCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.VersionRetention.MinVersions, cfg.VersionRetention.MaxAge, cfg.CleanupBatchLimit, func(err error) {
+	go workerService.RunFileVersionCleanupLoop(workerCtx, cfg.VersionCleanupInterval, cfg.VersionRetention.MinVersions, cfg.VersionRetention.MaxAge, cfg.CleanupBatchLimit, func(err error) {
 		slog.Error("file version cleanup failed", "error", err)
 	})
 

@@ -13,6 +13,7 @@ services:
       DATABASE_URL: /data/synchub.db
       LOCAL_STORAGE_ROOT: /data/storage
       CLEANUP_BATCH_LIMIT: 1000
+      VERSION_CLEANUP_INTERVAL_SECONDS: 3600
       VERSION_RETENTION_MIN_VERSIONS: 20
       VERSION_RETENTION_MAX_AGE_DAYS: 30
       JWT_SECRET: "dev-secret-change-me"

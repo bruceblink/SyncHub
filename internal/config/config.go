@@ -8,20 +8,21 @@ import (
 )
 
 type Config struct {
-	HTTPAddr              string
-	DatabaseDriver        string
-	DatabaseURL           string
-	JWTSecret             string
-	StorageBackend        string
-	LocalStorageRoot      string
-	UploadChunkSize       int64
-	UploadSessionTTL      time.Duration
-	UploadCleanupInterval time.Duration
-	CleanupBatchLimit     int32
-	VersionRetention      VersionRetentionPolicy
-	AccessTokenTTL        time.Duration
-	RefreshTokenTTL       time.Duration
-	LogLevel              string
+	HTTPAddr               string
+	DatabaseDriver         string
+	DatabaseURL            string
+	JWTSecret              string
+	StorageBackend         string
+	LocalStorageRoot       string
+	UploadChunkSize        int64
+	UploadSessionTTL       time.Duration
+	UploadCleanupInterval  time.Duration
+	VersionCleanupInterval time.Duration
+	CleanupBatchLimit      int32
+	VersionRetention       VersionRetentionPolicy
+	AccessTokenTTL         time.Duration
+	RefreshTokenTTL        time.Duration
+	LogLevel               string
 }
 
 type VersionRetentionPolicy struct {
@@ -39,17 +40,20 @@ func Load() Config {
 		databaseURL = "./.data/synchub.db"
 	}
 
+	uploadCleanupInterval := time.Duration(getEnvInt64("UPLOAD_CLEANUP_INTERVAL_SECONDS", 60*60)) * time.Second
+
 	return Config{
-		HTTPAddr:              getEnv("HTTP_ADDR", ":8765"),
-		DatabaseDriver:        databaseDriver,
-		DatabaseURL:           databaseURL,
-		JWTSecret:             getEnv("JWT_SECRET", "dev-secret-change-me"),
-		StorageBackend:        getEnv("STORAGE_BACKEND", "local"),
-		LocalStorageRoot:      getEnv("LOCAL_STORAGE_ROOT", "./.data/storage"),
-		UploadChunkSize:       getEnvInt64("UPLOAD_CHUNK_SIZE", 4*1024*1024),
-		UploadSessionTTL:      time.Duration(getEnvInt64("UPLOAD_SESSION_TTL_SECONDS", 24*60*60)) * time.Second,
-		UploadCleanupInterval: time.Duration(getEnvInt64("UPLOAD_CLEANUP_INTERVAL_SECONDS", 60*60)) * time.Second,
-		CleanupBatchLimit:     int32(getEnvInt64("CLEANUP_BATCH_LIMIT", 1000)),
+		HTTPAddr:               getEnv("HTTP_ADDR", ":8765"),
+		DatabaseDriver:         databaseDriver,
+		DatabaseURL:            databaseURL,
+		JWTSecret:              getEnv("JWT_SECRET", "dev-secret-change-me"),
+		StorageBackend:         getEnv("STORAGE_BACKEND", "local"),
+		LocalStorageRoot:       getEnv("LOCAL_STORAGE_ROOT", "./.data/storage"),
+		UploadChunkSize:        getEnvInt64("UPLOAD_CHUNK_SIZE", 4*1024*1024),
+		UploadSessionTTL:       time.Duration(getEnvInt64("UPLOAD_SESSION_TTL_SECONDS", 24*60*60)) * time.Second,
+		UploadCleanupInterval:  uploadCleanupInterval,
+		VersionCleanupInterval: time.Duration(getEnvInt64("VERSION_CLEANUP_INTERVAL_SECONDS", int64(uploadCleanupInterval/time.Second))) * time.Second,
+		CleanupBatchLimit:      int32(getEnvInt64("CLEANUP_BATCH_LIMIT", 1000)),
 		VersionRetention: VersionRetentionPolicy{
 			MinVersions: getEnvInt64("VERSION_RETENTION_MIN_VERSIONS", 20),
 			MaxAge:      time.Duration(getEnvNonNegativeInt64("VERSION_RETENTION_MAX_AGE_DAYS", 30)) * 24 * time.Hour,
