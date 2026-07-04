@@ -44,6 +44,10 @@ Agent -> REST API -> SyncHub Server -> Storage
 
 See docs/roadmap/ROADMAP.md
 
+## User Guide
+
+See [docs/user-guide.md](docs/user-guide.md) for local usage and manual testing steps.
+
 ## MVP Quick Start
 
 Run the API server with the default SQLite database and local file storage:
