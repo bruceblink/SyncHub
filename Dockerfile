@@ -1,6 +1,8 @@
 FROM golang:1.26-alpine AS build
 
-ARG VERSION=dev
+ARG GOPROXY=https://goproxy.cn,direct
+
+ENV GOPROXY=${GOPROXY}
 
 WORKDIR /src
 
@@ -8,6 +10,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-api ./cmd/synchub-api
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-cli ./cmd/synchub-cli
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-agent ./cmd/synchub-agent
