@@ -99,6 +99,7 @@ func runServerWait(ctx context.Context, args []string, stdout, stderr io.Writer)
 	serverURL := fs.String("server", defaultServerURL, "server base URL")
 	timeout := fs.Duration("timeout", 30*time.Second, "maximum time to wait for readiness")
 	interval := fs.Duration("interval", time.Second, "readiness check interval")
+	jsonOutput := fs.Bool("json", false, "print server wait result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -115,9 +116,14 @@ func runServerWait(ctx context.Context, args []string, stdout, stderr io.Writer)
 	api := client.New(*serverURL)
 	deadline := time.Now().Add(*timeout)
 	var lastErr error
+	attempts := 0
 	for {
+		attempts++
 		ready, err := api.Ready(ctx)
 		if err == nil && strings.EqualFold(strings.TrimSpace(ready.Status), "ready") {
+			if *jsonOutput {
+				return writeServerWaitJSON(stdout, api.BaseURL, ready, attempts)
+			}
 			fmt.Fprintf(stdout, "server ready: %s\n", api.BaseURL)
 			return nil
 		}
@@ -138,6 +144,23 @@ func runServerWait(ctx context.Context, args []string, stdout, stderr io.Writer)
 		}
 	}
 	return fmt.Errorf("server was not ready before timeout %s: %w", timeout.String(), lastErr)
+}
+
+type serverWaitSnapshot struct {
+	Server   string            `json:"server"`
+	Ready    client.StatusInfo `json:"ready"`
+	Attempts int               `json:"attempts"`
+}
+
+func writeServerWaitJSON(stdout io.Writer, server string, ready client.StatusInfo, attempts int) error {
+	snapshot := serverWaitSnapshot{
+		Server:   server,
+		Ready:    ready,
+		Attempts: attempts,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func runServerMetrics(ctx context.Context, args []string, stdout, stderr io.Writer) error {

@@ -145,6 +145,47 @@ func TestRunServerWaitRetriesUntilReady(t *testing.T) {
 	}
 }
 
+func TestRunServerWaitCanOutputJSON(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/readyz" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"code":"INTERNAL","message":"database is not ready"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready"}}`))
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"server",
+		"wait",
+		"--server", server.URL,
+		"--timeout", "1s",
+		"--interval", "1ms",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server wait json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "server ready:") {
+		t.Fatalf("json output includes text wait output: %s", stdout.String())
+	}
+	var snapshot serverWaitSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode server wait json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Server != server.URL || snapshot.Ready.Status != "ready" || snapshot.Attempts != 2 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
 func TestRunServerWaitTimesOut(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/readyz" {
@@ -285,7 +326,13 @@ func TestRunServerHelpIncludesStatusJSONCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("server help: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "synchub-cli server status --server http://localhost:8765 --json") {
-		t.Fatalf("server help missing status json command: %s", stdout.String())
+	out := stdout.String()
+	for _, want := range []string{
+		"synchub-cli server status --server http://localhost:8765 --json",
+		"synchub-cli server wait --server http://localhost:8765 --timeout 30s --json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("server help missing %q: %s", want, out)
+		}
 	}
 }
