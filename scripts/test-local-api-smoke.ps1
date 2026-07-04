@@ -74,6 +74,10 @@ try {
 
     & $cliBinary server wait --server $serverURL --timeout 20s --interval 250ms
     & $cliBinary server status --server $serverURL
+    $metrics = & $cliBinary server metrics --server $serverURL
+    if (($metrics -join "`n") -notmatch "synchub_http_requests_total") {
+        throw "metrics output missing synchub_http_requests_total"
+    }
 
     Write-Output "local api smoke test passed"
 }
