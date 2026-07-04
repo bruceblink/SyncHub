@@ -63,3 +63,63 @@ func TestRunServerStatusReportsReadinessFailure(t *testing.T) {
 		t.Fatalf("error = %v, want readiness failure", err)
 	}
 }
+
+func TestRunServerWaitRetriesUntilReady(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/readyz" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"code":"INTERNAL","message":"database is not ready"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready"}}`))
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"server",
+		"wait",
+		"--server", server.URL,
+		"--timeout", "1s",
+		"--interval", "1ms",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server wait: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("ready calls = %d, want 2", calls)
+	}
+	want := "server ready: " + server.URL + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunServerWaitTimesOut(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/readyz" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":"INTERNAL","message":"database is not ready"}`))
+	}))
+	defer server.Close()
+
+	err := run(context.Background(), []string{
+		"server",
+		"wait",
+		"--server", server.URL,
+		"--timeout", "1ms",
+		"--interval", "1ms",
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "server was not ready before timeout") || !strings.Contains(err.Error(), "database is not ready") {
+		t.Fatalf("error = %v, want timeout with readiness reason", err)
+	}
+}

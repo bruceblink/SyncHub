@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/bruceblink/SyncHub/pkg/client"
 )
@@ -19,6 +20,8 @@ func runServer(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	switch args[0] {
 	case "status":
 		return runServerStatus(ctx, args[1:], stdout, stderr)
+	case "wait":
+		return runServerWait(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printServerUsage(stdout)
 		return nil
@@ -58,4 +61,51 @@ func runServerStatus(ctx context.Context, args []string, stdout, stderr io.Write
 	fmt.Fprintf(stdout, "health: %s\n", health.Status)
 	fmt.Fprintf(stdout, "ready: %s\n", ready.Status)
 	return nil
+}
+
+func runServerWait(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("server wait", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	serverURL := fs.String("server", defaultServerURL, "server base URL")
+	timeout := fs.Duration("timeout", 30*time.Second, "maximum time to wait for readiness")
+	interval := fs.Duration("interval", time.Second, "readiness check interval")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*serverURL) == "" {
+		return errors.New("server URL is required")
+	}
+	if *timeout <= 0 {
+		return errors.New("timeout must be positive")
+	}
+	if *interval <= 0 {
+		return errors.New("interval must be positive")
+	}
+
+	api := client.New(*serverURL)
+	deadline := time.Now().Add(*timeout)
+	var lastErr error
+	for {
+		ready, err := api.Ready(ctx)
+		if err == nil && strings.EqualFold(strings.TrimSpace(ready.Status), "ready") {
+			fmt.Fprintf(stdout, "server ready: %s\n", api.BaseURL)
+			return nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("unexpected readiness status: %s", ready.Status)
+		}
+		if !time.Now().Add(*interval).Before(deadline) {
+			break
+		}
+		timer := time.NewTimer(*interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return fmt.Errorf("server was not ready before timeout %s: %w", timeout.String(), lastErr)
 }

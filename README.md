@@ -59,6 +59,7 @@ Check local binary versions:
 ```bash
 go run ./cmd/synchub-cli version
 go run ./cmd/synchub-agent --version
+go run ./cmd/synchub-cli server wait --server http://localhost:8765 --timeout 30s
 go run ./cmd/synchub-cli server status --server http://localhost:8765
 ```
 
