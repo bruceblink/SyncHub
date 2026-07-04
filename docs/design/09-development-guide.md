@@ -13,7 +13,8 @@ Later：
 
 ## 推荐命令
 
-```bash
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
 go fmt ./...
 go vet ./...
 go test ./...

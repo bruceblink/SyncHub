@@ -76,13 +76,11 @@ Useful endpoints:
 
 Run the MVP checks:
 
-```bash
-go fmt ./...
-go vet ./...
-go test ./...
-pwsh ./scripts/test-local-api-smoke.ps1
-pwsh ./scripts/test-local-backup-restore.ps1
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
 ```
+
+The MVP check script runs formatting, vet, unit/integration tests, local API smoke checks, and local backup/restore smoke checks.
 
 Minimal CLI flow:
 

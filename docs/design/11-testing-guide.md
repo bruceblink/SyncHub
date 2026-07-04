@@ -33,13 +33,11 @@
 
 ## CI 检查
 
-```bash
-go fmt ./...
-go vet ./...
-go test ./...
-pwsh ./scripts/test-local-api-smoke.ps1
-pwsh ./scripts/test-local-backup-restore.ps1
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
 ```
+
+`scripts/test-mvp.ps1` 串联 `go fmt ./...`、`go vet ./...`、`go test ./...`、本地 API smoke test 和本地备份恢复 smoke test。
 
 ## 测试数据原则
 
