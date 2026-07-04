@@ -62,6 +62,7 @@ go run ./cmd/synchub-agent --version
 go run ./cmd/synchub-cli server wait --server http://localhost:8765 --timeout 30s
 go run ./cmd/synchub-cli server status --server http://localhost:8765
 go run ./cmd/synchub-cli server metrics --server http://localhost:8765
+go run ./cmd/synchub-cli server openapi --server http://localhost:8765
 ```
 
 Useful endpoints:

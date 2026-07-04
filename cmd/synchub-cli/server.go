@@ -24,6 +24,8 @@ func runServer(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return runServerWait(ctx, args[1:], stdout, stderr)
 	case "metrics":
 		return runServerMetrics(ctx, args[1:], stdout, stderr)
+	case "openapi":
+		return runServerOpenAPI(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printServerUsage(stdout)
 		return nil
@@ -128,5 +130,24 @@ func runServerMetrics(ctx context.Context, args []string, stdout, stderr io.Writ
 		return fmt.Errorf("metrics check failed: %w", err)
 	}
 	fmt.Fprint(stdout, metrics)
+	return nil
+}
+
+func runServerOpenAPI(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("server openapi", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	serverURL := fs.String("server", defaultServerURL, "server base URL")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*serverURL) == "" {
+		return errors.New("server URL is required")
+	}
+
+	spec, err := client.New(*serverURL).OpenAPI(ctx)
+	if err != nil {
+		return fmt.Errorf("openapi check failed: %w", err)
+	}
+	fmt.Fprint(stdout, spec)
 	return nil
 }

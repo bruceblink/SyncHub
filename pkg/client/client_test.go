@@ -195,6 +195,25 @@ func TestMetricsReturnsAPIError(t *testing.T) {
 	}
 }
 
+func TestOpenAPI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/swagger/openapi.yaml" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write([]byte("openapi: 3.0.3\ninfo:\n  title: SyncHub API\n"))
+	}))
+	defer server.Close()
+
+	spec, err := New(server.URL).OpenAPI(context.Background())
+	if err != nil {
+		t.Fatalf("openapi: %v", err)
+	}
+	if !strings.Contains(spec, "openapi: 3.0.3") || !strings.Contains(spec, "title: SyncHub API") {
+		t.Fatalf("spec = %q", spec)
+	}
+}
+
 func TestLoginReturnsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

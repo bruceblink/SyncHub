@@ -204,7 +204,15 @@ func (c *Client) Ready(ctx context.Context) (StatusInfo, error) {
 }
 
 func (c *Client) Metrics(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint("/metrics"), nil)
+	return c.getText(ctx, "/metrics")
+}
+
+func (c *Client) OpenAPI(ctx context.Context) (string, error) {
+	return c.getText(ctx, "/swagger/openapi.yaml")
+}
+
+func (c *Client) getText(ctx context.Context, path string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint(path), nil)
 	if err != nil {
 		return "", err
 	}

@@ -126,6 +126,8 @@ try {
     Invoke-Checked -FilePath $cliBinary -Arguments @("server", "status", "--server", $serverURL) | Out-Null
     $metrics = Invoke-Checked -FilePath $cliBinary -Arguments @("server", "metrics", "--server", $serverURL)
     Assert-OutputContains -Output $metrics -Expected "synchub_http_requests_total" -Message "metrics output missing request counter"
+    $openapi = Invoke-Checked -FilePath $cliBinary -Arguments @("server", "openapi", "--server", $serverURL)
+    Assert-OutputContains -Output $openapi -Expected "openapi: 3.0.3" -Message "openapi output missing version"
 
     $workspaceRoot = Join-Path $tempRoot "workspace"
     New-Item -ItemType Directory -Path $workspaceRoot | Out-Null

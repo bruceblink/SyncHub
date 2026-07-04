@@ -158,3 +158,38 @@ func TestRunServerMetricsReportsFailure(t *testing.T) {
 		t.Fatalf("error = %v, want metrics failure", err)
 	}
 }
+
+func TestRunServerOpenAPIPrintsSpec(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/swagger/openapi.yaml" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write([]byte("openapi: 3.0.3\ninfo:\n  title: SyncHub API\n"))
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"server", "openapi", "--server", server.URL}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server openapi: %v", err)
+	}
+	want := "openapi: 3.0.3\ninfo:\n  title: SyncHub API\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunServerOpenAPIReportsFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":"INTERNAL","message":"openapi unavailable"}`))
+	}))
+	defer server.Close()
+
+	err := run(context.Background(), []string{"server", "openapi", "--server", server.URL}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "openapi check failed: openapi unavailable") {
+		t.Fatalf("error = %v, want openapi failure", err)
+	}
+}
