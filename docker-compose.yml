@@ -8,7 +8,7 @@ services:
         VERSION: ${SYNCHUB_VERSION:-dev}
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
     image: synchub-api:dev
-    container_name: synchub-api
+    container_name: ${SYNCHUB_CONTAINER_NAME:-synchub-api}
     ports:
       - "${SYNCHUB_PORT:-8765}:8765"
     environment:

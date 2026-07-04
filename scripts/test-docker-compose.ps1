@@ -47,9 +47,20 @@ $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
 $env:SYNCHUB_VERSION = $Version
 $env:GOPROXY = $GoProxy
 $env:SYNCHUB_PORT = [string]$Port
+$env:SYNCHUB_CONTAINER_NAME = "$ProjectName-api"
 
 Push-Location $ProjectRoot
 try {
+    $existingContainer = & docker ps -aq --filter "name=^/$env:SYNCHUB_CONTAINER_NAME$"
+    if ($LASTEXITCODE -ne 0) {
+        throw "docker ps failed with exit code $LASTEXITCODE"
+    }
+    if ($existingContainer) {
+        & docker rm -f $env:SYNCHUB_CONTAINER_NAME | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "docker rm -f $env:SYNCHUB_CONTAINER_NAME failed with exit code $LASTEXITCODE"
+        }
+    }
     Invoke-Compose -Arguments @("down", "--volumes", "--remove-orphans")
     Invoke-Compose -Arguments @("build", "synchub-api")
     Invoke-Compose -Arguments @("up", "-d", "synchub-api")
