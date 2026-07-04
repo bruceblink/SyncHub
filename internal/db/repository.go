@@ -286,7 +286,7 @@ func (r *Repository) RestoreFileVersion(ctx context.Context, userID, fileID stri
 	return restored, changeID, wrapDBErr(tx.Commit(ctx))
 }
 
-func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error) {
+func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string, baseVersion *int64, sourceDeviceID *string) (domain.FileNode, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return domain.FileNode{}, wrapDBErr(err)
@@ -299,6 +299,15 @@ func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newN
 	}
 	if old.NodeType == domain.NodeTypeDirectory && isDescendantPath(newPath, old.Path) {
 		return domain.FileNode{}, domain.E(domain.CodeInvalidArgument, "directory cannot be moved into itself", nil)
+	}
+	if baseVersion != nil && old.Version != *baseVersion {
+		if err := createVersionConflictTx(ctx, tx, userID, old, baseVersion); err != nil {
+			return domain.FileNode{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return domain.FileNode{}, wrapDBErr(err)
+		}
+		return domain.FileNode{}, domain.E(domain.CodeFileConflict, "base version conflict", nil)
 	}
 
 	var node domain.FileNode
@@ -334,7 +343,7 @@ func (r *Repository) MoveFile(ctx context.Context, userID, fileID, newPath, newN
 	return node, wrapDBErr(tx.Commit(ctx))
 }
 
-func (r *Repository) DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
+func (r *Repository) DeleteFile(ctx context.Context, userID, fileID string, baseVersion *int64, sourceDeviceID *string) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return wrapDBErr(err)
@@ -344,6 +353,15 @@ func (r *Repository) DeleteFile(ctx context.Context, userID, fileID string, sour
 	node, err := r.getFileByIDTx(ctx, tx, userID, fileID)
 	if err != nil {
 		return err
+	}
+	if baseVersion != nil && node.Version != *baseVersion {
+		if err := createVersionConflictTx(ctx, tx, userID, node, baseVersion); err != nil {
+			return err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return wrapDBErr(err)
+		}
+		return domain.E(domain.CodeFileConflict, "base version conflict", nil)
 	}
 	nextVersion := node.Version + 1
 	tag, err := tx.Exec(ctx, `
@@ -784,6 +802,17 @@ func createSyncConflictTx(ctx context.Context, tx pgx.Tx, conflict domain.SyncCo
 		values ($1,$2,$3,$4,$5,$6,$7)
 	`, conflict.ID, conflict.UserID, conflict.FileID, conflict.Path, conflict.LocalVersion, conflict.RemoteVersion, conflict.Resolution)
 	return wrapDBErr(err)
+}
+
+func createVersionConflictTx(ctx context.Context, tx pgx.Tx, userID string, node domain.FileNode, localVersion *int64) error {
+	remoteVersion := node.Version
+	return createSyncConflictTx(ctx, tx, domain.SyncConflict{
+		UserID:        userID,
+		FileID:        &node.ID,
+		Path:          node.Path,
+		LocalVersion:  localVersion,
+		RemoteVersion: &remoteVersion,
+	})
 }
 
 func (r *Repository) ListSyncConflicts(ctx context.Context, userID, resolution string, limit int32) ([]domain.SyncConflict, error) {

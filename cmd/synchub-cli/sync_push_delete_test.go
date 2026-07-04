@@ -31,13 +31,14 @@ func TestRunSyncPushDeletesRemovedManifestFiles(t *testing.T) {
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"remove.txt","path":"/workspace/remove.txt","node_type":"file","version":3}}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/files/file_1":
 			var req struct {
-				DeviceID string `json:"device_id"`
+				DeviceID    string `json:"device_id"`
+				BaseVersion *int64 `json:"base_version"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode delete request: %v", err)
 			}
-			if req.DeviceID != "dev_1" {
-				t.Fatalf("delete device id = %q", req.DeviceID)
+			if req.DeviceID != "dev_1" || req.BaseVersion == nil || *req.BaseVersion != remoteVersion {
+				t.Fatalf("delete request = %#v", req)
 			}
 			deleted = true
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{}}`))

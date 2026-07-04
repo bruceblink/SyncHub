@@ -355,7 +355,7 @@ func TestSQLiteMoveDirectoryCascadesDescendantPaths(t *testing.T) {
 	}
 	deviceID := "dev-1"
 
-	moved, err := repo.MoveFile(ctx, user.ID, src.ID, "/archive/src", "src", &archive.ID, &deviceID)
+	moved, err := repo.MoveFile(ctx, user.ID, src.ID, "/archive/src", "src", &archive.ID, nil, &deviceID)
 	if err != nil {
 		t.Fatalf("move directory: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestSQLiteMoveDirectoryRejectsDescendantTarget(t *testing.T) {
 		t.Fatalf("create nested: %v", err)
 	}
 
-	_, err = repo.MoveFile(ctx, user.ID, src.ID, "/workspace/src/nested/src", "src", &nested.ID, nil)
+	_, err = repo.MoveFile(ctx, user.ID, src.ID, "/workspace/src/nested/src", "src", &nested.ID, nil, nil)
 	if domain.ErrorCodeOf(err) != domain.CodeInvalidArgument {
 		t.Fatalf("move into descendant error = %v, want invalid argument", err)
 	}
@@ -429,6 +429,53 @@ func TestSQLiteMoveDirectoryRejectsDescendantTarget(t *testing.T) {
 	}
 	if node.Path != "/workspace/src" || node.Version != 1 {
 		t.Fatalf("src after rejected move = %#v", node)
+	}
+}
+
+func TestSQLiteMoveFileRejectsStaleBaseVersionAndRecordsConflict(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "stale-move@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := repo.CreateDirectory(ctx, user.ID, "/workspace", "workspace", nil, nil); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	file := commitTestFile(t, repo, user.ID, "/workspace/stale.txt", "sha-stale", "objects/user/stale")
+	staleVersion := file.Version - 1
+
+	_, err = repo.MoveFile(ctx, user.ID, file.ID, "/workspace/moved.txt", "moved.txt", nil, &staleVersion, nil)
+	if domain.ErrorCodeOf(err) != domain.CodeFileConflict {
+		t.Fatalf("move stale version error = %v, want file conflict", err)
+	}
+	current, err := repo.GetFileByID(ctx, user.ID, file.ID)
+	if err != nil {
+		t.Fatalf("get current file: %v", err)
+	}
+	if current.Path != "/workspace/stale.txt" || current.Version != file.Version {
+		t.Fatalf("file changed after rejected move: %#v", current)
+	}
+	conflicts, err := repo.ListSyncConflicts(ctx, user.ID, domain.ConflictResolutionPending, 10)
+	if err != nil {
+		t.Fatalf("list conflicts: %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("conflicts = %#v, want one", conflicts)
+	}
+	if conflicts[0].Path != file.Path || conflicts[0].FileID == nil || *conflicts[0].FileID != file.ID {
+		t.Fatalf("conflict target = %#v", conflicts[0])
+	}
+	if conflicts[0].LocalVersion == nil || *conflicts[0].LocalVersion != staleVersion {
+		t.Fatalf("conflict local version = %#v", conflicts[0].LocalVersion)
+	}
+	if conflicts[0].RemoteVersion == nil || *conflicts[0].RemoteVersion != file.Version {
+		t.Fatalf("conflict remote version = %#v", conflicts[0].RemoteVersion)
 	}
 }
 
@@ -455,7 +502,7 @@ func TestSQLiteDeleteDirectoryCascadesDescendants(t *testing.T) {
 	file := commitTestFile(t, repo, user.ID, "/workspace/src/main.go", "sha-delete", "objects/user/delete")
 	deviceID := "dev-1"
 
-	if err := repo.DeleteFile(ctx, user.ID, src.ID, &deviceID); err != nil {
+	if err := repo.DeleteFile(ctx, user.ID, src.ID, nil, &deviceID); err != nil {
 		t.Fatalf("delete directory: %v", err)
 	}
 	if _, err := repo.GetFileByID(ctx, user.ID, src.ID); domain.ErrorCodeOf(err) != domain.CodeNotFound {
@@ -482,6 +529,53 @@ func TestSQLiteDeleteDirectoryCascadesDescendants(t *testing.T) {
 	}
 	if last.SourceDeviceID == nil || *last.SourceDeviceID != deviceID {
 		t.Fatalf("source device id = %#v, want %s", last.SourceDeviceID, deviceID)
+	}
+}
+
+func TestSQLiteDeleteFileRejectsStaleBaseVersionAndRecordsConflict(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	user, err := repo.CreateUser(ctx, "stale-delete@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := repo.CreateDirectory(ctx, user.ID, "/workspace", "workspace", nil, nil); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	file := commitTestFile(t, repo, user.ID, "/workspace/delete-stale.txt", "sha-delete-stale", "objects/user/delete-stale")
+	staleVersion := file.Version - 1
+
+	err = repo.DeleteFile(ctx, user.ID, file.ID, &staleVersion, nil)
+	if domain.ErrorCodeOf(err) != domain.CodeFileConflict {
+		t.Fatalf("delete stale version error = %v, want file conflict", err)
+	}
+	current, err := repo.GetFileByID(ctx, user.ID, file.ID)
+	if err != nil {
+		t.Fatalf("get current file: %v", err)
+	}
+	if current.DeletedAt != nil || current.Version != file.Version {
+		t.Fatalf("file changed after rejected delete: %#v", current)
+	}
+	conflicts, err := repo.ListSyncConflicts(ctx, user.ID, domain.ConflictResolutionPending, 10)
+	if err != nil {
+		t.Fatalf("list conflicts: %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("conflicts = %#v, want one", conflicts)
+	}
+	if conflicts[0].Path != file.Path || conflicts[0].FileID == nil || *conflicts[0].FileID != file.ID {
+		t.Fatalf("conflict target = %#v", conflicts[0])
+	}
+	if conflicts[0].LocalVersion == nil || *conflicts[0].LocalVersion != staleVersion {
+		t.Fatalf("conflict local version = %#v", conflicts[0].LocalVersion)
+	}
+	if conflicts[0].RemoteVersion == nil || *conflicts[0].RemoteVersion != file.Version {
+		t.Fatalf("conflict remote version = %#v", conflicts[0].RemoteVersion)
 	}
 }
 

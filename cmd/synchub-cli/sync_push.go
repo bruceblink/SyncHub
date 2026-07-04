@@ -405,7 +405,7 @@ func moveManifestEntry(ctx context.Context, apiClient *client.Client, accessToke
 	if err != nil {
 		return 0, err
 	}
-	moved, err := apiClient.MoveFileWithDevice(ctx, accessToken, node.ID, to.Path, deviceID)
+	moved, err := apiClient.MoveFileWithDeviceAndBaseVersion(ctx, accessToken, node.ID, to.Path, deviceID, from.RemoteVersion)
 	if err != nil {
 		return 0, err
 	}
@@ -457,7 +457,7 @@ func deleteManifestEntry(ctx context.Context, apiClient *client.Client, accessTo
 		}
 		return err
 	}
-	if err := apiClient.DeleteFileWithDevice(ctx, accessToken, node.ID, deviceID); err != nil && !isAPIErrorCode(err, "NOT_FOUND") {
+	if err := apiClient.DeleteFileWithDeviceAndBaseVersion(ctx, accessToken, node.ID, deviceID, item.RemoteVersion); err != nil && !isAPIErrorCode(err, "NOT_FOUND") {
 		return err
 	}
 	return nil

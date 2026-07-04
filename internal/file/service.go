@@ -24,8 +24,8 @@ type Repository interface {
 	PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
 	UnpinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
 	RestoreFileVersion(ctx context.Context, userID, fileID string, version int64, sourceDeviceID *string) (domain.FileNode, int64, error)
-	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error)
-	DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error
+	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string, baseVersion *int64, sourceDeviceID *string) (domain.FileNode, error)
+	DeleteFile(ctx context.Context, userID, fileID string, baseVersion *int64, sourceDeviceID *string) error
 	CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error)
 	GetUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error)
 	PutUploadChunk(ctx context.Context, uploadID string, chunkIndex, size int32, sha256sum, storageKey string) (domain.UploadChunk, error)
@@ -124,7 +124,10 @@ func (s *Service) UnpinVersion(ctx context.Context, userID, fileID string, versi
 	return s.repo.UnpinFileVersion(ctx, userID, fileID, version)
 }
 
-func (s *Service) Move(ctx context.Context, userID, fileID, newPath string, sourceDeviceID *string) (domain.FileNode, error) {
+func (s *Service) Move(ctx context.Context, userID, fileID, newPath string, baseVersion *int64, sourceDeviceID *string) (domain.FileNode, error) {
+	if baseVersion != nil && *baseVersion < 0 {
+		return domain.FileNode{}, domain.E(domain.CodeInvalidArgument, "base version must be non-negative", nil)
+	}
 	normalized, err := domain.NormalizePath(newPath)
 	if err != nil {
 		return domain.FileNode{}, err
@@ -137,11 +140,14 @@ func (s *Service) Move(ctx context.Context, userID, fileID, newPath string, sour
 	if err != nil {
 		return domain.FileNode{}, err
 	}
-	return s.repo.MoveFile(ctx, userID, fileID, normalized, name, parentID, cleanOptionalString(sourceDeviceID))
+	return s.repo.MoveFile(ctx, userID, fileID, normalized, name, parentID, baseVersion, cleanOptionalString(sourceDeviceID))
 }
 
-func (s *Service) Delete(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
-	return s.repo.DeleteFile(ctx, userID, fileID, cleanOptionalString(sourceDeviceID))
+func (s *Service) Delete(ctx context.Context, userID, fileID string, baseVersion *int64, sourceDeviceID *string) error {
+	if baseVersion != nil && *baseVersion < 0 {
+		return domain.E(domain.CodeInvalidArgument, "base version must be non-negative", nil)
+	}
+	return s.repo.DeleteFile(ctx, userID, fileID, baseVersion, cleanOptionalString(sourceDeviceID))
 }
 
 func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, size int64, sha256sum string, requestedChunkSize int64, baseVersion *int64, idempotencyKey, sourceDeviceID string) (domain.UploadSession, error) {

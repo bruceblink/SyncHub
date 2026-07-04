@@ -347,14 +347,15 @@ func (s *Server) createDirectory(c *gin.Context) {
 
 func (s *Server) moveFile(c *gin.Context) {
 	var req struct {
-		Path     string `json:"path"`
-		DeviceID string `json:"device_id"`
+		Path        string `json:"path"`
+		DeviceID    string `json:"device_id"`
+		BaseVersion *int64 `json:"base_version"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
 		return
 	}
-	node, err := s.files.Move(c.Request.Context(), userID(c), c.Param("id"), req.Path, optionalString(req.DeviceID))
+	node, err := s.files.Move(c.Request.Context(), userID(c), c.Param("id"), req.Path, req.BaseVersion, optionalString(req.DeviceID))
 	if err != nil {
 		fail(c, err)
 		return
@@ -364,10 +365,11 @@ func (s *Server) moveFile(c *gin.Context) {
 
 func (s *Server) deleteFile(c *gin.Context) {
 	var req struct {
-		DeviceID string `json:"device_id"`
+		DeviceID    string `json:"device_id"`
+		BaseVersion *int64 `json:"base_version"`
 	}
 	_ = c.ShouldBindJSON(&req)
-	if err := s.files.Delete(c.Request.Context(), userID(c), c.Param("id"), optionalString(req.DeviceID)); err != nil {
+	if err := s.files.Delete(c.Request.Context(), userID(c), c.Param("id"), req.BaseVersion, optionalString(req.DeviceID)); err != nil {
 		fail(c, err)
 		return
 	}

@@ -205,14 +205,16 @@ func (r *downloadFileRepo) RestoreFileVersion(ctx context.Context, userID, fileI
 	return domain.FileNode{}, 0, errNotImplemented()
 }
 
-func (r *downloadFileRepo) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error) {
+func (r *downloadFileRepo) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string, baseVersion *int64, sourceDeviceID *string) (domain.FileNode, error) {
 	_, _, _, _, _ = ctx, userID, fileID, newPath, newName
 	_, _ = newParentID, sourceDeviceID
+	_ = baseVersion
 	return domain.FileNode{}, errNotImplemented()
 }
 
-func (r *downloadFileRepo) DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
+func (r *downloadFileRepo) DeleteFile(ctx context.Context, userID, fileID string, baseVersion *int64, sourceDeviceID *string) error {
 	_, _, _, _ = ctx, userID, fileID, sourceDeviceID
+	_ = baseVersion
 	return errNotImplemented()
 }
 

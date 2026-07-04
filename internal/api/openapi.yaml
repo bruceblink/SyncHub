@@ -233,6 +233,10 @@ paths:
                 device_id:
                   type: string
                   description: Optional source device id for sync change attribution.
+                base_version:
+                  type: integer
+                  nullable: true
+                  description: Optional optimistic concurrency base version. Requests with a stale value return FILE_CONFLICT and create a sync conflict record.
       responses:
         "200":
           description: Updated file metadata.
@@ -255,6 +259,10 @@ paths:
                 device_id:
                   type: string
                   description: Optional source device id for sync change attribution.
+                base_version:
+                  type: integer
+                  nullable: true
+                  description: Optional optimistic concurrency base version. Requests with a stale value return FILE_CONFLICT and create a sync conflict record.
       responses:
         "200":
           description: Deleted.

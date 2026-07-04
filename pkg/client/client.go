@@ -366,14 +366,25 @@ func (c *Client) DeleteFile(ctx context.Context, accessToken, fileID string) err
 }
 
 func (c *Client) DeleteFileWithDevice(ctx context.Context, accessToken, fileID, deviceID string) error {
+	return c.DeleteFileWithDeviceAndBaseVersion(ctx, accessToken, fileID, deviceID, nil)
+}
+
+func (c *Client) DeleteFileWithDeviceAndBaseVersion(ctx context.Context, accessToken, fileID, deviceID string, baseVersion *int64) error {
 	path := fmt.Sprintf("/api/v1/files/%s", url.PathEscape(fileID))
 	var body io.Reader
+	payload := map[string]any{}
 	if strings.TrimSpace(deviceID) != "" {
-		payload, err := json.Marshal(map[string]string{"device_id": deviceID})
+		payload["device_id"] = deviceID
+	}
+	if baseVersion != nil {
+		payload["base_version"] = *baseVersion
+	}
+	if len(payload) > 0 {
+		raw, err := json.Marshal(payload)
 		if err != nil {
 			return err
 		}
-		body = bytes.NewReader(payload)
+		body = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.endpoint(path), body)
 	if err != nil {
@@ -391,13 +402,20 @@ func (c *Client) MoveFile(ctx context.Context, accessToken, fileID, path string)
 }
 
 func (c *Client) MoveFileWithDevice(ctx context.Context, accessToken, fileID, path, deviceID string) (FileNode, error) {
+	return c.MoveFileWithDeviceAndBaseVersion(ctx, accessToken, fileID, path, deviceID, nil)
+}
+
+func (c *Client) MoveFileWithDeviceAndBaseVersion(ctx context.Context, accessToken, fileID, path, deviceID string, baseVersion *int64) (FileNode, error) {
 	var data FileNode
 	endpoint := fmt.Sprintf("/api/v1/files/%s", url.PathEscape(fileID))
-	payload := map[string]string{
+	payload := map[string]any{
 		"path": path,
 	}
 	if strings.TrimSpace(deviceID) != "" {
 		payload["device_id"] = deviceID
+	}
+	if baseVersion != nil {
+		payload["base_version"] = *baseVersion
 	}
 	err := c.patchJSONAuth(ctx, endpoint, accessToken, payload, &data)
 	return data, err

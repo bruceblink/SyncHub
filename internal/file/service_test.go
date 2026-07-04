@@ -51,7 +51,7 @@ func TestMoveRequiresDirectoryParent(t *testing.T) {
 	}
 	service := NewService(repo, nil, 4*1024*1024, time.Hour)
 
-	_, err := service.Move(context.Background(), "user-1", "file-2", "/workspace/readme.txt/child.txt", nil)
+	_, err := service.Move(context.Background(), "user-1", "file-2", "/workspace/readme.txt/child.txt", nil, nil)
 	if domain.ErrorCodeOf(err) != domain.CodeInvalidArgument {
 		t.Fatalf("error = %v, want invalid argument", err)
 	}
@@ -112,14 +112,16 @@ func (r *fakeRepo) RestoreFileVersion(ctx context.Context, userID, fileID string
 	return domain.FileNode{}, 0, nil
 }
 
-func (r *fakeRepo) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error) {
+func (r *fakeRepo) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string, baseVersion *int64, sourceDeviceID *string) (domain.FileNode, error) {
 	_, _, _, _, _, _ = ctx, userID, fileID, newName, newParentID, sourceDeviceID
+	_ = baseVersion
 	r.movedFile = true
 	return domain.FileNode{ID: fileID, Path: newPath, NodeType: domain.NodeTypeFile}, nil
 }
 
-func (r *fakeRepo) DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
+func (r *fakeRepo) DeleteFile(ctx context.Context, userID, fileID string, baseVersion *int64, sourceDeviceID *string) error {
 	_, _, _, _ = ctx, userID, fileID, sourceDeviceID
+	_ = baseVersion
 	return nil
 }
 

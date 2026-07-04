@@ -364,7 +364,7 @@ func (r *SQLiteRepository) RestoreFileVersion(ctx context.Context, userID, fileI
 	return restored, changeID, wrapSQLiteDBErr(tx.Commit())
 }
 
-func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID, sourceDeviceID *string) (domain.FileNode, error) {
+func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string, baseVersion *int64, sourceDeviceID *string) (domain.FileNode, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return domain.FileNode{}, wrapSQLiteDBErr(err)
@@ -377,6 +377,15 @@ func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath
 	}
 	if old.NodeType == domain.NodeTypeDirectory && isDescendantPath(newPath, old.Path) {
 		return domain.FileNode{}, domain.E(domain.CodeInvalidArgument, "directory cannot be moved into itself", nil)
+	}
+	if baseVersion != nil && old.Version != *baseVersion {
+		if err := createSQLiteVersionConflictTx(ctx, tx, userID, old, baseVersion); err != nil {
+			return domain.FileNode{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.FileNode{}, wrapSQLiteDBErr(err)
+		}
+		return domain.FileNode{}, domain.E(domain.CodeFileConflict, "base version conflict", nil)
 	}
 
 	now := time.Now().UTC()
@@ -409,7 +418,7 @@ func (r *SQLiteRepository) MoveFile(ctx context.Context, userID, fileID, newPath
 	return node, wrapSQLiteDBErr(tx.Commit())
 }
 
-func (r *SQLiteRepository) DeleteFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) error {
+func (r *SQLiteRepository) DeleteFile(ctx context.Context, userID, fileID string, baseVersion *int64, sourceDeviceID *string) error {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return wrapSQLiteDBErr(err)
@@ -419,6 +428,15 @@ func (r *SQLiteRepository) DeleteFile(ctx context.Context, userID, fileID string
 	node, err := r.getFileByIDTx(ctx, tx, userID, fileID)
 	if err != nil {
 		return err
+	}
+	if baseVersion != nil && node.Version != *baseVersion {
+		if err := createSQLiteVersionConflictTx(ctx, tx, userID, node, baseVersion); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return wrapSQLiteDBErr(err)
+		}
+		return domain.E(domain.CodeFileConflict, "base version conflict", nil)
 	}
 	nextVersion := node.Version + 1
 	now := time.Now().UTC()
@@ -902,6 +920,17 @@ func createSQLiteSyncConflictTx(ctx context.Context, tx *sql.Tx, conflict domain
 		values (?, ?, ?, ?, ?, ?, ?, ?)
 	`, conflict.ID, conflict.UserID, conflict.FileID, conflict.Path, conflict.LocalVersion, conflict.RemoteVersion, conflict.Resolution, time.Now().UTC())
 	return wrapSQLiteDBErr(err)
+}
+
+func createSQLiteVersionConflictTx(ctx context.Context, tx *sql.Tx, userID string, node domain.FileNode, localVersion *int64) error {
+	remoteVersion := node.Version
+	return createSQLiteSyncConflictTx(ctx, tx, domain.SyncConflict{
+		UserID:        userID,
+		FileID:        &node.ID,
+		Path:          node.Path,
+		LocalVersion:  localVersion,
+		RemoteVersion: &remoteVersion,
+	})
 }
 
 func (r *SQLiteRepository) ListSyncConflicts(ctx context.Context, userID, resolution string, limit int32) ([]domain.SyncConflict, error) {

@@ -47,8 +47,9 @@ func TestRunSyncPushMovesRenamedManifestFiles(t *testing.T) {
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"old.txt","path":"/workspace/old.txt","node_type":"file","version":3}}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/files/file_1":
 			var req struct {
-				Path     string `json:"path"`
-				DeviceID string `json:"device_id"`
+				Path        string `json:"path"`
+				DeviceID    string `json:"device_id"`
+				BaseVersion *int64 `json:"base_version"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode move request: %v", err)
@@ -56,8 +57,8 @@ func TestRunSyncPushMovesRenamedManifestFiles(t *testing.T) {
 			if req.Path != "/workspace/renamed.txt" {
 				t.Fatalf("move path = %q", req.Path)
 			}
-			if req.DeviceID != "dev_1" {
-				t.Fatalf("move device id = %q", req.DeviceID)
+			if req.DeviceID != "dev_1" || req.BaseVersion == nil || *req.BaseVersion != remoteVersion {
+				t.Fatalf("move request = %#v", req)
 			}
 			moved = true
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"file_1","name":"renamed.txt","path":"/workspace/renamed.txt","node_type":"file","version":4}}`))
