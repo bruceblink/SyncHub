@@ -5,6 +5,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -177,6 +179,47 @@ func TestRunServerOpenAPIPrintsSpec(t *testing.T) {
 	want := "openapi: 3.0.3\ninfo:\n  title: SyncHub API\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestRunServerOpenAPIWritesSpecToOutputFile(t *testing.T) {
+	spec := "openapi: 3.0.3\ninfo:\n  title: SyncHub API\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/swagger/openapi.yaml" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write([]byte(spec))
+	}))
+	defer server.Close()
+
+	outputPath := filepath.Join(t.TempDir(), "generated", "openapi.yaml")
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		t.Fatalf("mkdir output dir: %v", err)
+	}
+	if err := os.WriteFile(outputPath, []byte("old spec"), 0o644); err != nil {
+		t.Fatalf("write old output: %v", err)
+	}
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"server",
+		"openapi",
+		"--server", server.URL,
+		"--output", outputPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server openapi output: %v", err)
+	}
+	wantStdout := "openapi written: " + outputPath + "\n"
+	if stdout.String() != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), wantStdout)
+	}
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read openapi output: %v", err)
+	}
+	if string(raw) != spec {
+		t.Fatalf("output file = %q, want %q", string(raw), spec)
 	}
 }
 

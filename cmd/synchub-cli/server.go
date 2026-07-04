@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -137,6 +139,7 @@ func runServerOpenAPI(ctx context.Context, args []string, stdout, stderr io.Writ
 	fs := flag.NewFlagSet("server openapi", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	serverURL := fs.String("server", defaultServerURL, "server base URL")
+	outputPath := fs.String("output", "", "write OpenAPI YAML to a file instead of stdout")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -148,6 +151,52 @@ func runServerOpenAPI(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return fmt.Errorf("openapi check failed: %w", err)
 	}
+	if strings.TrimSpace(*outputPath) != "" {
+		if err := writeTextAtomically(*outputPath, spec); err != nil {
+			return fmt.Errorf("write openapi output failed: %w", err)
+		}
+		fmt.Fprintf(stdout, "openapi written: %s\n", *outputPath)
+		return nil
+	}
 	fmt.Fprint(stdout, spec)
+	return nil
+}
+
+func writeTextAtomically(outputPath, content string) error {
+	outputPath = strings.TrimSpace(outputPath)
+	if outputPath == "" {
+		return errors.New("output path is required")
+	}
+	dir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if info, err := os.Stat(outputPath); err == nil && info.IsDir() {
+		return fmt.Errorf("output path is a directory: %s", outputPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".synchub-openapi-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := io.WriteString(tmp, content); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := replaceFile(tmpName, outputPath); err != nil {
+		return err
+	}
+	removeTmp = false
 	return nil
 }
