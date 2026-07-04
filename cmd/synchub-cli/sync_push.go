@@ -27,6 +27,11 @@ type pushManifestResult struct {
 	version      int64
 }
 
+type pushActionResult struct {
+	conflictKept bool
+	version      int64
+}
+
 func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("sync push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -131,17 +136,24 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	}
 	moveSources := make(map[string]struct{}, len(plannedMoves))
 	moveTargets := make(map[string]int64, len(plannedMoves))
+	moveConflictTargets := make(map[string]struct{}, len(plannedMoves))
 	for _, move := range plannedMoves {
 		if err := ensureRemoteDirectories(ctx, apiClient, loginConfig.Tokens.AccessToken, workspace.DeviceID, move.to.Path, createdDirs); err != nil {
 			return err
 		}
-		version, err := moveManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, workspace.DeviceID, move.from, move.to)
+		result, err := moveManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, workspace.DeviceID, move.from, move.to)
 		if err != nil {
 			return err
 		}
+		if result.conflictKept {
+			moveSources[move.sourcePath] = struct{}{}
+			moveConflictTargets[move.targetPath] = struct{}{}
+			conflictKept++
+			continue
+		}
 		moveSources[move.sourcePath] = struct{}{}
-		if version > 0 {
-			moveTargets[move.targetPath] = version
+		if result.version > 0 {
+			moveTargets[move.targetPath] = result.version
 		}
 		moved++
 		manifestChanged = true
@@ -155,8 +167,13 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 			continue
 		}
 		if _, ok := currentPaths[path]; !ok {
-			if err := deleteManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, workspace.DeviceID, item); err != nil {
+			result, err := deleteManifestEntry(ctx, apiClient, loginConfig.Tokens.AccessToken, workspace.DeviceID, item)
+			if err != nil {
 				return err
+			}
+			if result.conflictKept {
+				conflictKept++
+				continue
 			}
 			deleted++
 			manifestChanged = true
@@ -170,6 +187,9 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		if version, ok := moveTargets[path]; ok {
 			version := version
 			currentManifest.Items[i].RemoteVersion = &version
+			continue
+		}
+		if _, ok := moveConflictTargets[path]; ok {
 			continue
 		}
 		previousItem, existed := previousEntries[path]
@@ -400,16 +420,19 @@ func hasDeletedManifestEntries(previous manifest.Manifest, currentPaths map[stri
 	return false
 }
 
-func moveManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, deviceID string, from, to manifest.Entry) (int64, error) {
+func moveManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, deviceID string, from, to manifest.Entry) (pushActionResult, error) {
 	node, err := apiClient.GetFileByPath(ctx, accessToken, from.Path)
 	if err != nil {
-		return 0, err
+		return pushActionResult{}, err
 	}
 	moved, err := apiClient.MoveFileWithDeviceAndBaseVersion(ctx, accessToken, node.ID, to.Path, deviceID, from.RemoteVersion)
 	if err != nil {
-		return 0, err
+		if isAPIErrorCode(err, "FILE_CONFLICT") {
+			return pushActionResult{conflictKept: true}, nil
+		}
+		return pushActionResult{}, err
 	}
-	return moved.Version, nil
+	return pushActionResult{version: moved.Version}, nil
 }
 
 func mergePushManifestRemoteVersions(current *manifest.Manifest, previous manifest.Manifest) error {
@@ -449,18 +472,21 @@ func manifestPathSet(m manifest.Manifest) (map[string]struct{}, error) {
 	return paths, nil
 }
 
-func deleteManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, deviceID string, item manifest.Entry) error {
+func deleteManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, deviceID string, item manifest.Entry) (pushActionResult, error) {
 	node, err := apiClient.GetFileByPath(ctx, accessToken, item.Path)
 	if err != nil {
 		if isAPIErrorCode(err, "NOT_FOUND") {
-			return nil
+			return pushActionResult{}, nil
 		}
-		return err
+		return pushActionResult{}, err
 	}
 	if err := apiClient.DeleteFileWithDeviceAndBaseVersion(ctx, accessToken, node.ID, deviceID, item.RemoteVersion); err != nil && !isAPIErrorCode(err, "NOT_FOUND") {
-		return err
+		if isAPIErrorCode(err, "FILE_CONFLICT") {
+			return pushActionResult{conflictKept: true}, nil
+		}
+		return pushActionResult{}, err
 	}
-	return nil
+	return pushActionResult{}, nil
 }
 
 func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessToken, root string, workspace workspaceConfig, item manifest.Entry, createdDirs map[string]struct{}) (int64, error) {
