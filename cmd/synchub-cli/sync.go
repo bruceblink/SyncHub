@@ -210,9 +210,14 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 	}
 	fmt.Fprintf(stdout, "manifest: %s\n", localManifestPath)
 	fmt.Fprintf(stdout, "files: %d\n", len(m.Items))
-	remoteTracked, localOnly := manifestRemoteVersionSummary(m.Items)
+	remoteTracked, localOnly, minRemoteVersion, maxRemoteVersion := manifestRemoteVersionSummary(m.Items)
 	fmt.Fprintf(stdout, "remote tracked: %d\n", remoteTracked)
 	fmt.Fprintf(stdout, "local only: %d\n", localOnly)
+	if remoteTracked > 0 {
+		fmt.Fprintf(stdout, "remote version range: %d-%d\n", minRemoteVersion, maxRemoteVersion)
+	} else {
+		fmt.Fprintln(stdout, "remote version range: -")
+	}
 	fmt.Fprintf(stdout, "last scan: %s\n", m.GeneratedAt.Format(time.RFC3339))
 	changes, err := scanManifestChanges(ctx, root, workspace.RemotePath, localManifestPath)
 	if err != nil {
@@ -404,13 +409,20 @@ func printChangeTypeCounts(stdout io.Writer, changes []watch.Change) {
 	fmt.Fprintf(stdout, "moved: %d\n", counts[watch.ChangeMoved])
 }
 
-func manifestRemoteVersionSummary(items []manifest.Entry) (remoteTracked, localOnly int) {
+func manifestRemoteVersionSummary(items []manifest.Entry) (remoteTracked, localOnly int, minRemoteVersion, maxRemoteVersion int64) {
 	for _, item := range items {
 		if item.RemoteVersion == nil {
 			localOnly++
 			continue
 		}
 		remoteTracked++
+		version := *item.RemoteVersion
+		if minRemoteVersion == 0 || version < minRemoteVersion {
+			minRemoteVersion = version
+		}
+		if version > maxRemoteVersion {
+			maxRemoteVersion = version
+		}
 	}
-	return remoteTracked, localOnly
+	return remoteTracked, localOnly, minRemoteVersion, maxRemoteVersion
 }
