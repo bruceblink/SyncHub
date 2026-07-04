@@ -178,6 +178,68 @@ func TestRunStatusShowsNotRunWithoutState(t *testing.T) {
 	}
 }
 
+func TestRunStatusCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	if err := writeAgentState(agentState{
+		Version:             1,
+		Root:                root,
+		Status:              "error",
+		CyclesRun:           3,
+		ConsecutiveFailures: 2,
+		LastSuccessAt:       testAgentTimePtr(time.Date(2026, 7, 4, 1, 1, 1, 0, time.UTC)),
+		LastFailureAt:       testAgentTimePtr(time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC)),
+		LastError:           "sync failed",
+		UpdatedAt:           time.Date(2026, 7, 4, 1, 2, 4, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write agent state: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	called := false
+	err := run(context.Background(), []string{"--path", root, "--status", "--json"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run agent status json: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called for status")
+	}
+	if strings.Contains(stdout.String(), "agent:") {
+		t.Fatalf("json output includes text status: %s", stdout.String())
+	}
+	var snapshot agentStatusSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode status json: %v\n%s", err, stdout.String())
+	}
+	if !snapshot.HasRun || snapshot.Workspace.Root != root || snapshot.State == nil {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if snapshot.State.Status != "error" || snapshot.State.CyclesRun != 3 || snapshot.State.ConsecutiveFailures != 2 || snapshot.State.LastError != "sync failed" {
+		t.Fatalf("state = %#v", snapshot.State)
+	}
+}
+
+func TestRunStatusNotRunCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"--path", root, "--status", "--json"}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		t.Fatal("runner should not be called for status")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run agent status json: %v", err)
+	}
+	var snapshot agentStatusSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode status json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.HasRun || snapshot.State != nil || snapshot.Workspace.Root != root {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
 func TestRunPauseWritesControlAndPausedState(t *testing.T) {
 	originalNow := agentNow
 	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
@@ -553,6 +615,9 @@ func TestRunHelpPrintsUsage(t *testing.T) {
 	if !strings.Contains(stdout.String(), "synchub-agent --path . --once --dry-run") || !strings.Contains(stdout.String(), "synchub-agent --path . --cycles 3") {
 		t.Fatalf("usage output = %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "synchub-agent --path . --status --json") {
+		t.Fatalf("usage output missing status json: %q", stdout.String())
+	}
 }
 
 func TestRunVersionPrintsVersion(t *testing.T) {
@@ -634,6 +699,13 @@ func TestParseOptionsRejectsStatusWithWatch(t *testing.T) {
 	_, err := parseOptions([]string{"--status", "--watch"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "status cannot be used with --watch") {
 		t.Fatalf("error = %v, want status cannot be used with --watch", err)
+	}
+}
+
+func TestParseOptionsRejectsJSONWithoutStatus(t *testing.T) {
+	_, err := parseOptions([]string{"--json"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "json output requires --status") {
+		t.Fatalf("error = %v, want json output requires --status", err)
 	}
 }
 

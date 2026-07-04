@@ -42,6 +42,7 @@ type agentOptions struct {
 	DryRun              bool
 	Watch               bool
 	Status              bool
+	JSON                bool
 	Pause               bool
 	Resume              bool
 }
@@ -71,6 +72,16 @@ type agentControl struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type agentStatusSnapshot struct {
+	Workspace agentStatusWorkspace `json:"workspace"`
+	State     *agentState          `json:"state,omitempty"`
+	HasRun    bool                 `json:"has_run"`
+}
+
+type agentStatusWorkspace struct {
+	Root string `json:"root"`
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -96,7 +107,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 		return resumeAgent(opts, stdout)
 	}
 	if opts.Status {
-		return runStatus(opts, stdout)
+		return runStatus(opts, stdout, opts.JSON)
 	}
 	if runner == nil {
 		return errors.New("sync runner is required")
@@ -122,7 +133,7 @@ func runOnce(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, r
 	return state.lastErr
 }
 
-func runStatus(opts agentOptions, stdout io.Writer) error {
+func runStatus(opts agentOptions, stdout io.Writer, jsonOutput bool) error {
 	state, err := loadAgentState(opts.RootPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -130,11 +141,24 @@ func runStatus(opts agentOptions, stdout io.Writer) error {
 			if rootErr != nil {
 				return rootErr
 			}
+			if jsonOutput {
+				return writeAgentStatusJSON(stdout, agentStatusSnapshot{
+					Workspace: agentStatusWorkspace{Root: root},
+					HasRun:    false,
+				})
+			}
 			fmt.Fprintf(stdout, "agent: not run\n")
 			fmt.Fprintf(stdout, "workspace: %s\n", root)
 			return nil
 		}
 		return err
+	}
+	if jsonOutput {
+		return writeAgentStatusJSON(stdout, agentStatusSnapshot{
+			Workspace: agentStatusWorkspace{Root: state.Root},
+			State:     &state,
+			HasRun:    true,
+		})
 	}
 	fmt.Fprintf(stdout, "agent: %s\n", state.Status)
 	fmt.Fprintf(stdout, "workspace: %s\n", state.Root)
@@ -147,6 +171,12 @@ func runStatus(opts agentOptions, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "updated: %s\n", state.UpdatedAt.UTC().Format(time.RFC3339))
 	return nil
+}
+
+func writeAgentStatusJSON(stdout io.Writer, snapshot agentStatusSnapshot) error {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func pauseAgent(opts agentOptions, stdout io.Writer) error {
@@ -552,6 +582,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state; requires --once")
 	fs.BoolVar(&opts.Watch, "watch", false, "trigger sync when local workspace changes are detected")
 	fs.BoolVar(&opts.Status, "status", false, "print the last agent state and exit")
+	fs.BoolVar(&opts.JSON, "json", false, "print status output as JSON; requires --status")
 	fs.BoolVar(&opts.Pause, "pause", false, "pause sync cycles for this workspace and exit")
 	fs.BoolVar(&opts.Resume, "resume", false, "resume sync cycles for this workspace and exit")
 	if len(args) > 0 {
@@ -594,6 +625,9 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.Status && opts.Watch {
 		return agentOptions{}, errors.New("status cannot be used with --watch")
 	}
+	if opts.JSON && !opts.Status {
+		return agentOptions{}, errors.New("json output requires --status")
+	}
 	if opts.Pause && opts.Resume {
 		return agentOptions{}, errors.New("pause cannot be used with --resume")
 	}
@@ -631,6 +665,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-agent --path . --once")
 	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run")
 	fmt.Fprintln(w, "  synchub-agent --path . --status")
+	fmt.Fprintln(w, "  synchub-agent --path . --status --json")
 	fmt.Fprintln(w, "  synchub-agent --path . --pause")
 	fmt.Fprintln(w, "  synchub-agent --path . --resume")
 	fmt.Fprintln(w, "  synchub-agent --path . --interval 30s --device-name laptop --platform windows --limit 500")
