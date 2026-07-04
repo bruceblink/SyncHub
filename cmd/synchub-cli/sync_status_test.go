@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -461,6 +462,144 @@ func TestRunSyncStatusCanShowRemoteChanges(t *testing.T) {
 	}
 }
 
+func TestRunSyncStatusCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	sourceDeviceID := "dev_1"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/changes":
+			if got := r.URL.Query().Get("device_id"); got != "dev_1" {
+				t.Fatalf("device_id = %q", got)
+			}
+			if got := r.URL.Query().Get("after_change_id"); got != "4" {
+				t.Fatalf("after_change_id = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":5,"file_id":"own","event_type":"update","version":2,"path":"/workspace/own.txt","source_device_id":"dev_1","created_at":"2026-06-30T00:01:00Z"},{"id":6,"file_id":"file_1","event_type":"update","version":3,"path":"/workspace/a.txt","created_at":"2026-06-30T00:02:00Z"}],"next_cursor":6}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sync/conflicts":
+			if got := r.URL.Query().Get("resolution"); got != "pending" {
+				t.Fatalf("resolution = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":"conf_1","path":"/workspace/a.txt","local_version":1,"remote_version":3,"resolution":"pending","created_at":"2026-06-30T00:03:00Z"}]}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:             1,
+		Root:                root,
+		RemotePath:          "/workspace",
+		ServerURL:           server.URL,
+		UserID:              "u1",
+		UserEmail:           "user@example.com",
+		DeviceID:            sourceDeviceID,
+		DeviceName:          "laptop",
+		DevicePlatform:      "windows",
+		LastAppliedChangeID: 4,
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
+	})
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("write updated file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "local.txt"), []byte("local"), 0o644); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	remoteVersion := int64(2)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+		Items: []manifest.Entry{
+			{Path: "/workspace/a.txt", RelativePath: "a.txt", Size: int64(len("old")), SHA256: testSHA([]byte("old")), RemoteVersion: &remoteVersion},
+		},
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	trashBatch := filepath.Join(root, ".synchub", "trash", "20260702T010000.000000000Z")
+	if err := os.MkdirAll(trashBatch, 0o755); err != nil {
+		t.Fatalf("mkdir trash: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trashBatch, "old.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("write trash: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-state.json"), syncAgentState{
+		Version:       1,
+		Root:          root,
+		Status:        "ok",
+		CyclesRun:     2,
+		LastSuccessAt: testTimePtr(time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC)),
+		UpdatedAt:     time.Date(2026, 7, 4, 1, 2, 4, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write agent state: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+		Version:   1,
+		Paused:    true,
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write agent control: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL:            server.URL,
+		User:                 clientUser("u1", "user@example.com"),
+		Tokens:               client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+		AccessTokenExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"status",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--show-remote",
+		"--show-conflicts",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "workspace:") {
+		t.Fatalf("json output includes text status: %s", stdout.String())
+	}
+
+	var status syncStatusSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("decode status json: %v\n%s", err, stdout.String())
+	}
+	if status.Workspace.Root != root || status.Workspace.DeviceID != sourceDeviceID {
+		t.Fatalf("workspace = %#v", status.Workspace)
+	}
+	if status.Manifest.Files != 1 || status.Manifest.RemoteTracked != 1 || status.Manifest.LocalOnly != 0 {
+		t.Fatalf("manifest = %#v", status.Manifest)
+	}
+	if status.PendingChanges.Total != 2 || status.PendingChanges.Created != 1 || status.PendingChanges.Updated != 1 {
+		t.Fatalf("pending changes = %#v", status.PendingChanges)
+	}
+	if status.Trash.Entries != 1 || status.Trash.Latest == nil || status.Trash.Latest.Path != "old.txt" {
+		t.Fatalf("trash = %#v", status.Trash)
+	}
+	if !status.Agent.HasRun || !status.Agent.Paused || status.Agent.State == nil || status.Agent.State.Status != "ok" {
+		t.Fatalf("agent = %#v", status.Agent)
+	}
+	if status.Remote == nil || status.Remote.Skipped || len(status.Remote.Changes) != 1 || status.Remote.Changes[0].Path != "/workspace/a.txt" {
+		t.Fatalf("remote = %#v", status.Remote)
+	}
+	if status.Conflicts == nil || len(status.Conflicts.Items) != 1 || status.Conflicts.Items[0].ID != "conf_1" {
+		t.Fatalf("conflicts = %#v", status.Conflicts)
+	}
+}
+
 func TestRunSyncStatusSkipsRemoteChangesWithoutDevice(t *testing.T) {
 	root := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -535,6 +674,34 @@ func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "manifest: missing") {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunSyncStatusMissingManifestCanOutputJSON(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "status", "--path", root, "--json"}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "manifest: missing") {
+		t.Fatalf("json output includes text status: %s", stdout.String())
+	}
+
+	var status syncStatusSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("decode status json: %v\n%s", err, stdout.String())
+	}
+	if !status.Manifest.Missing {
+		t.Fatalf("manifest missing = false: %#v", status.Manifest)
+	}
+	if status.Next != "run synchub-cli sync once --path ." {
+		t.Fatalf("next = %q", status.Next)
+	}
+	if status.PendingChanges.Total != 0 || status.Trash.Entries != 0 || status.Agent.HasRun {
+		t.Fatalf("status should stop at missing manifest: %#v", status)
 	}
 }
 

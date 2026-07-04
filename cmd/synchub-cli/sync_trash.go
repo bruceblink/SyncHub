@@ -12,10 +12,10 @@ import (
 )
 
 type trashEntry struct {
-	Batch string
-	Path  string
-	Size  int64
-	IsDir bool
+	Batch string `json:"batch"`
+	Path  string `json:"path"`
+	Size  int64  `json:"size"`
+	IsDir bool   `json:"is_dir"`
 }
 
 func runSyncTrash(args []string, stdout, stderr io.Writer) error {
