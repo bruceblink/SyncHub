@@ -164,25 +164,23 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 		if errors.Is(err, os.ErrNotExist) {
 			status.Manifest.Missing = true
 			status.Next = "run synchub-cli sync once --path ."
-			if *jsonOutput {
-				return writeSyncStatusJSON(stdout, status)
-			}
-			return printSyncStatusText(stdout, status)
+		} else {
+			return err
 		}
-		return err
+	} else {
+		remoteTracked, localOnly, minRemoteVersion, maxRemoteVersion := manifestRemoteVersionSummary(m.Items)
+		status.Manifest.Files = len(m.Items)
+		status.Manifest.RemoteTracked = remoteTracked
+		status.Manifest.LocalOnly = localOnly
+		status.Manifest.RemoteVersionRange = syncStatusVersionRange{Min: minRemoteVersion, Max: maxRemoteVersion}
+		lastScan := m.GeneratedAt
+		status.Manifest.LastScan = &lastScan
+		changes, err := scanManifestChanges(ctx, root, workspace.RemotePath, localManifestPath)
+		if err != nil {
+			return err
+		}
+		status.PendingChanges = syncStatusChangeSummaryFromChanges(changes)
 	}
-	remoteTracked, localOnly, minRemoteVersion, maxRemoteVersion := manifestRemoteVersionSummary(m.Items)
-	status.Manifest.Files = len(m.Items)
-	status.Manifest.RemoteTracked = remoteTracked
-	status.Manifest.LocalOnly = localOnly
-	status.Manifest.RemoteVersionRange = syncStatusVersionRange{Min: minRemoteVersion, Max: maxRemoteVersion}
-	lastScan := m.GeneratedAt
-	status.Manifest.LastScan = &lastScan
-	changes, err := scanManifestChanges(ctx, root, workspace.RemotePath, localManifestPath)
-	if err != nil {
-		return err
-	}
-	status.PendingChanges = syncStatusChangeSummaryFromChanges(changes)
 	trash, err := syncStatusTrashSummary(root)
 	if err != nil {
 		return err
@@ -235,9 +233,16 @@ func printSyncStatusText(stdout io.Writer, status syncStatusSnapshot) error {
 	}
 	if status.Manifest.Missing {
 		fmt.Fprintln(stdout, "manifest: missing")
-		if strings.TrimSpace(status.Next) != "" {
-			fmt.Fprintf(stdout, "next: %s\n", status.Next)
+		printSyncStatusChanges(stdout, status.PendingChanges)
+		printSyncStatusTrash(stdout, status.Trash)
+		printSyncStatusAgent(stdout, status.Agent)
+		if status.Remote != nil {
+			printSyncStatusRemote(stdout, *status.Remote)
 		}
+		if status.Conflicts != nil {
+			printSyncStatusConflicts(stdout, *status.Conflicts)
+		}
+		printSyncStatusNext(stdout, status)
 		return nil
 	}
 	fmt.Fprintf(stdout, "manifest: %s\n", status.Manifest.Path)
@@ -263,7 +268,14 @@ func printSyncStatusText(stdout io.Writer, status syncStatusSnapshot) error {
 	if status.Conflicts != nil {
 		printSyncStatusConflicts(stdout, *status.Conflicts)
 	}
+	printSyncStatusNext(stdout, status)
 	return nil
+}
+
+func printSyncStatusNext(stdout io.Writer, status syncStatusSnapshot) {
+	if strings.TrimSpace(status.Next) != "" {
+		fmt.Fprintf(stdout, "next: %s\n", status.Next)
+	}
 }
 
 func syncStatusChangeSummaryFromChanges(changes []watch.Change) syncStatusChangeSummary {

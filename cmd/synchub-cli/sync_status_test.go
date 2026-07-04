@@ -668,20 +668,52 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
 	root := t.TempDir()
 	writeTestWorkspaceConfig(t, root)
+	trashBatch := filepath.Join(root, ".synchub", "trash", "20260702T010000.000000000Z")
+	if err := os.MkdirAll(trashBatch, 0o755); err != nil {
+		t.Fatalf("mkdir trash: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trashBatch, "old.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("write trash: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+		Version:   1,
+		Paused:    true,
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write agent control: %v", err)
+	}
 
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("sync status: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "manifest: missing") {
-		t.Fatalf("stdout = %q", stdout.String())
+	out := stdout.String()
+	for _, want := range []string{
+		"manifest: missing",
+		"pending changes: 0",
+		"trash entries: 1",
+		"latest trash: 20260702T010000.000000000Z old.txt",
+		"agent: not run",
+		"agent paused: yes",
+		"next: run synchub-cli sync once --path .",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
 	}
 }
 
 func TestRunSyncStatusMissingManifestCanOutputJSON(t *testing.T) {
 	root := t.TempDir()
 	writeTestWorkspaceConfig(t, root)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+		Version:   1,
+		Paused:    true,
+		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write agent control: %v", err)
+	}
 
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{"sync", "status", "--path", root, "--json"}, &stdout, &bytes.Buffer{})
@@ -702,8 +734,75 @@ func TestRunSyncStatusMissingManifestCanOutputJSON(t *testing.T) {
 	if status.Next != "run synchub-cli sync once --path ." {
 		t.Fatalf("next = %q", status.Next)
 	}
-	if status.PendingChanges.Total != 0 || status.Trash.Entries != 0 || status.Agent.HasRun {
-		t.Fatalf("status should stop at missing manifest: %#v", status)
+	if status.PendingChanges.Total != 0 || status.Trash.Entries != 0 || status.Agent.HasRun || !status.Agent.Paused || status.Agent.Control == nil {
+		t.Fatalf("status = %#v", status)
+	}
+}
+
+func TestRunSyncStatusMissingManifestCanShowRemoteChanges(t *testing.T) {
+	root := t.TempDir()
+	changesRequested := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sync/changes" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("device_id"); got != "dev_1" {
+			t.Fatalf("device_id = %q", got)
+		}
+		changesRequested = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[{"id":6,"file_id":"file_1","event_type":"update","version":3,"path":"/workspace/a.txt","created_at":"2026-06-30T00:02:00Z"}],"next_cursor":6}}`))
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:             1,
+		Root:                root,
+		RemotePath:          "/workspace",
+		ServerURL:           server.URL,
+		UserID:              "u1",
+		UserEmail:           "user@example.com",
+		DeviceID:            "dev_1",
+		LastAppliedChangeID: 4,
+	})
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL:            server.URL,
+		User:                 clientUser("u1", "user@example.com"),
+		Tokens:               client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+		AccessTokenExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"status",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--show-remote",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status missing manifest remote changes: %v", err)
+	}
+	if !changesRequested {
+		t.Fatal("changes endpoint was not called")
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"manifest: missing",
+		"remote changes: 1",
+		"update /workspace/a.txt version=3 id=6",
+		"remote next cursor: 6",
+		"next: run synchub-cli sync once --path .",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
 	}
 }
 
