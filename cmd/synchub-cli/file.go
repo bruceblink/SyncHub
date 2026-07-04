@@ -60,6 +60,7 @@ func runFileList(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	remotePath := fs.String("remote-path", "", "remote parent directory path")
 	cursor := fs.String("cursor", "", "page cursor returned by a previous file list")
 	pageSize := fs.Int("page-size", 100, "maximum files to list")
+	jsonOutput := fs.Bool("json", false, "print file list as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -80,6 +81,9 @@ func runFileList(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	files, err := session.apiClient.ListFiles(ctx, session.accessToken, parent, *cursor, int32(*pageSize))
 	if err != nil {
 		return err
+	}
+	if *jsonOutput {
+		return writeFileListJSON(stdout, session.workspace, parent, *cursor, files)
 	}
 	printFileList(stdout, files)
 	return nil
@@ -642,6 +646,14 @@ type fileVersionsSnapshot struct {
 	Items     []client.FileVersion `json:"items"`
 }
 
+type fileListSnapshot struct {
+	Workspace  syncFileWorkspace `json:"workspace"`
+	ParentID   string            `json:"parent_id,omitempty"`
+	Cursor     string            `json:"cursor,omitempty"`
+	NextCursor string            `json:"next_cursor,omitempty"`
+	Items      []client.FileNode `json:"items"`
+}
+
 type fileRestoreSnapshot struct {
 	Workspace syncFileWorkspace             `json:"workspace"`
 	File      fileVersionsTarget            `json:"file"`
@@ -665,6 +677,29 @@ type syncFileWorkspace struct {
 type fileVersionsTarget struct {
 	ID   string `json:"id"`
 	Path string `json:"path,omitempty"`
+}
+
+func writeFileListJSON(stdout io.Writer, workspace workspaceConfig, parentID *string, cursor string, files client.FileList) error {
+	snapshot := fileListSnapshot{
+		Workspace: syncFileWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		Cursor:     strings.TrimSpace(cursor),
+		NextCursor: files.NextCursor,
+		Items:      files.Items,
+	}
+	if parentID != nil {
+		snapshot.ParentID = strings.TrimSpace(*parentID)
+	}
+	if snapshot.Items == nil {
+		snapshot.Items = []client.FileNode{}
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func writeFileVersionsJSON(stdout io.Writer, workspace workspaceConfig, remotePath, fileID string, versions []client.FileVersion) error {
