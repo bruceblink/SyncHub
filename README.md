@@ -91,6 +91,7 @@ Minimal CLI flow:
 ```bash
 go run ./cmd/synchub-cli register --server http://localhost:8765 --email user@example.com --password password
 go run ./cmd/synchub-cli workspace init --path . --remote-path /workspace
+go run ./cmd/synchub-cli sync doctor --path .
 go run ./cmd/synchub-cli sync once --path . --dry-run
 go run ./cmd/synchub-cli sync once --path .
 go run ./cmd/synchub-cli sync status --path .
@@ -98,6 +99,7 @@ go run ./cmd/synchub-cli sync trash --path .
 go run ./cmd/synchub-cli sync devices --path .
 ```
 
+Use `sync doctor` to check workspace config, login config, API readiness, auth, device registration, manifest state, and agent pause state before manual testing.
 Use `sync once --dry-run` before applying changes if you want to inspect the local push plan and incoming change feed.
 Use `sync trash` to inspect local files moved aside after remote delete events.
 `sync status` also shows a local trash summary when these files exist.

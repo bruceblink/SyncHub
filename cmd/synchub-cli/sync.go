@@ -17,6 +17,8 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runSyncOnce(ctx, args[1:], stdout, stderr)
 	case "status":
 		return runSyncStatus(ctx, args[1:], stdout, stderr)
+	case "doctor":
+		return runSyncDoctor(ctx, args[1:], stdout, stderr)
 	case "push":
 		return runSyncPush(ctx, args[1:], stdout, stderr)
 	case "pull":

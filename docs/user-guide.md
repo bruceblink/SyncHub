@@ -129,6 +129,15 @@ go run .\cmd\synchub-cli workspace init --path $deviceA --remote-path /workspace
 go run .\cmd\synchub-cli workspace init --path $deviceB --remote-path /workspace --config $login
 ```
 
+同步前可以先运行诊断命令，集中检查工作区配置、登录配置、服务端 ready、认证、设备注册、manifest 和 Agent 暂停状态：
+
+```powershell
+go run .\cmd\synchub-cli sync doctor --path $deviceA --config $login
+go run .\cmd\synchub-cli sync doctor --path $deviceA --config $login --json
+```
+
+如果只出现 `warn`，通常表示还缺少第一次同步产生的状态，例如设备 ID 或 manifest；按输出里的 `next` 命令继续即可。如果出现 `fail`，先修复登录、服务端或工作区配置问题。
+
 ## 5. 验证上传和下载同步
 
 在设备 A 创建文件：
@@ -318,6 +327,7 @@ go run .\cmd\synchub-cli file download --path $deviceA --config $login --remote-
 ```powershell
 go run .\cmd\synchub-cli sync status --path $deviceA
 go run .\cmd\synchub-cli sync status --path $deviceA --json
+go run .\cmd\synchub-cli sync doctor --path $deviceA --config $login
 go run .\cmd\synchub-cli sync status --path $deviceA --config $login --show-remote --show-conflicts
 go run .\cmd\synchub-cli sync devices --path $deviceA --config $login
 go run .\cmd\synchub-cli sync conflicts --path $deviceA --config $login
