@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -238,6 +239,7 @@ func runFileVersions(ctx context.Context, args []string, stdout, stderr io.Write
 	remotePath := fs.String("remote-path", "", "remote file path")
 	fileID := fs.String("file-id", "", "remote file id")
 	limit := fs.Int("limit", 100, "maximum versions to list")
+	jsonOutput := fs.Bool("json", false, "print file versions as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -256,6 +258,9 @@ func runFileVersions(ctx context.Context, args []string, stdout, stderr io.Write
 	versions, err := session.apiClient.ListFileVersions(ctx, session.accessToken, id, int32(*limit))
 	if err != nil {
 		return err
+	}
+	if *jsonOutput {
+		return writeFileVersionsJSON(stdout, session.workspace, remote, id, versions.Items)
 	}
 	printFileVersions(stdout, remote, id, versions.Items)
 	return nil
@@ -593,6 +598,43 @@ func printFileVersions(stdout io.Writer, remotePath, fileID string, versions []c
 			version.ID,
 		)
 	}
+}
+
+type fileVersionsSnapshot struct {
+	Workspace syncFileWorkspace    `json:"workspace"`
+	File      fileVersionsTarget   `json:"file"`
+	Items     []client.FileVersion `json:"items"`
+}
+
+type syncFileWorkspace struct {
+	Root       string `json:"root"`
+	RemotePath string `json:"remote_path"`
+	UserEmail  string `json:"user_email"`
+	DeviceID   string `json:"device_id,omitempty"`
+}
+
+type fileVersionsTarget struct {
+	ID   string `json:"id"`
+	Path string `json:"path,omitempty"`
+}
+
+func writeFileVersionsJSON(stdout io.Writer, workspace workspaceConfig, remotePath, fileID string, versions []client.FileVersion) error {
+	snapshot := fileVersionsSnapshot{
+		Workspace: syncFileWorkspace{
+			Root:       workspace.Root,
+			RemotePath: workspace.RemotePath,
+			UserEmail:  workspace.UserEmail,
+			DeviceID:   workspace.DeviceID,
+		},
+		File: fileVersionsTarget{
+			ID:   fileID,
+			Path: remotePath,
+		},
+		Items: versions,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func formatOptionalTime(value *time.Time) string {
