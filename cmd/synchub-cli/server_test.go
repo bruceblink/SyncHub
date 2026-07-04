@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -37,6 +38,47 @@ func TestRunServerStatusShowsPublicHealthEndpoints(t *testing.T) {
 	want := "server: " + server.URL + "\nversion: SyncHub 0.1.0\nhealth: ok\nready: ready\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+	if strings.Join(requests, ",") != "/version,/healthz,/readyz" {
+		t.Fatalf("requests = %#v", requests)
+	}
+}
+
+func TestRunServerStatusCanOutputJSON(t *testing.T) {
+	requests := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/version":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"name":"SyncHub","version":"0.1.0"}}`))
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ok"}}`))
+		case "/readyz":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready"}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"server", "status", "--server", server.URL, "--json"}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server status json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "server:") {
+		t.Fatalf("json output includes text status output: %s", stdout.String())
+	}
+	var snapshot serverStatusSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode server status json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Server != server.URL || snapshot.Version.Name != "SyncHub" || snapshot.Version.Version != "0.1.0" {
+		t.Fatalf("snapshot version = %#v", snapshot)
+	}
+	if snapshot.Health.Status != "ok" || snapshot.Ready.Status != "ready" {
+		t.Fatalf("snapshot status = %#v", snapshot)
 	}
 	if strings.Join(requests, ",") != "/version,/healthz,/readyz" {
 		t.Fatalf("requests = %#v", requests)
@@ -234,5 +276,16 @@ func TestRunServerOpenAPIReportsFailure(t *testing.T) {
 	err := run(context.Background(), []string{"server", "openapi", "--server", server.URL}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "openapi check failed: openapi unavailable") {
 		t.Fatalf("error = %v, want openapi failure", err)
+	}
+}
+
+func TestRunServerHelpIncludesStatusJSONCommand(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"server", "help"}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server help: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "synchub-cli server status --server http://localhost:8765 --json") {
+		t.Fatalf("server help missing status json command: %s", stdout.String())
 	}
 }

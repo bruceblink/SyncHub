@@ -9,6 +9,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli version")
 	fmt.Fprintln(w, "  synchub-cli server status --server http://localhost:8765")
+	fmt.Fprintln(w, "  synchub-cli server status --server http://localhost:8765 --json")
 	fmt.Fprintln(w, "  synchub-cli server wait --server http://localhost:8765 --timeout 30s")
 	fmt.Fprintln(w, "  synchub-cli server metrics --server http://localhost:8765")
 	fmt.Fprintln(w, "  synchub-cli server openapi --server http://localhost:8765")
@@ -72,6 +73,7 @@ func printWorkspaceUsage(w io.Writer) {
 func printServerUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli server status --server http://localhost:8765")
+	fmt.Fprintln(w, "  synchub-cli server status --server http://localhost:8765 --json")
 	fmt.Fprintln(w, "  synchub-cli server wait --server http://localhost:8765 --timeout 30s")
 	fmt.Fprintln(w, "  synchub-cli server metrics --server http://localhost:8765")
 	fmt.Fprintln(w, "  synchub-cli server openapi --server http://localhost:8765")

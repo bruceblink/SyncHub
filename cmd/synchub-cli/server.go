@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,6 +42,7 @@ func runServerStatus(ctx context.Context, args []string, stdout, stderr io.Write
 	fs := flag.NewFlagSet("server status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	serverURL := fs.String("server", defaultServerURL, "server base URL")
+	jsonOutput := fs.Bool("json", false, "print server status as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -62,11 +64,33 @@ func runServerStatus(ctx context.Context, args []string, stdout, stderr io.Write
 		return fmt.Errorf("readiness check failed: %w", err)
 	}
 
+	if *jsonOutput {
+		return writeServerStatusJSON(stdout, api.BaseURL, version, health, ready)
+	}
 	fmt.Fprintf(stdout, "server: %s\n", api.BaseURL)
 	fmt.Fprintf(stdout, "version: %s %s\n", version.Name, version.Version)
 	fmt.Fprintf(stdout, "health: %s\n", health.Status)
 	fmt.Fprintf(stdout, "ready: %s\n", ready.Status)
 	return nil
+}
+
+type serverStatusSnapshot struct {
+	Server  string             `json:"server"`
+	Version client.VersionInfo `json:"version"`
+	Health  client.StatusInfo  `json:"health"`
+	Ready   client.StatusInfo  `json:"ready"`
+}
+
+func writeServerStatusJSON(stdout io.Writer, server string, version client.VersionInfo, health, ready client.StatusInfo) error {
+	snapshot := serverStatusSnapshot{
+		Server:  server,
+		Version: version,
+		Health:  health,
+		Ready:   ready,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func runServerWait(ctx context.Context, args []string, stdout, stderr io.Writer) error {
