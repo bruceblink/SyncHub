@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +16,18 @@ import (
 	"github.com/bruceblink/SyncHub/internal/watch"
 	"github.com/bruceblink/SyncHub/pkg/client"
 )
+
+type syncAgentState struct {
+	Version             int        `json:"version"`
+	Root                string     `json:"root"`
+	Status              string     `json:"status"`
+	CyclesRun           int        `json:"cycles_run"`
+	ConsecutiveFailures int        `json:"consecutive_failures"`
+	LastSuccessAt       *time.Time `json:"last_success_at"`
+	LastFailureAt       *time.Time `json:"last_failure_at"`
+	LastError           string     `json:"last_error"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
 
 func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
@@ -209,6 +222,9 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 	if err := printSyncStatusTrash(stdout, root); err != nil {
 		return err
 	}
+	if err := printSyncStatusAgent(stdout, root); err != nil {
+		return err
+	}
 	if *showRemote {
 		if err := printSyncStatusRemote(ctx, stdout, root, workspace, *loginConfigPath, *remoteLimit); err != nil {
 			return err
@@ -220,6 +236,43 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 		}
 	}
 	return nil
+}
+
+func printSyncStatusAgent(stdout io.Writer, root string) error {
+	state, ok, err := readSyncAgentState(root)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(stdout, "agent: not run")
+		return nil
+	}
+	fmt.Fprintf(stdout, "agent: %s\n", state.Status)
+	fmt.Fprintf(stdout, "agent cycles: %d\n", state.CyclesRun)
+	fmt.Fprintf(stdout, "agent consecutive failures: %d\n", state.ConsecutiveFailures)
+	fmt.Fprintf(stdout, "agent last success: %s\n", formatOptionalTime(state.LastSuccessAt))
+	fmt.Fprintf(stdout, "agent last failure: %s\n", formatOptionalTime(state.LastFailureAt))
+	if strings.TrimSpace(state.LastError) != "" {
+		fmt.Fprintf(stdout, "agent last error: %s\n", state.LastError)
+	}
+	fmt.Fprintf(stdout, "agent updated: %s\n", state.UpdatedAt.UTC().Format(time.RFC3339))
+	return nil
+}
+
+func readSyncAgentState(root string) (syncAgentState, bool, error) {
+	path := filepath.Join(root, ".synchub", "agent-state.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return syncAgentState{}, false, nil
+		}
+		return syncAgentState{}, false, err
+	}
+	var state syncAgentState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return syncAgentState{}, false, fmt.Errorf("read agent state: %w", err)
+	}
+	return state, true, nil
 }
 
 func printSyncStatusTrash(stdout io.Writer, root string) error {

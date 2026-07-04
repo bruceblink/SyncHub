@@ -66,6 +66,7 @@ func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
 		"last scan: 2026-06-30T01:02:03Z",
 		"pending changes: 0",
 		"trash entries: 0",
+		"agent: not run",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -108,6 +109,51 @@ func TestRunSyncStatusShowsLocalTrashSummary(t *testing.T) {
 	for _, want := range []string{
 		"trash entries: 2",
 		"latest trash: 20260702T010000.000000000Z new.txt",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunSyncStatusShowsAgentState(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-state.json"), syncAgentState{
+		Version:             1,
+		Root:                root,
+		Status:              "error",
+		CyclesRun:           3,
+		ConsecutiveFailures: 2,
+		LastFailureAt:       testTimePtr(time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC)),
+		LastError:           "sync failed",
+		UpdatedAt:           time.Date(2026, 7, 4, 1, 2, 4, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write agent state: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"sync", "status", "--path", root}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"agent: error",
+		"agent cycles: 3",
+		"agent consecutive failures: 2",
+		"agent last success: -",
+		"agent last failure: 2026-07-04T01:02:03Z",
+		"agent last error: sync failed",
+		"agent updated: 2026-07-04T01:02:04Z",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -438,4 +484,8 @@ func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
 	if !strings.Contains(stdout.String(), "manifest: missing") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
+}
+
+func testTimePtr(t time.Time) *time.Time {
+	return &t
 }
