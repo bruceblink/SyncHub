@@ -230,6 +230,34 @@ func TestRunServerMetricsPrintsPrometheusText(t *testing.T) {
 	}
 }
 
+func TestRunServerMetricsCanOutputJSON(t *testing.T) {
+	metrics := "# TYPE synchub_http_requests_total counter\nsynchub_http_requests_total 1\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/metrics" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_, _ = w.Write([]byte(metrics))
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"server", "metrics", "--server", server.URL, "--json"}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server metrics json: %v", err)
+	}
+	if strings.HasPrefix(stdout.String(), "# TYPE") {
+		t.Fatalf("json output includes raw metrics output: %s", stdout.String())
+	}
+	var snapshot serverMetricsSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode server metrics json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Server != server.URL || snapshot.Bytes != len([]byte(metrics)) || snapshot.Metrics != metrics {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
 func TestRunServerMetricsReportsFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -400,6 +428,7 @@ func TestRunServerHelpIncludesStatusJSONCommand(t *testing.T) {
 	for _, want := range []string{
 		"synchub-cli server status --server http://localhost:8765 --json",
 		"synchub-cli server wait --server http://localhost:8765 --timeout 30s --json",
+		"synchub-cli server metrics --server http://localhost:8765 --json",
 		"synchub-cli server openapi --server http://localhost:8765 --output ./openapi.yaml --json",
 	} {
 		if !strings.Contains(out, want) {

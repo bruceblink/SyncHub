@@ -167,6 +167,7 @@ func runServerMetrics(ctx context.Context, args []string, stdout, stderr io.Writ
 	fs := flag.NewFlagSet("server metrics", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	serverURL := fs.String("server", defaultServerURL, "server base URL")
+	jsonOutput := fs.Bool("json", false, "print server metrics as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -174,12 +175,33 @@ func runServerMetrics(ctx context.Context, args []string, stdout, stderr io.Writ
 		return errors.New("server URL is required")
 	}
 
-	metrics, err := client.New(*serverURL).Metrics(ctx)
+	api := client.New(*serverURL)
+	metrics, err := api.Metrics(ctx)
 	if err != nil {
 		return fmt.Errorf("metrics check failed: %w", err)
 	}
+	if *jsonOutput {
+		return writeServerMetricsJSON(stdout, api.BaseURL, metrics)
+	}
 	fmt.Fprint(stdout, metrics)
 	return nil
+}
+
+type serverMetricsSnapshot struct {
+	Server  string `json:"server"`
+	Bytes   int    `json:"bytes"`
+	Metrics string `json:"metrics"`
+}
+
+func writeServerMetricsJSON(stdout io.Writer, server, metrics string) error {
+	snapshot := serverMetricsSnapshot{
+		Server:  server,
+		Bytes:   len([]byte(metrics)),
+		Metrics: metrics,
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func runServerOpenAPI(ctx context.Context, args []string, stdout, stderr io.Writer) error {
