@@ -58,4 +58,4 @@ git push origin main
 git push origin v0.1.0
 ```
 
-Pushing a `v*` tag triggers the Release workflow. The workflow reruns the MVP gate, rebuilds and verifies release artifacts, then publishes the GitHub Release with the archives and `SHA256SUMS.txt`.
+Pushing a `v*` tag triggers the Release workflow. The workflow reruns the deterministic MVP gate, rebuilds and verifies release artifacts, then publishes the GitHub Release with the archives and `SHA256SUMS.txt`. The full local MVP gate above remains the pre-tag check for the local API smoke flow.

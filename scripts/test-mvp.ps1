@@ -1,6 +1,7 @@
 param(
     [string]$ProjectRoot = "",
-    [int]$Port = 18765
+    [int]$Port = 18765,
+    [switch]$SkipLocalApiSmoke
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,8 +49,10 @@ try {
     Invoke-ExternalStep -Name "go vet ./..." -FilePath "go" -Arguments @("vet", "./...")
     Invoke-ExternalStep -Name "go test ./..." -FilePath "go" -Arguments @("test", "./...")
 
-    Invoke-ScriptStep -Name "local API smoke" -Script {
-        & (Join-Path $ProjectRoot "scripts/test-local-api-smoke.ps1") -ProjectRoot $ProjectRoot -Port $Port
+    if (-not $SkipLocalApiSmoke) {
+        Invoke-ScriptStep -Name "local API smoke" -Script {
+            & (Join-Path $ProjectRoot "scripts/test-local-api-smoke.ps1") -ProjectRoot $ProjectRoot -Port $Port
+        }
     }
     Invoke-ScriptStep -Name "local backup restore smoke" -Script {
         & (Join-Path $ProjectRoot "scripts/test-local-backup-restore.ps1") -ProjectRoot $ProjectRoot
