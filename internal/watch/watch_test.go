@@ -82,6 +82,27 @@ func TestDiffDoesNotGuessAmbiguousMoves(t *testing.T) {
 	assertChange(t, changes[2], ChangeDeleted, "old.txt")
 }
 
+func TestRetainSkippedSnapshotEntriesPreventsFalseDelete(t *testing.T) {
+	previous := Snapshot{
+		"locked.tmp": entry("/workspace/locked.tmp", "locked.tmp", "locked"),
+		"keep.txt":   entry("/workspace/keep.txt", "keep.txt", "keep"),
+	}
+	current := Snapshot{
+		"keep.txt": entry("/workspace/keep.txt", "keep.txt", "keep"),
+	}
+
+	retainSkippedSnapshotEntries(current, previous, []manifest.Issue{{
+		Path:         "/workspace/locked.tmp",
+		RelativePath: "locked.tmp",
+		Err:          os.ErrPermission,
+	}})
+
+	changes := Diff(previous, current)
+	if len(changes) != 0 {
+		t.Fatalf("changes = %#v, want none", changes)
+	}
+}
+
 func TestPollerDetectsWorkspaceChanges(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "delete.txt"), "delete")

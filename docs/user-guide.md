@@ -481,7 +481,7 @@ Daemon 状态默认写入：
 
 ## 9. 忽略不需要同步的文件
 
-在工作区根目录创建 `.synchubignore`：
+在工作区根目录创建 `.synchubignore` 或 `.ignore`：
 
 ```text
 # build output
@@ -498,7 +498,7 @@ node_modules/
 - `dist/` 这类以 `/` 结尾的规则只匹配目录。
 - `*.log` 会匹配任意路径段里的日志文件。
 - 包含 `/` 的规则按工作区相对路径匹配，例如 `docs/*.tmp`。
-- `.synchub` 目录和 `.synchubignore` 文件本身不会被同步。
+- `.synchub` 目录、`.synchubignore` 和 `.ignore` 文件本身不会被同步。
 
 查看当前忽略规则：
 

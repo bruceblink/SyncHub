@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bruceblink/SyncHub/internal/manifest"
@@ -41,10 +42,12 @@ func NewPoller(ctx context.Context, root, remotePath string) (*Poller, error) {
 }
 
 func (p *Poller) Poll(ctx context.Context) ([]Change, error) {
-	current, err := Scan(ctx, p.root, p.remotePath)
+	m, err := manifest.Scan(ctx, p.root, p.remotePath)
 	if err != nil {
 		return nil, err
 	}
+	current := SnapshotFromManifest(m)
+	retainSkippedSnapshotEntries(current, p.snapshot, m.Skipped)
 	changes := Diff(p.snapshot, current)
 	p.snapshot = current
 	return changes, nil
@@ -88,6 +91,19 @@ func SnapshotFromManifest(m manifest.Manifest) Snapshot {
 		snapshot[item.RelativePath] = item
 	}
 	return snapshot
+}
+
+func retainSkippedSnapshotEntries(current, previous Snapshot, skipped []manifest.Issue) {
+	for _, issue := range skipped {
+		for relativePath, item := range previous {
+			if _, ok := current[relativePath]; ok {
+				continue
+			}
+			if relativePath == issue.RelativePath || strings.HasPrefix(relativePath, issue.RelativePath+"/") {
+				current[relativePath] = item
+			}
+		}
+	}
 }
 
 func Diff(previous, current Snapshot) []Change {

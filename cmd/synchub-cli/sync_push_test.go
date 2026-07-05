@@ -357,6 +357,107 @@ func TestRunSyncPushSkipsAlreadyUploadedChunks(t *testing.T) {
 	}
 }
 
+func TestRunSyncPushRetriesInactiveUploadSession(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("hello")
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	initCalls := 0
+	var idempotencyKeys []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer access" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/files/directories":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dir_1","name":"workspace","path":"/workspace","node_type":"directory","version":1}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads":
+			initCalls++
+			idempotencyKeys = append(idempotencyKeys, r.Header.Get("Idempotency-Key"))
+			if initCalls == 1 {
+				_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_expired","path":"/workspace/a.txt","chunk_size":3,"expires_at":"2026-06-30T00:00:00Z","status":"expired","uploaded_chunks":[]}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"upload_id":"upl_retry","path":"/workspace/a.txt","chunk_size":3,"expires_at":"2026-06-30T00:00:00Z","status":"pending","uploaded_chunks":[]}}`))
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/v1/uploads/upl_retry/chunks/"):
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"chunk_index":0,"size":3,"sha256":"ok"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads/upl_retry/commit":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"file_id":"file_1","version":1,"change_id":2}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+		DeviceID:   "dev_1",
+	})
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: server.URL,
+		User:      clientUser("u1", "user@example.com"),
+		Tokens:    client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"push",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	if initCalls != 2 {
+		t.Fatalf("init calls = %d, want 2", initCalls)
+	}
+	if len(idempotencyKeys) != 2 || idempotencyKeys[0] == idempotencyKeys[1] || !strings.Contains(idempotencyKeys[1], ":retry:") {
+		t.Fatalf("idempotency keys = %#v", idempotencyKeys)
+	}
+}
+
+func TestRetainSkippedManifestEntriesPreventsFalseDelete(t *testing.T) {
+	remoteVersion := int64(7)
+	current := manifest.Manifest{
+		Items: []manifest.Entry{
+			{Path: "/workspace/keep.txt", RelativePath: "keep.txt", Size: 4, SHA256: testSHA([]byte("keep"))},
+		},
+		Skipped: []manifest.Issue{
+			{Path: "/workspace/locked.tmp", RelativePath: "locked.tmp", Err: os.ErrPermission},
+		},
+	}
+	previous := manifest.Manifest{
+		Items: []manifest.Entry{
+			{Path: "/workspace/locked.tmp", RelativePath: "locked.tmp", Size: 6, SHA256: testSHA([]byte("locked")), RemoteVersion: &remoteVersion},
+			{Path: "/workspace/keep.txt", RelativePath: "keep.txt", Size: 4, SHA256: testSHA([]byte("keep"))},
+		},
+	}
+
+	if err := retainSkippedManifestEntries(&current, previous); err != nil {
+		t.Fatalf("retain skipped entries: %v", err)
+	}
+	paths, err := manifestPathSet(current)
+	if err != nil {
+		t.Fatalf("manifest path set: %v", err)
+	}
+	if _, ok := paths["/workspace/locked.tmp"]; !ok {
+		t.Fatalf("locked path was not retained: %#v", current.Items)
+	}
+}
+
 func TestRunSyncPushDiscoversNewLocalFiles(t *testing.T) {
 	root := t.TempDir()
 	content := []byte("new file")

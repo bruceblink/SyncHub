@@ -138,11 +138,13 @@ func runManifestIgnores(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	patterns := rules.Patterns()
-	ignoreFile := filepath.Join(root, ".synchubignore")
+	ignoreFiles := manifest.IgnoreFilePaths(root)
 	if *jsonOutput {
-		return writeManifestIgnoresJSON(stdout, root, ignoreFile, patterns)
+		return writeManifestIgnoresJSON(stdout, root, ignoreFiles, patterns)
 	}
-	fmt.Fprintf(stdout, "ignore file: %s\n", ignoreFile)
+	for _, ignoreFile := range ignoreFiles {
+		fmt.Fprintf(stdout, "ignore file: %s\n", ignoreFile)
+	}
 	fmt.Fprintf(stdout, "rules: %d\n", len(patterns))
 	for _, pattern := range patterns {
 		fmt.Fprintf(stdout, "%s\n", pattern)
@@ -151,19 +153,25 @@ func runManifestIgnores(args []string, stdout, stderr io.Writer) error {
 }
 
 type manifestIgnoresSnapshot struct {
-	Root       string   `json:"root"`
-	IgnoreFile string   `json:"ignore_file"`
-	Rules      []string `json:"rules"`
+	Root        string   `json:"root"`
+	IgnoreFile  string   `json:"ignore_file"`
+	IgnoreFiles []string `json:"ignore_files"`
+	Rules       []string `json:"rules"`
 }
 
-func writeManifestIgnoresJSON(stdout io.Writer, root, ignoreFile string, patterns []string) error {
+func writeManifestIgnoresJSON(stdout io.Writer, root string, ignoreFiles []string, patterns []string) error {
 	if patterns == nil {
 		patterns = []string{}
 	}
+	ignoreFile := ""
+	if len(ignoreFiles) > 0 {
+		ignoreFile = ignoreFiles[0]
+	}
 	snapshot := manifestIgnoresSnapshot{
-		Root:       root,
-		IgnoreFile: ignoreFile,
-		Rules:      patterns,
+		Root:        root,
+		IgnoreFile:  ignoreFile,
+		IgnoreFiles: ignoreFiles,
+		Rules:       patterns,
 	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")

@@ -4,16 +4,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
-const ignoreFileName = ".synchubignore"
+const primaryIgnoreFileName = ".synchubignore"
+
+var ignoreFileNames = []string{primaryIgnoreFileName, ".ignore"}
 
 type Manifest struct {
 	Version     int       `json:"version"`
@@ -21,6 +26,7 @@ type Manifest struct {
 	RemotePath  string    `json:"remote_path"`
 	GeneratedAt time.Time `json:"generated_at"`
 	Items       []Entry   `json:"items"`
+	Skipped     []Issue   `json:"-"`
 }
 
 type Entry struct {
@@ -30,6 +36,12 @@ type Entry struct {
 	ModTime       time.Time `json:"mtime"`
 	SHA256        string    `json:"sha256"`
 	RemoteVersion *int64    `json:"remote_version,omitempty"`
+}
+
+type Issue struct {
+	Path         string
+	RelativePath string
+	Err          error
 }
 
 func Scan(ctx context.Context, root, remotePath string) (Manifest, error) {
@@ -47,6 +59,17 @@ func Scan(ctx context.Context, root, remotePath string) (Manifest, error) {
 	}
 	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			if path != root && isTransientFileReadError(err) {
+				if relative, relErr := filepath.Rel(root, path); relErr == nil {
+					relative = filepath.ToSlash(relative)
+					result.Skipped = append(result.Skipped, Issue{
+						Path:         joinRemotePath(remotePath, relative),
+						RelativePath: relative,
+						Err:          err,
+					})
+				}
+				return nil
+			}
 			return err
 		}
 		select {
@@ -74,11 +97,19 @@ func Scan(ctx context.Context, root, remotePath string) (Manifest, error) {
 			return err
 		}
 		relative = filepath.ToSlash(relative)
-		if relative == ignoreFileName || ignoreRules.Match(relative, false) {
+		if isIgnoreFile(relative) || ignoreRules.Match(relative, false) {
 			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
+			if isTransientFileReadError(err) {
+				result.Skipped = append(result.Skipped, Issue{
+					Path:         joinRemotePath(remotePath, relative),
+					RelativePath: relative,
+					Err:          err,
+				})
+				return nil
+			}
 			return err
 		}
 		if !info.Mode().IsRegular() {
@@ -86,6 +117,14 @@ func Scan(ctx context.Context, root, remotePath string) (Manifest, error) {
 		}
 		sum, err := fileSHA256(path)
 		if err != nil {
+			if isTransientFileReadError(err) {
+				result.Skipped = append(result.Skipped, Issue{
+					Path:         joinRemotePath(remotePath, relative),
+					RelativePath: relative,
+					Err:          err,
+				})
+				return nil
+			}
 			return err
 		}
 		result.Items = append(result.Items, Entry{
@@ -103,6 +142,9 @@ func Scan(ctx context.Context, root, remotePath string) (Manifest, error) {
 	sort.Slice(result.Items, func(i, j int) bool {
 		return result.Items[i].RelativePath < result.Items[j].RelativePath
 	})
+	sort.Slice(result.Skipped, func(i, j int) bool {
+		return result.Skipped[i].RelativePath < result.Skipped[j].RelativePath
+	})
 	return result, nil
 }
 
@@ -114,29 +156,39 @@ type ignoreRule struct {
 }
 
 func LoadIgnoreRules(root string) (IgnoreRules, error) {
-	raw, err := os.ReadFile(filepath.Join(root, ignoreFileName))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+	rules := IgnoreRules{}
+	for _, name := range ignoreFileNames {
+		raw, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	lines := strings.Split(string(raw), "\n")
-	rules := make(IgnoreRules, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+		lines := strings.Split(string(raw), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			line = strings.TrimPrefix(filepath.ToSlash(line), "/")
+			directory := strings.HasSuffix(line, "/")
+			line = strings.TrimSuffix(line, "/")
+			if line == "" {
+				continue
+			}
+			rules = append(rules, ignoreRule{pattern: line, directory: directory})
 		}
-		line = strings.TrimPrefix(filepath.ToSlash(line), "/")
-		directory := strings.HasSuffix(line, "/")
-		line = strings.TrimSuffix(line, "/")
-		if line == "" {
-			continue
-		}
-		rules = append(rules, ignoreRule{pattern: line, directory: directory})
 	}
 	return rules, nil
+}
+
+func IgnoreFilePaths(root string) []string {
+	paths := make([]string, 0, len(ignoreFileNames))
+	for _, name := range ignoreFileNames {
+		paths = append(paths, filepath.Join(root, name))
+	}
+	return paths
 }
 
 func (rules IgnoreRules) Match(relativePath string, directory bool) bool {
@@ -181,6 +233,16 @@ func matchIgnoreRule(pattern, relativePath string) bool {
 	return false
 }
 
+func isIgnoreFile(relativePath string) bool {
+	relativePath = strings.TrimPrefix(filepath.ToSlash(relativePath), "/")
+	for _, name := range ignoreFileNames {
+		if relativePath == name {
+			return true
+		}
+	}
+	return false
+}
+
 func fileSHA256(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -193,6 +255,23 @@ func fileSHA256(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func isTransientFileReadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) || os.IsPermission(err) {
+		return true
+	}
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno == 32 || errno == 33
+	}
+	return false
 }
 
 func normalizeRemotePath(p string) string {

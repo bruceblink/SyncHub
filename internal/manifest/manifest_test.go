@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -40,12 +42,15 @@ func TestScan(t *testing.T) {
 func TestScanHonorsSynchubIgnore(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, ".synchubignore"), "# local build artifacts\n*.tmp\nbuild/\nlogs/*.log\n")
+	writeFile(t, filepath.Join(root, ".ignore"), "cache/\n*.secret\n")
 	writeFile(t, filepath.Join(root, "keep.txt"), "keep")
 	writeFile(t, filepath.Join(root, "scratch.tmp"), "temporary")
 	writeFile(t, filepath.Join(root, "build", "app.bin"), "binary")
+	writeFile(t, filepath.Join(root, "cache", "state.db"), "cache")
 	writeFile(t, filepath.Join(root, "logs", "debug.log"), "log")
 	writeFile(t, filepath.Join(root, "logs", "keep.txt"), "keep log note")
 	writeFile(t, filepath.Join(root, "nested", "scratch.tmp"), "nested temporary")
+	writeFile(t, filepath.Join(root, "nested", "token.secret"), "secret")
 
 	m, err := Scan(context.Background(), root, "/workspace")
 	if err != nil {
@@ -58,6 +63,30 @@ func TestScanHonorsSynchubIgnore(t *testing.T) {
 	want := []string{"keep.txt", "logs/keep.txt"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("items = %v, want %v", got, want)
+	}
+}
+
+func TestIgnoreFilePathsIncludesSupportedWorkspaceIgnoreFiles(t *testing.T) {
+	root := t.TempDir()
+	paths := IgnoreFilePaths(root)
+	want := []string{filepath.Join(root, ".synchubignore"), filepath.Join(root, ".ignore")}
+	if strings.Join(paths, ",") != strings.Join(want, ",") {
+		t.Fatalf("paths = %v, want %v", paths, want)
+	}
+}
+
+func TestTransientFileReadErrorTreatsPermissionAsSkippable(t *testing.T) {
+	if !isTransientFileReadError(&os.PathError{Op: "open", Path: "locked", Err: os.ErrPermission}) {
+		t.Fatal("permission error should be skippable")
+	}
+}
+
+func TestTransientFileReadErrorTreatsWindowsSharingViolationAsSkippable(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-specific sharing violation")
+	}
+	if !isTransientFileReadError(&os.PathError{Op: "open", Path: "locked", Err: syscall.Errno(32)}) {
+		t.Fatal("windows sharing violation should be skippable")
 	}
 }
 

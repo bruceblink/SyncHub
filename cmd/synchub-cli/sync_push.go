@@ -14,6 +14,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -78,6 +79,9 @@ func runSyncPush(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	if err := mergePushManifestRemoteVersions(&currentManifest, m); err != nil {
+		return err
+	}
+	if err := retainSkippedManifestEntries(&currentManifest, m); err != nil {
 		return err
 	}
 	previousEntries, err := manifestEntriesByPath(m)
@@ -621,6 +625,59 @@ func mergePushManifestRemoteVersions(current *manifest.Manifest, previous manife
 	return nil
 }
 
+func retainSkippedManifestEntries(current *manifest.Manifest, previous manifest.Manifest) error {
+	if len(current.Skipped) == 0 {
+		return nil
+	}
+	currentEntries := make(map[string]struct{}, len(current.Items))
+	for _, item := range current.Items {
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			return err
+		}
+		currentEntries[path] = struct{}{}
+	}
+	skipped := make([]string, 0, len(current.Skipped))
+	for _, issue := range current.Skipped {
+		path, err := normalizeRemotePath(issue.Path)
+		if err != nil {
+			return err
+		}
+		skipped = append(skipped, path)
+	}
+	for _, item := range previous.Items {
+		path, err := normalizeRemotePath(item.Path)
+		if err != nil {
+			return err
+		}
+		if !isSkippedManifestPath(path, skipped) {
+			continue
+		}
+		if _, ok := currentEntries[path]; ok {
+			continue
+		}
+		current.Items = append(current.Items, item)
+		currentEntries[path] = struct{}{}
+	}
+	sortManifestItems(current.Items)
+	return nil
+}
+
+func isSkippedManifestPath(path string, skipped []string) bool {
+	for _, skippedPath := range skipped {
+		if path == skippedPath || strings.HasPrefix(path, skippedPath+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func sortManifestItems(items []manifest.Entry) {
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].RelativePath < items[j].RelativePath
+	})
+}
+
 func manifestPathSet(m manifest.Manifest) (map[string]struct{}, error) {
 	paths := make(map[string]struct{}, len(m.Items))
 	for _, item := range m.Items {
@@ -655,13 +712,14 @@ func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessTo
 	if err := ensureRemoteDirectories(ctx, apiClient, accessToken, workspace.DeviceID, item.Path, createdDirs); err != nil {
 		return 0, err
 	}
-	session, err := apiClient.InitUpload(ctx, accessToken, client.InitUploadRequest{
+	req := client.InitUploadRequest{
 		Path:        item.Path,
 		Size:        item.Size,
 		SHA256:      item.SHA256,
 		BaseVersion: item.RemoteVersion,
 		DeviceID:    workspace.DeviceID,
-	}, uploadIdempotencyKey(item))
+	}
+	session, err := initUploadSession(ctx, apiClient, accessToken, req, uploadIdempotencyKey(item))
 	if err != nil {
 		return 0, err
 	}
@@ -673,6 +731,25 @@ func uploadManifestEntry(ctx context.Context, apiClient *client.Client, accessTo
 		return 0, err
 	}
 	return commit.Version, nil
+}
+
+func initUploadSession(ctx context.Context, apiClient *client.Client, accessToken string, req client.InitUploadRequest, idempotencyKey string) (client.UploadSession, error) {
+	session, err := apiClient.InitUpload(ctx, accessToken, req, idempotencyKey)
+	if err != nil {
+		return client.UploadSession{}, err
+	}
+	if uploadSessionAcceptsChunks(session) || strings.TrimSpace(idempotencyKey) == "" {
+		return session, nil
+	}
+	return apiClient.InitUpload(ctx, accessToken, req, retryUploadIdempotencyKey(idempotencyKey))
+}
+
+func uploadSessionAcceptsChunks(session client.UploadSession) bool {
+	return strings.EqualFold(strings.TrimSpace(session.Status), "pending")
+}
+
+func retryUploadIdempotencyKey(idempotencyKey string) string {
+	return idempotencyKey + ":retry:" + syncPushNow().UTC().Format("20060102T150405.000000000Z")
 }
 
 func conflictRemotePath(remotePath, device string, timestamp time.Time) string {
