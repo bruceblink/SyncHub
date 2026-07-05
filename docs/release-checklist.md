@@ -49,4 +49,4 @@ git status --short
 git log --oneline -5
 ```
 
-The worktree should be clean before tagging. Use `git tag v0.1.0` only after the MVP check and release build both pass.
+The worktree should be clean before tagging. Use `git tag --no-sign v0.1.0` only after the MVP check and release build both pass.
