@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-
-	"github.com/bruceblink/SyncHub/internal/version"
 )
 
 const defaultServerURL = "http://localhost:8765"
@@ -26,8 +24,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	switch args[0] {
 	case "version", "--version":
-		printVersion(stdout)
-		return nil
+		return runVersion(args[1:], stdout, stderr)
 	case "server":
 		return runServer(ctx, args[1:], stdout, stderr)
 	case "register":
@@ -53,8 +50,4 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		printUsage(stderr)
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
-}
-
-func printVersion(w io.Writer) {
-	fmt.Fprintf(w, "%s %s\n", version.Name, version.Version)
 }
