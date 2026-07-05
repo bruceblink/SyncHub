@@ -132,7 +132,7 @@ fly secrets set --app $env:FLY_APP JWT_SECRET="replace-with-a-long-random-secret
 fly deploy --config .\fly.toml
 ```
 
-如果使用 GitHub Actions 自动部署，在仓库 Secrets 中设置 `FLY_API_TOKEN`。之后推送到 `main` 时，CI 测试通过后会自动执行 Fly 部署。
+如果使用自动部署，推荐启用 Fly.io 的 GitHub 集成。之后推送到 `main` 时，GitHub 会显示独立的 `Fly.io` 部署检查；本仓库 CI 只负责测试。
 
 检查服务：
 

@@ -87,7 +87,7 @@ fly deploy --config .\fly.toml
 curl.exe -fsS https://synchub-your-name.fly.dev/readyz
 ```
 
-The CI workflow uses `superfly/flyctl-actions/setup-flyctl` and deploys from the project Dockerfile after the `main` branch test job passes. Configure `FLY_API_TOKEN` as a repository secret for automatic deployment.
+Automatic Fly.io deployment is handled by the Fly.io GitHub integration. The repository CI workflow stays test-only, and Fly.io reports a separate deployment check on push.
 
 ## 数据卷
 

@@ -178,7 +178,7 @@ fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-s
 fly deploy --config .\fly.toml
 ```
 
-GitHub Actions deploys the Fly app automatically after the `main` branch CI job passes. Configure the repository secret `FLY_API_TOKEN` before relying on CI deployment.
+For automatic deployment, enable the Fly.io GitHub integration for this repository. The repository CI stays focused on tests, while Fly.io reports its own deployment check on push.
 
 For a containerized local development server:
 
