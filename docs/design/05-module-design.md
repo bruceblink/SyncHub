@@ -10,21 +10,14 @@
 - 加载配置、初始化日志、数据库、storage、router。
 - 处理 graceful shutdown。
 
-### cmd/synchub-agent
-
-职责：
-
-- Agent 进程入口。
-- 文件监听、本地 manifest 扫描、同步循环。
-- 与服务端执行 pull / push / ack。
-
 ### cmd/synchub-cli
 
 职责：
 
 - CLI 入口。
 - login、workspace init、sync、status、pull、push 等命令。
-- 与 Agent local API 或服务端 API 交互。
+- 提供内置 daemon 模式，负责文件监听、本地 manifest 扫描和同步循环。
+- 与服务端 API 交互。
 
 ### internal/api
 
@@ -127,6 +120,14 @@ type Storage interface {
 - 冲突检测。
 - 同步计划生成。
 
+### internal/syncdaemon
+
+职责：
+
+- CLI daemon 的同步循环、状态文件和暂停控制文件。
+- 监听本地 workspace 变化，并复用 `sync once` 逻辑执行 push / pull。
+- 只作为 CLI 内部包使用，不再发布独立同步二进制。
+
 ### internal/worker
 
 职责：
@@ -145,7 +146,7 @@ Later：
 职责：
 
 - 可选的 Go API client。
-- 供 CLI / Agent-style commands 复用。
+- 供 CLI commands 复用。
 - 只暴露稳定 API，不暴露 internal 包。
 
 ## 依赖方向

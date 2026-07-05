@@ -135,8 +135,7 @@ New-Item -ItemType Directory -Path $releaseRoot | Out-Null
 
 $binaries = @(
     @{ Name = "synchub-api"; Package = "./cmd/synchub-api" },
-    @{ Name = "synchub-cli"; Package = "./cmd/synchub-cli" },
-    @{ Name = "synchub-agent"; Package = "./cmd/synchub-agent" }
+    @{ Name = "synchub-cli"; Package = "./cmd/synchub-cli" }
 )
 $archiveTool = Join-Path (Join-Path $ProjectRoot "scripts") "release-targz.go"
 $deploymentFiles = @("docker-compose.release.yml", "fly.toml")

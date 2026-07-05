@@ -1,4 +1,4 @@
-package main
+package syncdaemon
 
 import (
 	"bytes"
@@ -184,7 +184,7 @@ func TestRunStatusShowsAgentState(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"agent: error",
+		"daemon: error",
 		"workspace: " + root,
 		"paused: false",
 		"cycles: 3",
@@ -214,7 +214,7 @@ func TestRunStatusShowsNotRunWithoutState(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for status")
 	}
-	want := "agent: not run\nworkspace: " + root + "\npaused: false\n"
+	want := "daemon: not run\nworkspace: " + root + "\npaused: false\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -238,7 +238,7 @@ func TestRunStatusShowsPausedControlWithoutState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent status: %v", err)
 	}
-	want := "agent: not run\nworkspace: " + root + "\npaused: true\n"
+	want := "daemon: not run\nworkspace: " + root + "\npaused: true\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -272,7 +272,7 @@ func TestRunStatusCanOutputJSON(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for status")
 	}
-	if strings.Contains(stdout.String(), "agent:") {
+	if strings.Contains(stdout.String(), "daemon:") {
 		t.Fatalf("json output includes text status: %s", stdout.String())
 	}
 	var snapshot agentStatusSnapshot
@@ -351,7 +351,7 @@ func TestRunPauseWritesControlAndPausedState(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for pause")
 	}
-	want := "agent paused: " + root + "\n"
+	want := "daemon paused: " + root + "\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -383,7 +383,7 @@ func TestRunPauseCanOutputJSON(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for pause")
 	}
-	if strings.Contains(stdout.String(), "agent paused:") {
+	if strings.Contains(stdout.String(), "daemon paused:") {
 		t.Fatalf("json output includes text pause output: %s", stdout.String())
 	}
 	var snapshot agentControlSnapshot
@@ -431,11 +431,11 @@ func TestRunResumeClearsControlAndWritesIdleState(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for resume")
 	}
-	want := "agent resumed: " + root + "\n"
+	want := "daemon resumed: " + root + "\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".synchub", "agent-control.json")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(root, ".synchub", "daemon-control.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("control file still exists or stat failed: %v", err)
 	}
 	state := readAgentState(t, root)
@@ -477,7 +477,7 @@ func TestRunResumeCanOutputJSON(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for resume")
 	}
-	if strings.Contains(stdout.String(), "agent resumed:") {
+	if strings.Contains(stdout.String(), "daemon resumed:") {
 		t.Fatalf("json output includes text resume output: %s", stdout.String())
 	}
 	var snapshot agentControlSnapshot
@@ -487,7 +487,7 @@ func TestRunResumeCanOutputJSON(t *testing.T) {
 	if snapshot.Action != "resumed" || snapshot.Workspace.Root != root || snapshot.State.Status != "idle" || snapshot.State.CyclesRun != 4 || snapshot.Control != nil {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".synchub", "agent-control.json")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(root, ".synchub", "daemon-control.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("control file still exists or stat failed: %v", err)
 	}
 }
@@ -522,13 +522,13 @@ func TestRunResetStateRemovesStateAndControl(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for reset state")
 	}
-	want := "agent state reset: " + root + "\nremoved: agent-state.json, agent-control.json\n"
+	want := "daemon state reset: " + root + "\nremoved: daemon-state.json, daemon-control.json\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 	for _, path := range []string{
-		filepath.Join(root, ".synchub", "agent-state.json"),
-		filepath.Join(root, ".synchub", "agent-control.json"),
+		filepath.Join(root, ".synchub", "daemon-state.json"),
+		filepath.Join(root, ".synchub", "daemon-control.json"),
 	} {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("%s still exists or stat failed: %v", path, err)
@@ -559,17 +559,17 @@ func TestRunResetStateCanOutputJSON(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for reset state")
 	}
-	if strings.Contains(stdout.String(), "agent state reset:") {
+	if strings.Contains(stdout.String(), "daemon state reset:") {
 		t.Fatalf("json output includes text reset output: %s", stdout.String())
 	}
 	var snapshot agentResetSnapshot
 	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
 		t.Fatalf("decode reset json: %v\n%s", err, stdout.String())
 	}
-	if snapshot.Action != "reset_state" || snapshot.Workspace.Root != root || !reflect.DeepEqual(snapshot.Removed, []string{"agent-state.json"}) {
+	if snapshot.Action != "reset_state" || snapshot.Workspace.Root != root || !reflect.DeepEqual(snapshot.Removed, []string{"daemon-state.json"}) {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".synchub", "agent-state.json")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(root, ".synchub", "daemon-state.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("state file still exists or stat failed: %v", err)
 	}
 }
@@ -585,7 +585,7 @@ func TestRunResetStateReportsNoRemovedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reset missing agent state: %v", err)
 	}
-	want := "agent state reset: " + root + "\nremoved: none\n"
+	want := "daemon state reset: " + root + "\nremoved: none\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -634,14 +634,45 @@ func TestRunWatchTriggersSyncOnLocalChanges(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"agent started: " + root,
+		"daemon started: " + root,
 		"watch interval: 1ms",
 		"local changes detected: 1",
-		"agent stopped: sync cycles reached 2",
+		"daemon stopped: sync cycles reached 2",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
 		}
+	}
+}
+
+func TestRunDefaultsToWatchLoop(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".synchub"), 0o755); err != nil {
+		t.Fatalf("mkdir .synchub: %v", err)
+	}
+	workspacePath := filepath.Join(root, ".synchub", "workspace.json")
+	if err := writeAgentWorkspaceConfig(workspacePath, agentWorkspaceConfig{Root: root, RemotePath: "/workspace"}); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+
+	calls := 0
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"--path", root,
+		"--workspace-config", workspacePath,
+		"--cycles", "1",
+	}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run default daemon loop: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("sync calls = %d, want 1", calls)
+	}
+	if !strings.Contains(stdout.String(), "watch interval: 1s") {
+		t.Fatalf("stdout = %q, want default watch loop", stdout.String())
 	}
 }
 
@@ -700,6 +731,7 @@ func TestRunLoopStopsAfterMaxFailures(t *testing.T) {
 	wantErr := errors.New("sync failed")
 	err := run(context.Background(), []string{
 		"--path", root,
+		"--no-watch",
 		"--interval", "1ms",
 		"--max-failures", "2",
 	}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
@@ -723,6 +755,7 @@ func TestRunLoopStopsAfterCycles(t *testing.T) {
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{
 		"--path", root,
+		"--no-watch",
 		"--interval", "1ms",
 		"--cycles", "2",
 	}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
@@ -737,10 +770,10 @@ func TestRunLoopStopsAfterCycles(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"agent started: " + root,
+		"daemon started: " + root,
 		"sync interval: 1ms",
 		"sync completed: 2026-07-04T01:02:03Z",
-		"agent stopped: sync cycles reached 2",
+		"daemon stopped: sync cycles reached 2",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -765,6 +798,7 @@ func TestRunLoopSkipsSyncWhenPaused(t *testing.T) {
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{
 		"--path", root,
+		"--no-watch",
 		"--interval", "1ms",
 		"--cycles", "1",
 	}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
@@ -779,8 +813,8 @@ func TestRunLoopSkipsSyncWhenPaused(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"sync skipped: agent is paused",
-		"agent stopped: sync cycles reached 1",
+		"sync skipped: daemon is paused",
+		"daemon stopped: sync cycles reached 1",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -816,7 +850,7 @@ func TestRunOnceSkipsSyncWhenPaused(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called while paused")
 	}
-	if stdout.String() != "sync skipped: agent is paused\n" {
+	if stdout.String() != "sync skipped: daemon is paused\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	state := readAgentState(t, root)
@@ -857,7 +891,7 @@ func TestRunOnceJSONSkipsSyncWhenPaused(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
 		t.Fatalf("decode paused one-shot json: %v\n%s", err, stdout.String())
 	}
-	if snapshot.Action != "skipped" || !snapshot.Skipped || snapshot.Reason != "agent is paused" || snapshot.Workspace.Root != root || snapshot.State.Status != "paused" || snapshot.State.CyclesRun != 1 {
+	if snapshot.Action != "skipped" || !snapshot.Skipped || snapshot.Reason != "daemon is paused" || snapshot.Workspace.Root != root || snapshot.State.Status != "paused" || snapshot.State.CyclesRun != 1 {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
 }
@@ -868,6 +902,7 @@ func TestRunLoopReturnsFinalCycleError(t *testing.T) {
 	calls := 0
 	err := run(context.Background(), []string{
 		"--path", root,
+		"--no-watch",
 		"--interval", "1ms",
 		"--cycles", "2",
 	}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
@@ -922,24 +957,24 @@ func TestRunHelpPrintsUsage(t *testing.T) {
 	if called {
 		t.Fatal("runner should not be called for help")
 	}
-	if !strings.Contains(stdout.String(), "synchub-agent --path . --once --dry-run") || !strings.Contains(stdout.String(), "synchub-agent --path . --cycles 3") {
+	if !strings.Contains(stdout.String(), "synchub-cli sync daemon --path . --once --dry-run") || !strings.Contains(stdout.String(), "synchub-cli sync daemon --path . --cycles 3") {
 		t.Fatalf("usage output = %q", stdout.String())
 	}
 	for _, want := range []string{
-		"synchub-agent --path . --once --json",
-		"synchub-agent --path . --once --dry-run --json",
+		"synchub-cli sync daemon --path . --once --json",
+		"synchub-cli sync daemon --path . --once --dry-run --json",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("usage output missing %q: %q", want, stdout.String())
 		}
 	}
-	if !strings.Contains(stdout.String(), "synchub-agent --path . --status --json") {
+	if !strings.Contains(stdout.String(), "synchub-cli sync daemon --path . --status --json") {
 		t.Fatalf("usage output missing status json: %q", stdout.String())
 	}
 	for _, want := range []string{
-		"synchub-agent --path . --pause --json",
-		"synchub-agent --path . --resume --json",
-		"synchub-agent --path . --reset-state --json",
+		"synchub-cli sync daemon --path . --pause --json",
+		"synchub-cli sync daemon --path . --resume --json",
+		"synchub-cli sync daemon --path . --reset-state --json",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("usage output missing %q: %q", want, stdout.String())
@@ -1015,6 +1050,33 @@ func TestParseOptionsRejectsWatchWithOnce(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsWatchWithNoWatch(t *testing.T) {
+	_, err := parseOptions([]string{"--watch", "--no-watch"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "watch cannot be used with --no-watch") {
+		t.Fatalf("error = %v, want watch cannot be used with --no-watch", err)
+	}
+}
+
+func TestParseOptionsDefaultsToWatchForDaemonLoop(t *testing.T) {
+	opts, err := parseOptions([]string{}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parse options: %v", err)
+	}
+	if !opts.Watch {
+		t.Fatalf("watch = false, want true")
+	}
+}
+
+func TestParseOptionsCanDisableDefaultWatch(t *testing.T) {
+	opts, err := parseOptions([]string{"--no-watch"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parse options: %v", err)
+	}
+	if opts.Watch {
+		t.Fatalf("watch = true, want false")
+	}
+}
+
 func TestParseOptionsRejectsStatusWithOnce(t *testing.T) {
 	_, err := parseOptions([]string{"--status", "--once"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "status cannot be used with --once") {
@@ -1069,7 +1131,7 @@ func TestParseOptionsRejectsDryRunWithoutOnce(t *testing.T) {
 }
 
 func TestParseOptionsRejectsInvalidWatchInterval(t *testing.T) {
-	_, err := parseOptions([]string{"--watch", "--watch-interval", "0s"}, &bytes.Buffer{}, &bytes.Buffer{})
+	_, err := parseOptions([]string{"--watch-interval", "0s"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "watch interval must be positive") {
 		t.Fatalf("error = %v, want watch interval must be positive", err)
 	}
@@ -1120,7 +1182,7 @@ func writeAgentWorkspaceConfig(path string, cfg agentWorkspaceConfig) error {
 
 func readAgentState(t *testing.T, root string) agentState {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(root, ".synchub", "agent-state.json"))
+	raw, err := os.ReadFile(filepath.Join(root, ".synchub", "daemon-state.json"))
 	if err != nil {
 		t.Fatalf("read agent state: %v", err)
 	}
@@ -1133,7 +1195,7 @@ func readAgentState(t *testing.T, root string) agentState {
 
 func readAgentControl(t *testing.T, root string) agentControl {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(root, ".synchub", "agent-control.json"))
+	raw, err := os.ReadFile(filepath.Join(root, ".synchub", "daemon-control.json"))
 	if err != nil {
 		t.Fatalf("read agent control: %v", err)
 	}

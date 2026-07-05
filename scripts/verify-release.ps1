@@ -158,7 +158,7 @@ elseif (-not [System.IO.Path]::IsPathRooted($ReleaseDir)) {
 }
 $ReleaseDir = (Resolve-Path -LiteralPath $ReleaseDir).ProviderPath
 $archiveTool = Join-Path (Join-Path $ProjectRoot "scripts") "release-targz.go"
-$unixExecutableFiles = @("synchub-api", "synchub-cli", "synchub-agent")
+$unixExecutableFiles = @("synchub-api", "synchub-cli")
 $deploymentFiles = @("docker-compose.release.yml", "fly.toml")
 
 $checksumPath = Join-Path $ReleaseDir "SHA256SUMS.txt"
@@ -230,7 +230,7 @@ try {
         if ($goos -eq "windows") {
             $suffix = ".exe"
         }
-        foreach ($binary in @("synchub-api", "synchub-cli", "synchub-agent")) {
+        foreach ($binary in @("synchub-api", "synchub-cli")) {
             Assert-PathExists -Path (Join-Path $extractDir "$binary$suffix") -Message "$archiveName missing $binary$suffix"
         }
 
@@ -239,8 +239,10 @@ try {
             $cliVersion = Invoke-CheckedOutput -FilePath (Join-Path $extractDir "synchub-cli$suffix") -Arguments @("version")
             Assert-Equal -Actual $cliVersion.Trim() -Expected $expectedVersion -Message "CLI version mismatch"
 
-            $agentVersion = Invoke-CheckedOutput -FilePath (Join-Path $extractDir "synchub-agent$suffix") -Arguments @("--version")
-            Assert-Equal -Actual $agentVersion.Trim() -Expected $expectedVersion -Message "agent version mismatch"
+            $daemonHelp = Invoke-CheckedOutput -FilePath (Join-Path $extractDir "synchub-cli$suffix") -Arguments @("sync", "daemon", "--help")
+            if (-not $daemonHelp.Contains("synchub-cli sync daemon") -or -not $daemonHelp.Contains("synchub-cli sync daemon --path . --once")) {
+                throw "CLI daemon help is missing expected usage"
+            }
         }
     }
 }

@@ -91,7 +91,7 @@ func TestRunSyncDoctorShowsHealthyWorkspace(t *testing.T) {
 		"[ok] auth: token accepted; devices=1",
 		"[ok] device: dev_1 name=laptop platform=windows cursor=7",
 		"[ok] manifest:",
-		"[ok] agent: not paused",
+		"[ok] daemon: not paused",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -122,12 +122,12 @@ func TestRunSyncDoctorWarnsForMissingDeviceAndManifest(t *testing.T) {
 		UserID:     "u1",
 		UserEmail:  "user@example.com",
 	})
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-control.json"), syncAgentControl{
 		Version:   1,
 		Paused:    true,
 		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC),
 	}, 0o600); err != nil {
-		t.Fatalf("write agent control: %v", err)
+		t.Fatalf("write daemon control: %v", err)
 	}
 	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
 	if err := writeConfig(loginConfigPath, cliConfig{
@@ -163,8 +163,8 @@ func TestRunSyncDoctorWarnsForMissingDeviceAndManifest(t *testing.T) {
 	if !doctorReportHasCheck(report, "manifest", syncDoctorStatusWarn) {
 		t.Fatalf("missing manifest warning: %#v", report.Checks)
 	}
-	if !doctorReportHasCheck(report, "agent", syncDoctorStatusWarn) {
-		t.Fatalf("missing agent warning: %#v", report.Checks)
+	if !doctorReportHasCheck(report, "daemon", syncDoctorStatusWarn) {
+		t.Fatalf("missing daemon warning: %#v", report.Checks)
 	}
 	if len(report.Next) == 0 {
 		t.Fatalf("expected next steps: %#v", report)

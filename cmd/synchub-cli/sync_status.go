@@ -40,7 +40,7 @@ type syncStatusSnapshot struct {
 	Manifest       syncStatusManifest          `json:"manifest"`
 	PendingChanges syncStatusChangeSummary     `json:"pending_changes,omitempty"`
 	Trash          syncStatusTrashSummaryValue `json:"trash,omitempty"`
-	Agent          syncStatusAgentSummaryValue `json:"agent,omitempty"`
+	Daemon         syncStatusAgentSummaryValue `json:"daemon,omitempty"`
 	Remote         *syncStatusRemoteSummary    `json:"remote,omitempty"`
 	Conflicts      *syncStatusConflictSummary  `json:"conflicts,omitempty"`
 	Next           string                      `json:"next,omitempty"`
@@ -186,11 +186,11 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return err
 	}
 	status.Trash = trash
-	agent, err := syncStatusAgentSummary(root)
+	daemon, err := syncStatusAgentSummary(root)
 	if err != nil {
 		return err
 	}
-	status.Agent = agent
+	status.Daemon = daemon
 	if *showRemote {
 		remote, err := buildSyncStatusRemoteSummary(ctx, root, workspace, *loginConfigPath, *remoteLimit)
 		if err != nil {
@@ -236,7 +236,7 @@ func printSyncStatusText(stdout io.Writer, status syncStatusSnapshot) error {
 		fmt.Fprintln(stdout, "manifest: missing")
 		printSyncStatusChanges(stdout, status.PendingChanges)
 		printSyncStatusTrash(stdout, status.Trash)
-		printSyncStatusAgent(stdout, status.Agent)
+		printSyncStatusAgent(stdout, status.Daemon)
 		if status.Remote != nil {
 			printSyncStatusRemote(stdout, *status.Remote)
 		}
@@ -262,7 +262,7 @@ func printSyncStatusText(stdout io.Writer, status syncStatusSnapshot) error {
 	fmt.Fprintf(stdout, "last scan: %s\n", lastScan)
 	printSyncStatusChanges(stdout, status.PendingChanges)
 	printSyncStatusTrash(stdout, status.Trash)
-	printSyncStatusAgent(stdout, status.Agent)
+	printSyncStatusAgent(stdout, status.Daemon)
 	if status.Remote != nil {
 		printSyncStatusRemote(stdout, *status.Remote)
 	}
@@ -298,8 +298,8 @@ func syncStatusNextAction(status syncStatusSnapshot) string {
 			return "run synchub-cli sync pull --path ."
 		}
 	}
-	if status.Agent.Paused {
-		return "run synchub-agent --path . --resume"
+	if status.Daemon.Paused {
+		return "run synchub-cli sync daemon --path . --resume"
 	}
 	if status.Trash.Entries > 0 {
 		return "run synchub-cli sync trash --path ."
@@ -351,22 +351,22 @@ func syncStatusAgentSummary(root string) (syncStatusAgentSummaryValue, error) {
 
 func printSyncStatusAgent(stdout io.Writer, summary syncStatusAgentSummaryValue) {
 	if !summary.HasRun || summary.State == nil {
-		fmt.Fprintln(stdout, "agent: not run")
+		fmt.Fprintln(stdout, "daemon: not run")
 		if summary.Control != nil {
 			printSyncAgentControl(stdout, *summary.Control)
 		}
 		return
 	}
 	state := summary.State
-	fmt.Fprintf(stdout, "agent: %s\n", state.Status)
-	fmt.Fprintf(stdout, "agent cycles: %d\n", state.CyclesRun)
-	fmt.Fprintf(stdout, "agent consecutive failures: %d\n", state.ConsecutiveFailures)
-	fmt.Fprintf(stdout, "agent last success: %s\n", formatOptionalTime(state.LastSuccessAt))
-	fmt.Fprintf(stdout, "agent last failure: %s\n", formatOptionalTime(state.LastFailureAt))
+	fmt.Fprintf(stdout, "daemon: %s\n", state.Status)
+	fmt.Fprintf(stdout, "daemon cycles: %d\n", state.CyclesRun)
+	fmt.Fprintf(stdout, "daemon consecutive failures: %d\n", state.ConsecutiveFailures)
+	fmt.Fprintf(stdout, "daemon last success: %s\n", formatOptionalTime(state.LastSuccessAt))
+	fmt.Fprintf(stdout, "daemon last failure: %s\n", formatOptionalTime(state.LastFailureAt))
 	if strings.TrimSpace(state.LastError) != "" {
-		fmt.Fprintf(stdout, "agent last error: %s\n", state.LastError)
+		fmt.Fprintf(stdout, "daemon last error: %s\n", state.LastError)
 	}
-	fmt.Fprintf(stdout, "agent updated: %s\n", state.UpdatedAt.UTC().Format(time.RFC3339))
+	fmt.Fprintf(stdout, "daemon updated: %s\n", state.UpdatedAt.UTC().Format(time.RFC3339))
 	if summary.Control != nil {
 		printSyncAgentControl(stdout, *summary.Control)
 	}
@@ -377,12 +377,12 @@ func printSyncAgentControl(stdout io.Writer, control syncAgentControl) {
 	if control.Paused {
 		paused = "yes"
 	}
-	fmt.Fprintf(stdout, "agent paused: %s\n", paused)
-	fmt.Fprintf(stdout, "agent control updated: %s\n", control.UpdatedAt.UTC().Format(time.RFC3339))
+	fmt.Fprintf(stdout, "daemon paused: %s\n", paused)
+	fmt.Fprintf(stdout, "daemon control updated: %s\n", control.UpdatedAt.UTC().Format(time.RFC3339))
 }
 
 func readSyncAgentState(root string) (syncAgentState, bool, error) {
-	path := filepath.Join(root, ".synchub", "agent-state.json")
+	path := filepath.Join(root, ".synchub", "daemon-state.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -392,13 +392,13 @@ func readSyncAgentState(root string) (syncAgentState, bool, error) {
 	}
 	var state syncAgentState
 	if err := json.Unmarshal(raw, &state); err != nil {
-		return syncAgentState{}, false, fmt.Errorf("read agent state: %w", err)
+		return syncAgentState{}, false, fmt.Errorf("read daemon state: %w", err)
 	}
 	return state, true, nil
 }
 
 func readSyncAgentControl(root string) (syncAgentControl, bool, error) {
-	path := filepath.Join(root, ".synchub", "agent-control.json")
+	path := filepath.Join(root, ".synchub", "daemon-control.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -408,7 +408,7 @@ func readSyncAgentControl(root string) (syncAgentControl, bool, error) {
 	}
 	var control syncAgentControl
 	if err := json.Unmarshal(raw, &control); err != nil {
-		return syncAgentControl{}, false, fmt.Errorf("read agent control: %w", err)
+		return syncAgentControl{}, false, fmt.Errorf("read daemon control: %w", err)
 	}
 	return control, true, nil
 }

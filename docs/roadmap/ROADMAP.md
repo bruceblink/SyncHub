@@ -9,7 +9,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 项目目标之一是训练 Go 工程能力。
 - Go 在本项目中的开发体验和迭代效率优于 Rust。
 - SyncHub 的主要瓶颈预计在网络、磁盘、数据库和对象存储 IO，不存在必须依赖 Rust 才能解决的性能瓶颈。
-- 服务端、CLI 和 Agent 可以统一使用 Go，减少模型、协议、错误处理和构建流程割裂。
+- 服务端和 CLI daemon 可以统一使用 Go，减少模型、协议、错误处理和构建流程割裂。
 
 核心技术组合：
 
@@ -25,13 +25,13 @@ SyncHub 主技术栈确定为 Go + Gin。
 
 ## 总体目标
 
-先做一个可靠的个人开发者工作区同步闭环：单用户、多设备、SQLite、Local FS、CLI / Agent。
+先做一个可靠的个人开发者工作区同步闭环：单用户、多设备、SQLite、Local FS、CLI daemon。
 
 优先级顺序：
 
 1. 文件上传下载正确。
 2. 元数据、版本和变更日志正确。
-3. Agent 能稳定增量同步。
+3. CLI daemon 能稳定增量同步。
 4. 冲突不会静默覆盖用户文件。
 5. Docker 镜像发布、Linux Compose 部署和恢复流程稳定。
 
@@ -40,7 +40,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - WebDAV adapter。
 - S3 / OSS / MinIO storage backend。
 - 团队空间、共享目录和复杂权限模型。
-- Agent SDK、第三方客户端适配层、Web / desktop / mobile 客户端规划。
+- 独立客户端 SDK、第三方客户端适配层、Web / desktop / mobile 客户端规划。
 - PostgreSQL / MySQL 生产级 adapter，除非 SQLite 单机闭环已经稳定且出现明确瓶颈。
 
 ## Phase 0: Go 工程基础
@@ -52,8 +52,8 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 创建 Go module。
 - 建立目录结构：
   - `cmd/synchub-api`
-  - `cmd/synchub-agent`
   - `cmd/synchub-cli`
+  - `internal/syncdaemon`
   - `internal/api`
   - `internal/auth`
   - `internal/config`
@@ -167,7 +167,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - ETag 命中返回 304。
 - 下载不存在或无权限文件返回统一错误。
 
-## Phase 2: Agent 与增量同步
+## Phase 2: CLI daemon 与增量同步
 
 目标：打通多设备同步闭环。
 
@@ -199,14 +199,14 @@ SyncHub 主技术栈确定为 Go + Gin。
 - ack 后游标推进。
 - 游标失效时返回明确错误，引导 full scan。
 
-### 2.3 CLI / Agent MVP
+### 2.3 CLI daemon MVP
 
 任务：
 
 - CLI login：调用服务端登录 API，并将 token 写入本地配置。
 - workspace init：创建本地 `.synchub/workspace.json`，记录本地根目录、远端路径和登录上下文。
 - 本地 manifest 扫描：生成 `.synchub/manifest.json`，记录 path、relative_path、size、mtime、sha256。
-- 文件监听。
+- CLI daemon 文件监听。
 - push 本地新增 / 修改文件。
 - pull 服务端变更。
 - sync status：读取工作区配置和本地 manifest，展示本地同步准备状态。
@@ -292,11 +292,11 @@ SyncHub 主技术栈确定为 Go + Gin。
 
 ## Later: Client Adapter
 
-目标：在稳定 CLI / Agent 能力之上，再考虑任意客户端形态接入。GUI 不是当前路线。
+目标：在稳定 CLI daemon 能力之上，再考虑任意客户端形态接入。GUI 不是当前路线。
 
 任务：
 
-- 提供 Agent local API 或 IPC，用于外部客户端读取同步状态和触发操作。
+- 提供 CLI daemon local API 或 IPC，用于外部客户端读取同步状态和触发操作。
 - 固化客户端配置文件格式。
 - 提供客户端适配文档。
 - 提供 Web / desktop / mobile 接入建议，但不指定 GUI 框架。
@@ -329,4 +329,4 @@ SyncHub 主技术栈确定为 Go + Gin。
 7. 实现 Storage interface 和 Local FS backend。
 8. 实现 chunk upload 闭环。
 
-完成以上 8 步后，SyncHub 就具备继续做 Agent 同步的服务端基础。
+完成以上 8 步后，SyncHub 就具备继续做 CLI daemon 同步的服务端基础。

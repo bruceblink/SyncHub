@@ -36,7 +36,7 @@ The script writes the release deployment files, auxiliary Linux CLI/server archi
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.0
 ```
 
-The verifier checks the deployment compose file, expected archives, SHA256 hashes, required bundled files, and the host-platform CLI/agent version output.
+The verifier checks the deployment compose file, expected archives, SHA256 hashes, required bundled files, the host-platform CLI version output, and the integrated CLI daemon help.
 
 ## 5. Review Release Notes
 

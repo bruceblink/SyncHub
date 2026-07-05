@@ -1,4 +1,4 @@
-package main
+package syncdaemon
 
 import (
 	"context"
@@ -9,10 +9,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/bruceblink/SyncHub/internal/version"
@@ -41,6 +39,7 @@ type agentOptions struct {
 	Once                bool
 	DryRun              bool
 	Watch               bool
+	NoWatch             bool
 	Status              bool
 	JSON                bool
 	Pause               bool
@@ -49,6 +48,8 @@ type agentOptions struct {
 }
 
 type syncOnceRunner func(context.Context, agentOptions, io.Writer, io.Writer) error
+
+type SyncOnceArgsRunner func(context.Context, []string, io.Writer, io.Writer) error
 
 type agentWorkspaceConfig struct {
 	Root       string `json:"root"`
@@ -106,14 +107,17 @@ type agentCycleSnapshot struct {
 	State     agentState           `json:"state"`
 }
 
-func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return run(ctx, args, stdout, stderr, runSyncOnceCommand)
+}
 
-	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr, runSyncOnceCommand); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+func RunWithSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer, runner SyncOnceArgsRunner) error {
+	if runner == nil {
+		return errors.New("sync once runner is required")
 	}
+	return run(ctx, args, stdout, stderr, func(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
+		return runner(ctx, buildSyncOnceArgs(opts), stdout, stderr)
+	})
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner syncOnceRunner) error {
@@ -143,7 +147,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, runner sy
 		return runOnce(ctx, opts, stdout, stderr, runner)
 	}
 
-	fmt.Fprintf(stdout, "agent started: %s\n", opts.RootPath)
+	fmt.Fprintf(stdout, "daemon started: %s\n", opts.RootPath)
 	fmt.Fprintf(stdout, "sync interval: %s\n", opts.Interval)
 	if opts.Watch {
 		return runWatchLoop(ctx, opts, stdout, stderr, runner)
@@ -186,7 +190,7 @@ func runStatus(opts agentOptions, stdout io.Writer, jsonOutput bool) error {
 					Paused:    paused,
 				})
 			}
-			fmt.Fprintf(stdout, "agent: not run\n")
+			fmt.Fprintf(stdout, "daemon: not run\n")
 			fmt.Fprintf(stdout, "workspace: %s\n", root)
 			fmt.Fprintf(stdout, "paused: %t\n", paused)
 			return nil
@@ -202,7 +206,7 @@ func runStatus(opts agentOptions, stdout io.Writer, jsonOutput bool) error {
 			Paused:    paused,
 		})
 	}
-	fmt.Fprintf(stdout, "agent: %s\n", state.Status)
+	fmt.Fprintf(stdout, "daemon: %s\n", state.Status)
 	fmt.Fprintf(stdout, "workspace: %s\n", state.Root)
 	fmt.Fprintf(stdout, "paused: %t\n", paused)
 	fmt.Fprintf(stdout, "cycles: %d\n", state.CyclesRun)
@@ -251,7 +255,7 @@ func pauseAgent(opts agentOptions, stdout io.Writer, jsonOutput bool) error {
 			Control:   &control,
 		})
 	}
-	fmt.Fprintf(stdout, "agent paused: %s\n", root)
+	fmt.Fprintf(stdout, "daemon paused: %s\n", root)
 	return nil
 }
 
@@ -286,7 +290,7 @@ func resumeAgent(opts agentOptions, stdout io.Writer, jsonOutput bool) error {
 			State:     state,
 		})
 	}
-	fmt.Fprintf(stdout, "agent resumed: %s\n", root)
+	fmt.Fprintf(stdout, "daemon resumed: %s\n", root)
 	return nil
 }
 
@@ -324,7 +328,7 @@ func resetAgentState(opts agentOptions, stdout io.Writer, jsonOutput bool) error
 			Removed:   removed,
 		})
 	}
-	fmt.Fprintf(stdout, "agent state reset: %s\n", root)
+	fmt.Fprintf(stdout, "daemon state reset: %s\n", root)
 	if len(removed) == 0 {
 		fmt.Fprintln(stdout, "removed: none")
 		return nil
@@ -430,14 +434,14 @@ func (s *syncLoopState) runCycle(ctx context.Context, opts agentOptions, stdout,
 		}
 		state := agentPausedState(opts, s.cyclesRun+1, previousPtr)
 		if stateErr := writeAgentState(state); stateErr != nil {
-			fmt.Fprintf(stderr, "write agent state failed: %v\n", stateErr)
+			fmt.Fprintf(stderr, "write daemon state failed: %v\n", stateErr)
 		}
 		if opts.JSON {
 			if err := writeAgentCycleJSON(stdout, agentCycleSnapshot{
 				Action:    "skipped",
 				Workspace: agentStatusWorkspace{Root: agentSnapshotRoot(opts.RootPath)},
 				Skipped:   true,
-				Reason:    "agent is paused",
+				Reason:    "daemon is paused",
 				State:     state,
 			}); err != nil {
 				return false, err
@@ -445,10 +449,10 @@ func (s *syncLoopState) runCycle(ctx context.Context, opts agentOptions, stdout,
 			s.cyclesRun++
 			return shouldStopAfterCycles(opts, s.cyclesRun), nil
 		}
-		fmt.Fprintln(stdout, "sync skipped: agent is paused")
+		fmt.Fprintln(stdout, "sync skipped: daemon is paused")
 		s.cyclesRun++
 		if shouldStopAfterCycles(opts, s.cyclesRun) {
-			fmt.Fprintf(stdout, "agent stopped: sync cycles reached %d\n", s.cyclesRun)
+			fmt.Fprintf(stdout, "daemon stopped: sync cycles reached %d\n", s.cyclesRun)
 			return true, nil
 		}
 		return false, nil
@@ -458,7 +462,7 @@ func (s *syncLoopState) runCycle(ctx context.Context, opts agentOptions, stdout,
 		s.lastSkipped = false
 		s.consecutiveFailures++
 		if stateErr := writeAgentState(agentFailureState(opts, s.consecutiveFailures, s.cyclesRun+1, err)); stateErr != nil {
-			fmt.Fprintf(stderr, "write agent state failed: %v\n", stateErr)
+			fmt.Fprintf(stderr, "write daemon state failed: %v\n", stateErr)
 		}
 		if shouldStopAfterFailures(opts, s.consecutiveFailures) {
 			return true, maxFailuresError(s.consecutiveFailures, err)
@@ -468,12 +472,12 @@ func (s *syncLoopState) runCycle(ctx context.Context, opts agentOptions, stdout,
 		s.lastSkipped = false
 		s.consecutiveFailures = 0
 		if err := writeAgentState(agentSuccessState(opts, s.cyclesRun+1)); err != nil {
-			fmt.Fprintf(stderr, "write agent state failed: %v\n", err)
+			fmt.Fprintf(stderr, "write daemon state failed: %v\n", err)
 		}
 	}
 	s.cyclesRun++
 	if shouldStopAfterCycles(opts, s.cyclesRun) {
-		fmt.Fprintf(stdout, "agent stopped: sync cycles reached %d\n", s.cyclesRun)
+		fmt.Fprintf(stdout, "daemon stopped: sync cycles reached %d\n", s.cyclesRun)
 		return true, s.lastErr
 	}
 	return false, nil
@@ -616,7 +620,7 @@ func agentStatePath(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, ".synchub", "agent-state.json"), nil
+	return filepath.Join(root, ".synchub", "daemon-state.json"), nil
 }
 
 func writeAgentControl(root string, control agentControl) error {
@@ -649,7 +653,7 @@ func loadAgentControl(root string) (agentControl, bool, error) {
 	}
 	var control agentControl
 	if err := json.Unmarshal(raw, &control); err != nil {
-		return agentControl{}, false, fmt.Errorf("read agent control: %w", err)
+		return agentControl{}, false, fmt.Errorf("read daemon control: %w", err)
 	}
 	return control, true, nil
 }
@@ -667,7 +671,7 @@ func agentControlPath(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, ".synchub", "agent-control.json"), nil
+	return filepath.Join(root, ".synchub", "daemon-control.json"), nil
 }
 
 func runSyncCycle(ctx context.Context, opts agentOptions, stdout, stderr io.Writer, runner syncOnceRunner) error {
@@ -695,7 +699,7 @@ func maxFailuresError(consecutiveFailures int, err error) error {
 }
 
 func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error) {
-	fs := flag.NewFlagSet("synchub-agent", flag.ContinueOnError)
+	fs := flag.NewFlagSet("sync daemon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		printUsage(stderr)
@@ -715,12 +719,13 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.IntVar(&opts.Cycles, "cycles", 0, "number of sync cycles to run before exit; 0 runs until interrupted")
 	fs.BoolVar(&opts.Once, "once", false, "run one sync cycle and exit")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state; requires --once")
-	fs.BoolVar(&opts.Watch, "watch", false, "trigger sync when local workspace changes are detected")
-	fs.BoolVar(&opts.Status, "status", false, "print the last agent state and exit")
+	fs.BoolVar(&opts.Watch, "watch", false, "trigger sync when local workspace changes are detected; kept for compatibility because daemon loops watch by default")
+	fs.BoolVar(&opts.NoWatch, "no-watch", false, "disable local workspace watching and sync only on the interval")
+	fs.BoolVar(&opts.Status, "status", false, "print the last daemon state and exit")
 	fs.BoolVar(&opts.JSON, "json", false, "print one-shot, status, pause, resume, or reset-state output as JSON")
 	fs.BoolVar(&opts.Pause, "pause", false, "pause sync cycles for this workspace and exit")
 	fs.BoolVar(&opts.Resume, "resume", false, "resume sync cycles for this workspace and exit")
-	fs.BoolVar(&opts.ResetState, "reset-state", false, "delete agent state and pause control files for this workspace and exit")
+	fs.BoolVar(&opts.ResetState, "reset-state", false, "delete daemon state and pause control files for this workspace and exit")
 	if len(args) > 0 {
 		switch args[0] {
 		case "--version":
@@ -755,6 +760,9 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.Watch && opts.Once {
 		return agentOptions{}, errors.New("watch cannot be used with --once")
 	}
+	if opts.Watch && opts.NoWatch {
+		return agentOptions{}, errors.New("watch cannot be used with --no-watch")
+	}
 	if opts.Status && opts.Once {
 		return agentOptions{}, errors.New("status cannot be used with --once")
 	}
@@ -788,35 +796,43 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.DryRun && !opts.Once {
 		return agentOptions{}, errors.New("dry run requires --once")
 	}
-	if opts.Watch && opts.WatchInterval <= 0 {
-		return agentOptions{}, errors.New("watch interval must be positive")
-	}
 	if strings.TrimSpace(opts.RootPath) == "" {
 		return agentOptions{}, errors.New("workspace path is required")
+	}
+	if daemonLoopMode(opts) && !opts.Watch && !opts.NoWatch {
+		opts.Watch = true
+	}
+	if opts.Watch && opts.WatchInterval <= 0 {
+		return agentOptions{}, errors.New("watch interval must be positive")
 	}
 	return opts, nil
 }
 
+func daemonLoopMode(opts agentOptions) bool {
+	return !opts.Once && !opts.Status && !opts.Pause && !opts.Resume && !opts.ResetState
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  synchub-agent --version")
-	fmt.Fprintln(w, "  synchub-agent --path .")
-	fmt.Fprintln(w, "  synchub-agent --path . --once")
-	fmt.Fprintln(w, "  synchub-agent --path . --once --json")
-	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run")
-	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run --json")
-	fmt.Fprintln(w, "  synchub-agent --path . --status")
-	fmt.Fprintln(w, "  synchub-agent --path . --status --json")
-	fmt.Fprintln(w, "  synchub-agent --path . --pause")
-	fmt.Fprintln(w, "  synchub-agent --path . --pause --json")
-	fmt.Fprintln(w, "  synchub-agent --path . --resume")
-	fmt.Fprintln(w, "  synchub-agent --path . --resume --json")
-	fmt.Fprintln(w, "  synchub-agent --path . --reset-state")
-	fmt.Fprintln(w, "  synchub-agent --path . --reset-state --json")
-	fmt.Fprintln(w, "  synchub-agent --path . --interval 30s --device-name laptop --platform windows --limit 500")
-	fmt.Fprintln(w, "  synchub-agent --path . --watch --watch-interval 1s")
-	fmt.Fprintln(w, "  synchub-agent --path . --cycles 3")
-	fmt.Fprintln(w, "  synchub-agent --path . --max-failures 5")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --version")
+	fmt.Fprintln(w, "  synchub-cli sync daemon")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path .")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --once")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --once --json")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --once --dry-run")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --once --dry-run --json")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --status")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --status --json")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --pause")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --pause --json")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --resume")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --resume --json")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --reset-state")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --reset-state --json")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --watch-interval 1s")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --no-watch --interval 30s --device-name laptop --platform windows --limit 500")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --cycles 3")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --max-failures 5")
 }
 
 func printVersion(w io.Writer) {

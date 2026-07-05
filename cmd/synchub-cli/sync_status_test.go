@@ -68,7 +68,7 @@ func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
 		"last scan: 2026-06-30T01:02:03Z",
 		"pending changes: 0",
 		"trash entries: 0",
-		"agent: not run",
+		"daemon: not run",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -129,7 +129,7 @@ func TestRunSyncStatusShowsAgentState(t *testing.T) {
 	}, 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-state.json"), syncAgentState{
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-state.json"), syncAgentState{
 		Version:             1,
 		Root:                root,
 		Status:              "error",
@@ -139,14 +139,14 @@ func TestRunSyncStatusShowsAgentState(t *testing.T) {
 		LastError:           "sync failed",
 		UpdatedAt:           time.Date(2026, 7, 4, 1, 2, 4, 0, time.UTC),
 	}, 0o600); err != nil {
-		t.Fatalf("write agent state: %v", err)
+		t.Fatalf("write daemon state: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-control.json"), syncAgentControl{
 		Version:   1,
 		Paused:    true,
 		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
 	}, 0o600); err != nil {
-		t.Fatalf("write agent control: %v", err)
+		t.Fatalf("write daemon control: %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -156,15 +156,15 @@ func TestRunSyncStatusShowsAgentState(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"agent: error",
-		"agent cycles: 3",
-		"agent consecutive failures: 2",
-		"agent last success: -",
-		"agent last failure: 2026-07-04T01:02:03Z",
-		"agent last error: sync failed",
-		"agent updated: 2026-07-04T01:02:04Z",
-		"agent paused: yes",
-		"agent control updated: 2026-07-04T01:02:05Z",
+		"daemon: error",
+		"daemon cycles: 3",
+		"daemon consecutive failures: 2",
+		"daemon last success: -",
+		"daemon last failure: 2026-07-04T01:02:03Z",
+		"daemon last error: sync failed",
+		"daemon updated: 2026-07-04T01:02:04Z",
+		"daemon paused: yes",
+		"daemon control updated: 2026-07-04T01:02:05Z",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -183,12 +183,12 @@ func TestRunSyncStatusShowsAgentControlWithoutState(t *testing.T) {
 	}, 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-control.json"), syncAgentControl{
 		Version:   1,
 		Paused:    true,
 		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
 	}, 0o600); err != nil {
-		t.Fatalf("write agent control: %v", err)
+		t.Fatalf("write daemon control: %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -198,9 +198,9 @@ func TestRunSyncStatusShowsAgentControlWithoutState(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"agent: not run",
-		"agent paused: yes",
-		"agent control updated: 2026-07-04T01:02:05Z",
+		"daemon: not run",
+		"daemon paused: yes",
+		"daemon control updated: 2026-07-04T01:02:05Z",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -532,7 +532,7 @@ func TestRunSyncStatusCanOutputJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(trashBatch, "old.txt"), []byte("old"), 0o644); err != nil {
 		t.Fatalf("write trash: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-state.json"), syncAgentState{
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-state.json"), syncAgentState{
 		Version:       1,
 		Root:          root,
 		Status:        "ok",
@@ -540,14 +540,14 @@ func TestRunSyncStatusCanOutputJSON(t *testing.T) {
 		LastSuccessAt: testTimePtr(time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC)),
 		UpdatedAt:     time.Date(2026, 7, 4, 1, 2, 4, 0, time.UTC),
 	}, 0o600); err != nil {
-		t.Fatalf("write agent state: %v", err)
+		t.Fatalf("write daemon state: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-control.json"), syncAgentControl{
 		Version:   1,
 		Paused:    true,
 		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
 	}, 0o600); err != nil {
-		t.Fatalf("write agent control: %v", err)
+		t.Fatalf("write daemon control: %v", err)
 	}
 	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
 	if err := writeConfig(loginConfigPath, cliConfig{
@@ -592,8 +592,8 @@ func TestRunSyncStatusCanOutputJSON(t *testing.T) {
 	if status.Trash.Entries != 1 || status.Trash.Latest == nil || status.Trash.Latest.Path != "old.txt" {
 		t.Fatalf("trash = %#v", status.Trash)
 	}
-	if !status.Agent.HasRun || !status.Agent.Paused || status.Agent.State == nil || status.Agent.State.Status != "ok" {
-		t.Fatalf("agent = %#v", status.Agent)
+	if !status.Daemon.HasRun || !status.Daemon.Paused || status.Daemon.State == nil || status.Daemon.State.Status != "ok" {
+		t.Fatalf("daemon = %#v", status.Daemon)
 	}
 	if status.Remote == nil || status.Remote.Skipped || len(status.Remote.Changes) != 1 || status.Remote.Changes[0].Path != "/workspace/a.txt" {
 		t.Fatalf("remote = %#v", status.Remote)
@@ -660,12 +660,12 @@ func TestRunSyncStatusSuggestsResumeWhenAgentPaused(t *testing.T) {
 	}, 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-control.json"), syncAgentControl{
 		Version:   1,
 		Paused:    true,
 		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
 	}, 0o600); err != nil {
-		t.Fatalf("write agent control: %v", err)
+		t.Fatalf("write daemon control: %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -675,8 +675,8 @@ func TestRunSyncStatusSuggestsResumeWhenAgentPaused(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"agent paused: yes",
-		"next: run synchub-agent --path . --resume",
+		"daemon paused: yes",
+		"next: run synchub-cli sync daemon --path . --resume",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -735,7 +735,8 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 		"synchub-cli sync push --path . --dry-run --json",
 		"synchub-cli sync pull --path . --dry-run",
 		"synchub-cli sync pull --path . --dry-run --json",
-		"synchub-cli sync watch --path . --once --json",
+		"synchub-cli sync daemon",
+		"synchub-cli sync daemon --status",
 		"synchub-cli sync trash --path .",
 		"synchub-cli sync trash restore --path . --batch 20260702T010000.000000000Z --entry docs/",
 		"synchub-cli sync devices --path .",
@@ -759,12 +760,12 @@ func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(trashBatch, "old.txt"), []byte("old"), 0o644); err != nil {
 		t.Fatalf("write trash: %v", err)
 	}
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-control.json"), syncAgentControl{
 		Version:   1,
 		Paused:    true,
 		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
 	}, 0o600); err != nil {
-		t.Fatalf("write agent control: %v", err)
+		t.Fatalf("write daemon control: %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -778,8 +779,8 @@ func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
 		"pending changes: 0",
 		"trash entries: 1",
 		"latest trash: 20260702T010000.000000000Z old.txt",
-		"agent: not run",
-		"agent paused: yes",
+		"daemon: not run",
+		"daemon paused: yes",
 		"next: run synchub-cli sync once --path .",
 	} {
 		if !strings.Contains(out, want) {
@@ -791,12 +792,12 @@ func TestRunSyncStatusShowsMissingManifest(t *testing.T) {
 func TestRunSyncStatusMissingManifestCanOutputJSON(t *testing.T) {
 	root := t.TempDir()
 	writeTestWorkspaceConfig(t, root)
-	if err := writeJSONFile(filepath.Join(root, ".synchub", "agent-control.json"), syncAgentControl{
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-control.json"), syncAgentControl{
 		Version:   1,
 		Paused:    true,
 		UpdatedAt: time.Date(2026, 7, 4, 1, 2, 5, 0, time.UTC),
 	}, 0o600); err != nil {
-		t.Fatalf("write agent control: %v", err)
+		t.Fatalf("write daemon control: %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -818,7 +819,7 @@ func TestRunSyncStatusMissingManifestCanOutputJSON(t *testing.T) {
 	if status.Next != "run synchub-cli sync once --path ." {
 		t.Fatalf("next = %q", status.Next)
 	}
-	if status.PendingChanges.Total != 0 || status.Trash.Entries != 0 || status.Agent.HasRun || !status.Agent.Paused || status.Agent.Control == nil {
+	if status.PendingChanges.Total != 0 || status.Trash.Entries != 0 || status.Daemon.HasRun || !status.Daemon.Paused || status.Daemon.Control == nil {
 		t.Fatalf("status = %#v", status)
 	}
 }

@@ -275,28 +275,28 @@ func runSyncDoctorManifestCheck(ctx context.Context, report *syncDoctorReport, r
 func runSyncDoctorAgentCheck(report *syncDoctorReport, root string) {
 	control, controlOK, err := readSyncAgentControl(root)
 	if err != nil {
-		report.add(syncDoctorStatusFail, "agent", err.Error())
+		report.add(syncDoctorStatusFail, "daemon", err.Error())
 		return
 	}
 	state, stateOK, err := readSyncAgentState(root)
 	if err != nil {
-		report.add(syncDoctorStatusFail, "agent", err.Error())
+		report.add(syncDoctorStatusFail, "daemon", err.Error())
 		return
 	}
 	if controlOK && control.Paused {
-		report.add(syncDoctorStatusWarn, "agent", "agent is paused")
-		report.addNext("synchub-agent --path . --resume")
+		report.add(syncDoctorStatusWarn, "daemon", "daemon is paused")
+		report.addNext("synchub-cli sync daemon --path . --resume")
 		return
 	}
 	if stateOK && strings.EqualFold(strings.TrimSpace(state.Status), "error") {
-		report.add(syncDoctorStatusWarn, "agent", "last run failed: "+state.LastError)
+		report.add(syncDoctorStatusWarn, "daemon", "last run failed: "+state.LastError)
 		return
 	}
 	if stateOK {
-		report.add(syncDoctorStatusOK, "agent", "last status: "+state.Status)
+		report.add(syncDoctorStatusOK, "daemon", "last status: "+state.Status)
 		return
 	}
-	report.add(syncDoctorStatusOK, "agent", "not paused")
+	report.add(syncDoctorStatusOK, "daemon", "not paused")
 }
 
 func writeSyncDoctorJSON(stdout io.Writer, report syncDoctorReport) error {

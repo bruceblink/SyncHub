@@ -19,7 +19,7 @@
 
 ## Phase 2 功能需求
 
-- Agent 设备注册与心跳。
+- CLI daemon 设备注册与心跳。
 - 文件监听与变更上报。
 - 基于 hash / version / change_id 的增量同步。
 - 冲突检测与冲突文件命名策略。
@@ -34,7 +34,7 @@
 
 - WebDAV adapter。
 - S3 / OSS / MinIO storage backend。
-- 稳定同步协议与 Agent SDK，供任意 GUI、Web、移动端或第三方客户端适配。
+- 稳定同步协议与客户端 SDK，供任意 GUI、Web、移动端或第三方客户端适配。
 - 团队空间与共享目录。
 
 ## 非功能需求

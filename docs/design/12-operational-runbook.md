@@ -14,11 +14,12 @@
 - 过期上传会话由 API 进程内 worker 周期性标记为 `expired`，间隔由 `UPLOAD_CLEANUP_INTERVAL_SECONDS` 控制。
 - 过期文件版本由 API 进程内 worker 周期性清理，间隔由 `VERSION_CLEANUP_INTERVAL_SECONDS` 控制；未设置时跟随上传清理间隔。
 - 清理任务每轮处理数量由 `CLEANUP_BATCH_LIMIT` 控制，默认 `1000`。
-- Agent 默认会持续重试同步；设置 `synchub-agent --cycles N` 可执行固定轮次后退出，适合本地验证和脚本化 smoke test。
-- 设置 `synchub-agent --max-failures N` 后，连续失败达到 N 次会退出，便于由 Docker、systemd 或其他 supervisor 重启。
-- 使用 `synchub-agent --path . --status` 可查看该工作区最近一次 Agent 运行状态、失败次数和最后错误；加 `--json` 可输出机器可读状态。
-- 使用 `synchub-agent --path . --pause` / `--resume` 可通过工作区内控制文件暂停或恢复同步循环；加 `--json` 可输出机器可读控制结果。
-- 使用 `synchub-agent --path . --reset-state` 可删除该工作区的 Agent 状态和暂停控制文件，适合本地重新验证同步循环；加 `--json` 可输出机器可读重置结果。
+- CLI daemon 默认监听本地 workspace 变化，并按周期兜底重试同步；设置 `synchub-cli sync daemon --cycles N` 可执行固定轮次后退出，适合本地验证和脚本化 smoke test。
+- 使用 `synchub-cli sync daemon --no-watch --interval 30s` 可关闭本地变化监听，仅按固定周期同步。
+- 设置 `synchub-cli sync daemon --max-failures N` 后，连续失败达到 N 次会退出，便于由 systemd 或其他 supervisor 重启。
+- 使用 `synchub-cli sync daemon --path . --status` 可查看该工作区最近一次 daemon 运行状态、失败次数和最后错误；加 `--json` 可输出机器可读状态。
+- 使用 `synchub-cli sync daemon --path . --pause` / `--resume` 可通过工作区内控制文件暂停或恢复同步循环；加 `--json` 可输出机器可读控制结果。
+- 使用 `synchub-cli sync daemon --path . --reset-state` 可删除该工作区的 daemon 状态和暂停控制文件，适合本地重新验证同步循环；加 `--json` 可输出机器可读重置结果。
 
 ## Linux Docker 部署
 

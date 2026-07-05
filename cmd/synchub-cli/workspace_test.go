@@ -45,6 +45,9 @@ func TestRunWorkspaceInitWritesConfig(t *testing.T) {
 	if !strings.Contains(stdout.String(), "workspace initialized") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "next: synchub-cli sync daemon --path "+workspaceRoot) {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
 
 	raw, err := os.ReadFile(filepath.Join(workspaceRoot, ".synchub", "workspace.json"))
 	if err != nil {

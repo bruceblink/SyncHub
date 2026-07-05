@@ -141,17 +141,14 @@ $isWindows = $PSVersionTable.PSEdition -ne "Core" -or $IsWindows
 $supportsStartWindowStyle = $isWindows -and $PSVersionTable.PSEdition -ne "Core"
 $apiBinaryName = if ($isWindows) { "synchub-api.exe" } else { "synchub-api" }
 $cliBinaryName = if ($isWindows) { "synchub-cli.exe" } else { "synchub-cli" }
-$agentBinaryName = if ($isWindows) { "synchub-agent.exe" } else { "synchub-agent" }
 $apiBinary = Join-Path $tempRoot $apiBinaryName
 $cliBinary = Join-Path $tempRoot $cliBinaryName
-$agentBinary = Join-Path $tempRoot $agentBinaryName
 
 try {
     New-Item -ItemType Directory -Path $tempRoot | Out-Null
 
     Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $apiBinary, "./cmd/synchub-api") | Out-Null
     Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $cliBinary, "./cmd/synchub-cli") | Out-Null
-    Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $agentBinary, "./cmd/synchub-agent") | Out-Null
 
     $env:HTTP_ADDR = "127.0.0.1:$Port"
     $env:DATABASE_DRIVER = "sqlite"
@@ -214,26 +211,29 @@ try {
     $trash = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "trash", "--path", $peerWorkspaceRoot)
     Assert-OutputContains -Output $trash -Expected "shared.txt" -Message "peer trash output missing deleted file"
 
-    $agentStatus = Invoke-Checked -FilePath $agentBinary -Arguments @("--path", $workspaceRoot, "--status")
-    Assert-OutputContains -Output $agentStatus -Expected "agent: not run" -Message "agent status should start as not run"
+    $daemonStatus = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "daemon", "--path", $workspaceRoot, "--status")
+    Assert-OutputContains -Output $daemonStatus -Expected "daemon: not run" -Message "daemon status should start as not run"
 
-    $agentPause = Invoke-Checked -FilePath $agentBinary -Arguments @("--path", $workspaceRoot, "--pause")
-    Assert-OutputContains -Output $agentPause -Expected "agent paused:" -Message "agent pause output missing"
+    $daemonPause = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "daemon", "--path", $workspaceRoot, "--pause")
+    Assert-OutputContains -Output $daemonPause -Expected "daemon paused:" -Message "daemon pause output missing"
 
-    $pausedOnce = Invoke-Checked -FilePath $agentBinary -Arguments @("--path", $workspaceRoot, "--config", $loginConfig, "--cli", $cliBinary, "--once")
-    Assert-OutputContains -Output $pausedOnce -Expected "sync skipped: agent is paused" -Message "paused agent should skip sync once"
+    $pausedOnce = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "daemon", "--path", $workspaceRoot, "--config", $loginConfig, "--once")
+    Assert-OutputContains -Output $pausedOnce -Expected "sync skipped: daemon is paused" -Message "paused daemon should skip sync once"
 
-    $pausedStatus = Invoke-Checked -FilePath $agentBinary -Arguments @("--path", $workspaceRoot, "--status")
-    Assert-OutputContains -Output $pausedStatus -Expected "agent: paused" -Message "agent status should show paused"
+    $pausedStatus = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "daemon", "--path", $workspaceRoot, "--status")
+    Assert-OutputContains -Output $pausedStatus -Expected "daemon: paused" -Message "daemon status should show paused"
 
-    $agentResume = Invoke-Checked -FilePath $agentBinary -Arguments @("--path", $workspaceRoot, "--resume")
-    Assert-OutputContains -Output $agentResume -Expected "agent resumed:" -Message "agent resume output missing"
+    $daemonResume = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "daemon", "--path", $workspaceRoot, "--resume")
+    Assert-OutputContains -Output $daemonResume -Expected "daemon resumed:" -Message "daemon resume output missing"
 
-    $agentOnce = Invoke-Checked -FilePath $agentBinary -Arguments @("--path", $workspaceRoot, "--config", $loginConfig, "--cli", $cliBinary, "--once", "--device-name", "smoke-device", "--platform", "smoke")
-    Assert-OutputContains -Output $agentOnce -Expected "sync completed:" -Message "agent sync once should complete after resume"
+    $daemonOnce = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "daemon", "--path", $workspaceRoot, "--config", $loginConfig, "--once", "--device-name", "smoke-device", "--platform", "smoke")
+    Assert-OutputContains -Output $daemonOnce -Expected "sync completed:" -Message "daemon sync once should complete after resume"
 
-    $agentStatus = Invoke-Checked -FilePath $agentBinary -Arguments @("--path", $workspaceRoot, "--status")
-    Assert-OutputContains -Output $agentStatus -Expected "agent: ok" -Message "agent status should show ok after sync"
+    $daemonNoWatch = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "daemon", "--path", $workspaceRoot, "--config", $loginConfig, "--no-watch", "--cycles", "1", "--device-name", "smoke-device", "--platform", "smoke")
+    Assert-OutputContains -Output $daemonNoWatch -Expected "daemon stopped: sync cycles reached 1" -Message "daemon no-watch smoke cycle should stop after one cycle"
+
+    $daemonStatus = Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "daemon", "--path", $workspaceRoot, "--status")
+    Assert-OutputContains -Output $daemonStatus -Expected "daemon: ok" -Message "daemon status should show ok after sync"
 
     [System.IO.File]::WriteAllText($historyPath, "version two")
     Invoke-Checked -FilePath $cliBinary -Arguments @("sync", "once", "--path", $workspaceRoot, "--config", $loginConfig, "--device-name", "smoke-device", "--platform", "smoke") | Out-Null

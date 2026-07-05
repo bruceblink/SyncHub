@@ -25,6 +25,8 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runSyncPull(ctx, args[1:], stdout, stderr)
 	case "watch":
 		return runSyncWatch(ctx, args[1:], stdout, stderr)
+	case "daemon":
+		return runSyncDaemon(ctx, args[1:], stdout, stderr)
 	case "trash":
 		return runSyncTrash(args[1:], stdout, stderr)
 	case "conflicts":

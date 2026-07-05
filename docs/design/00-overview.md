@@ -2,18 +2,18 @@
 
 ## 项目定位
 
-SyncHub 是一个面向个人开发者工作区的多设备同步工具，当前重点是 REST API、CLI / Agent、增量同步、版本恢复和用户级隔离存储。
+SyncHub 是一个面向个人开发者工作区的多设备同步工具，当前重点是 REST API、CLI daemon、增量同步、版本恢复和用户级隔离存储。
 发布和部署主路径是 Linux 服务器上的 Docker 镜像；Windows 仅作为本地开发和验证环境。
 
 第一阶段优先服务以下场景：
 
 - 在多台设备之间同步项目配置、笔记、AI 会话上下文和轻量工作区文件。
-- 通过 CLI / Agent 自动监听本地变更并上报到服务端。
+- 通过 `synchub-cli sync daemon` 自动监听本地变更并上报到服务端。
 - 通过 HTTP API 支持脚本化和自动化操作。
 
 ## 核心能力
 
-- 多设备文件同步（PC / CLI Agent）
+- 多设备文件同步（PC / CLI daemon）
 - REST API 与 CLI 访问
 - 分片上传与断点续传
 - 基于 hash / version 的增量同步
@@ -27,17 +27,17 @@ SyncHub 主技术栈确定为 Go + Gin。
 
 选择 Go 的原因：
 
-- 项目目标之一是训练 Go 工程能力，服务端、CLI 和 Agent 都适合用 Go 实现。
+- 项目目标之一是训练 Go 工程能力，服务端和 CLI daemon 都适合用 Go 实现。
 - SyncHub 的主要瓶颈预计在网络、磁盘、数据库和对象存储 IO，不存在必须依赖 Rust 才能解决的性能瓶颈。
 - Go 的开发体验、编译速度、部署方式和并发模型更适合快速推进 MVP。
 - Go 在 HTTP 服务、后台任务、文件监听和 CLI 等场景都有成熟生态。
-- 统一使用 Go 可以避免服务端与 Agent 在模型、协议、错误处理和构建流程上的割裂。
+- 统一使用 Go 可以避免服务端与客户端同步逻辑在模型、协议、错误处理和构建流程上的割裂。
 
 Rust 仍是可行方案，但不作为首期主栈。除非后续出现明确的内存安全、极限性能或 Rust 生态依赖，否则不在 MVP 阶段引入 Rust。
 
 ## 客户端策略
 
-SyncHub 采用 API-first + CLI / Agent-first 设计。当前只要求服务端 REST API 与 CLI / Agent 稳定协作。
+SyncHub 采用 API-first + CLI-first 设计。当前只要求服务端 REST API 与 `synchub-cli` 稳定协作，后台同步作为 CLI 内置 daemon 模式提供。
 
 GUI、WebDAV、S3 和第三方客户端适配都属于 Later，不参与当前 MVP 主线。
 

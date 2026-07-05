@@ -30,7 +30,7 @@ Supports:
 
 ## Architecture
 
-Agent -> REST API -> SyncHub Server -> Storage
+synchub-cli -> REST API -> SyncHub Server -> Storage
 
 ## Tech Stack
 
@@ -62,7 +62,6 @@ Check local binary versions:
 
 ```bash
 go run ./cmd/synchub-cli version
-go run ./cmd/synchub-agent --version
 go run ./cmd/synchub-cli server wait --server http://localhost:8765 --timeout 30s
 go run ./cmd/synchub-cli server status --server http://localhost:8765
 go run ./cmd/synchub-cli server metrics --server http://localhost:8765
@@ -117,30 +116,31 @@ go run ./cmd/synchub-cli sync trash --path .
 go run ./cmd/synchub-cli sync devices --path .
 ```
 
-Use `sync doctor` to check workspace config, login config, API readiness, auth, device registration, manifest state, and agent pause state before manual testing.
+Use `sync doctor` to check workspace config, login config, API readiness, auth, device registration, manifest state, and daemon pause state before manual testing.
 Use `sync once --dry-run` before applying changes if you want to inspect the local push plan and incoming change feed.
 Use `sync trash` to inspect local files moved aside after remote delete events.
 `sync status` also shows a local trash summary when these files exist.
 Create a `.synchubignore` file at the workspace root to exclude local build outputs or other paths from manifest scanning, watch detection, and sync push.
 
-Run the agent loop for an initialized workspace:
+Run the daemon loop for an initialized workspace:
 
 ```bash
-go run ./cmd/synchub-agent --path .
+go run ./cmd/synchub-cli sync daemon
 ```
 
-For a single agent sync cycle, add `--once`.
-For an agent-driven preview, use `--once --dry-run`.
+The daemon watches local changes by default and also runs a scheduled sync as a fallback.
+For a single daemon sync cycle, add `--once`.
+For a daemon-driven preview, use `--once --dry-run`.
 Use `--once --json` or `--once --dry-run --json` when an external client needs the underlying `sync once` result in a machine-readable format.
 Use `--device-name`, `--platform`, and `--limit` to control device registration and pull batch size.
-Use `--cycles N` to run a fixed number of agent sync cycles and then exit.
-Use `--max-failures N` to make the agent exit after N consecutive sync failures, so an external supervisor can restart it.
-Use `--watch` to trigger an extra sync cycle when local workspace changes are detected between scheduled intervals.
-Use `--status` to print the last recorded agent state for the workspace.
-Use `--status --json` to print the last recorded agent state in a machine-readable format.
+Use `--cycles N` to run a fixed number of daemon sync cycles and then exit.
+Use `--max-failures N` to make the daemon exit after N consecutive sync failures, so an external supervisor can restart it.
+Use `--no-watch` if you only want interval-based sync.
+Use `--status` to print the last recorded daemon state for the workspace.
+Use `--status --json` to print the last recorded daemon state in a machine-readable format.
 Use `--pause` and `--resume` to stop or restart sync cycles for a workspace without changing its configuration.
 Use `--pause --json` or `--resume --json` when an external client needs a machine-readable control result.
-Use `--reset-state` to delete the workspace agent state and pause control files before rerunning local verification.
+Use `--reset-state` to delete the workspace daemon state and pause control files before rerunning local verification.
 Use `--reset-state --json` when an external client needs a machine-readable reset result.
 
 For the release Docker image on a Linux server:

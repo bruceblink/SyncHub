@@ -98,6 +98,7 @@ func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "workspace initialized: %s\n", root)
 	fmt.Fprintf(stdout, "remote path: %s\n", normalizedRemote)
 	fmt.Fprintf(stdout, "config: %s\n", outputPath)
+	fmt.Fprintf(stdout, "next: synchub-cli sync daemon --path %s\n", root)
 	return nil
 }
 

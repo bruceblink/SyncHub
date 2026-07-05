@@ -18,7 +18,6 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-api ./cmd/synchub-api
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-cli ./cmd/synchub-cli
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-agent ./cmd/synchub-agent
 
 FROM ${RUNTIME_IMAGE}
 
@@ -41,7 +40,6 @@ WORKDIR /app
 
 COPY --from=build /out/synchub-api /usr/local/bin/synchub-api
 COPY --from=build /out/synchub-cli /usr/local/bin/synchub-cli
-COPY --from=build /out/synchub-agent /usr/local/bin/synchub-agent
 
 RUN mkdir -p /data/storage && chown -R synchub:synchub /data
 
