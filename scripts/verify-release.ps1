@@ -77,8 +77,11 @@ function Get-HostGOOS {
 
 function Get-HostGOARCH {
     $arch = [string]$env:PROCESSOR_ARCHITECTURE
+    if ([string]::IsNullOrWhiteSpace($arch)) {
+        $arch = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+    }
     switch -Regex ($arch.ToUpperInvariant()) {
-        "AMD64|X86_64" { return "amd64" }
+        "AMD64|X86_64|X64" { return "amd64" }
         "ARM64|AARCH64" { return "arm64" }
         default { return "" }
     }

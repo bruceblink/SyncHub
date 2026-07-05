@@ -140,12 +140,17 @@ try {
     $env:LOCAL_STORAGE_ROOT = Join-Path $tempRoot "storage"
     $env:JWT_SECRET = "local-smoke-secret"
 
-    $apiProcess = Start-Process -FilePath $apiBinary `
-        -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
-        -PassThru `
-        -RedirectStandardOutput $apiOut `
-        -RedirectStandardError $apiErr
+    $startArgs = @{
+        FilePath               = $apiBinary
+        WorkingDirectory       = $ProjectRoot
+        PassThru               = $true
+        RedirectStandardOutput = $apiOut
+        RedirectStandardError  = $apiErr
+    }
+    if ($isWindows) {
+        $startArgs.WindowStyle = "Hidden"
+    }
+    $apiProcess = Start-Process @startArgs
 
     Invoke-Checked -FilePath $cliBinary -Arguments @("server", "wait", "--server", $serverURL, "--timeout", "20s", "--interval", "250ms") | Out-Null
     Invoke-Checked -FilePath $cliBinary -Arguments @("server", "status", "--server", $serverURL) | Out-Null

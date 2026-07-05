@@ -50,3 +50,12 @@ git log --oneline -5
 ```
 
 The worktree should be clean before tagging. Use `git tag --no-sign v0.1.0` only after the MVP check and release build both pass.
+
+## 7. Publish
+
+```powershell
+git push origin main
+git push origin v0.1.0
+```
+
+Pushing a `v*` tag triggers the Release workflow. The workflow reruns the MVP gate, rebuilds and verifies release artifacts, then publishes the GitHub Release with the archives and `SHA256SUMS.txt`.

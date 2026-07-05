@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Resolve release tag
+        id: release
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+              $tag = "${{ inputs.tag }}"
+          }
+          if (-not $tag.StartsWith("v")) {
+              throw "release tag must start with v: $tag"
+          }
+          $version = $tag.Substring(1)
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "notes=docs/releases/$tag.md" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify MVP
+        shell: pwsh
+        run: ./scripts/test-mvp.ps1
+
+      - name: Build release artifacts
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -Version "${{ steps.release.outputs.version }}"
+
+      - name: Verify release artifacts
+        shell: pwsh
+        run: ./scripts/verify-release.ps1 -Version "${{ steps.release.outputs.version }}"
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.release.outputs.tag }}"
+          $version = "${{ steps.release.outputs.version }}"
+          $notes = "${{ steps.release.outputs.notes }}"
+          if (-not (Test-Path -LiteralPath $notes)) {
+              throw "release notes file is missing: $notes"
+          }
+
+          $releaseDir = Join-Path "dist" "synchub-$version"
+          $assets = Get-ChildItem -LiteralPath $releaseDir -File | ForEach-Object { $_.FullName }
+          if ($assets.Count -eq 0) {
+              throw "no release assets found in $releaseDir"
+          }
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+              gh release edit $tag --title "SyncHub $version" --notes-file $notes
+              if ($LASTEXITCODE -ne 0) {
+                  exit $LASTEXITCODE
+              }
+              gh release upload $tag @assets --clobber
+              if ($LASTEXITCODE -ne 0) {
+                  exit $LASTEXITCODE
+              }
+          }
+          else {
+              gh release create $tag @assets --title "SyncHub $version" --notes-file $notes --verify-tag
+              if ($LASTEXITCODE -ne 0) {
+                  exit $LASTEXITCODE
+              }
+          }
