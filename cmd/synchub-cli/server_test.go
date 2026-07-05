@@ -265,6 +265,34 @@ func TestRunServerOpenAPIPrintsSpec(t *testing.T) {
 	}
 }
 
+func TestRunServerOpenAPICanOutputJSON(t *testing.T) {
+	spec := "openapi: 3.0.3\ninfo:\n  title: SyncHub API\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/swagger/openapi.yaml" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write([]byte(spec))
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"server", "openapi", "--server", server.URL, "--json"}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server openapi json: %v", err)
+	}
+	if strings.HasPrefix(stdout.String(), "openapi:") {
+		t.Fatalf("json output includes raw spec output: %s", stdout.String())
+	}
+	var snapshot serverOpenAPISnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode server openapi json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Server != server.URL || snapshot.Bytes != len([]byte(spec)) || snapshot.Spec != spec || snapshot.Output != "" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
 func TestRunServerOpenAPIWritesSpecToOutputFile(t *testing.T) {
 	spec := "openapi: 3.0.3\ninfo:\n  title: SyncHub API\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -306,6 +334,48 @@ func TestRunServerOpenAPIWritesSpecToOutputFile(t *testing.T) {
 	}
 }
 
+func TestRunServerOpenAPIOutputCanOutputJSON(t *testing.T) {
+	spec := "openapi: 3.0.3\ninfo:\n  title: SyncHub API\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/swagger/openapi.yaml" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write([]byte(spec))
+	}))
+	defer server.Close()
+
+	outputPath := filepath.Join(t.TempDir(), "generated", "openapi.yaml")
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"server",
+		"openapi",
+		"--server", server.URL,
+		"--output", outputPath,
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server openapi output json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "openapi written:") {
+		t.Fatalf("json output includes text output: %s", stdout.String())
+	}
+	var snapshot serverOpenAPISnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode server openapi output json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Server != server.URL || snapshot.Output != outputPath || snapshot.Bytes != len([]byte(spec)) || snapshot.Spec != "" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read openapi output: %v", err)
+	}
+	if string(raw) != spec {
+		t.Fatalf("output file = %q, want %q", string(raw), spec)
+	}
+}
+
 func TestRunServerOpenAPIReportsFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -330,6 +400,7 @@ func TestRunServerHelpIncludesStatusJSONCommand(t *testing.T) {
 	for _, want := range []string{
 		"synchub-cli server status --server http://localhost:8765 --json",
 		"synchub-cli server wait --server http://localhost:8765 --timeout 30s --json",
+		"synchub-cli server openapi --server http://localhost:8765 --output ./openapi.yaml --json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("server help missing %q: %s", want, out)

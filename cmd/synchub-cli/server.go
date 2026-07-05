@@ -187,6 +187,7 @@ func runServerOpenAPI(ctx context.Context, args []string, stdout, stderr io.Writ
 	fs.SetOutput(stderr)
 	serverURL := fs.String("server", defaultServerURL, "server base URL")
 	outputPath := fs.String("output", "", "write OpenAPI YAML to a file instead of stdout")
+	jsonOutput := fs.Bool("json", false, "print OpenAPI result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -194,7 +195,8 @@ func runServerOpenAPI(ctx context.Context, args []string, stdout, stderr io.Writ
 		return errors.New("server URL is required")
 	}
 
-	spec, err := client.New(*serverURL).OpenAPI(ctx)
+	api := client.New(*serverURL)
+	spec, err := api.OpenAPI(ctx)
 	if err != nil {
 		return fmt.Errorf("openapi check failed: %w", err)
 	}
@@ -202,11 +204,38 @@ func runServerOpenAPI(ctx context.Context, args []string, stdout, stderr io.Writ
 		if err := writeTextAtomically(*outputPath, spec); err != nil {
 			return fmt.Errorf("write openapi output failed: %w", err)
 		}
+		if *jsonOutput {
+			return writeServerOpenAPIJSON(stdout, serverOpenAPISnapshot{
+				Server: api.BaseURL,
+				Output: *outputPath,
+				Bytes:  len([]byte(spec)),
+			})
+		}
 		fmt.Fprintf(stdout, "openapi written: %s\n", *outputPath)
 		return nil
 	}
+	if *jsonOutput {
+		return writeServerOpenAPIJSON(stdout, serverOpenAPISnapshot{
+			Server: api.BaseURL,
+			Bytes:  len([]byte(spec)),
+			Spec:   spec,
+		})
+	}
 	fmt.Fprint(stdout, spec)
 	return nil
+}
+
+type serverOpenAPISnapshot struct {
+	Server string `json:"server"`
+	Output string `json:"output,omitempty"`
+	Bytes  int    `json:"bytes"`
+	Spec   string `json:"spec,omitempty"`
+}
+
+func writeServerOpenAPIJSON(stdout io.Writer, snapshot serverOpenAPISnapshot) error {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func writeTextAtomically(outputPath, content string) error {

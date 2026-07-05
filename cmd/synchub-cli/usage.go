@@ -16,6 +16,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli server metrics --server http://localhost:8765")
 	fmt.Fprintln(w, "  synchub-cli server openapi --server http://localhost:8765")
 	fmt.Fprintln(w, "  synchub-cli server openapi --server http://localhost:8765 --output ./openapi.yaml")
+	fmt.Fprintln(w, "  synchub-cli server openapi --server http://localhost:8765 --output ./openapi.yaml --json")
 	fmt.Fprintln(w, "  synchub-cli register --server http://localhost:8765 --email user@example.com --password password")
 	fmt.Fprintln(w, "  synchub-cli register --server http://localhost:8765 --email user@example.com --password password --json")
 	fmt.Fprintln(w, "  synchub-cli login --server http://localhost:8765 --email user@example.com --password password")
@@ -93,6 +94,7 @@ func printServerUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli server metrics --server http://localhost:8765")
 	fmt.Fprintln(w, "  synchub-cli server openapi --server http://localhost:8765")
 	fmt.Fprintln(w, "  synchub-cli server openapi --server http://localhost:8765 --output ./openapi.yaml")
+	fmt.Fprintln(w, "  synchub-cli server openapi --server http://localhost:8765 --output ./openapi.yaml --json")
 }
 
 func printManifestUsage(w io.Writer) {
