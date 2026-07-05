@@ -339,12 +339,40 @@ go run .\cmd\synchub-cli sync trash --path $deviceA --json
 go run .\cmd\synchub-cli sync trash restore --path $deviceA --batch 20260702T010000.000000000Z --entry docs/readme.txt --json
 ```
 
-## 10. Docker Compose
+## 10. Docker Deployment
+
+发布版以 Docker 镜像作为主要交付物。Linux 服务器上推荐直接拉取 GHCR 镜像：
+
+```bash
+docker pull ghcr.io/bruceblink/synchub:0.1.0
+docker run -d --name synchub-api \
+  -p 8765:8765 \
+  -e JWT_SECRET=change-me \
+  -v synchub-data:/data \
+  ghcr.io/bruceblink/synchub:0.1.0
+```
+
+也可以用 GitHub Release 附带的发布版 compose 文件：
+
+```bash
+export JWT_SECRET=change-me
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.0
+docker compose -f docker-compose.release.yml up -d
+```
+
+Windows 开发机上可以构建并 smoke-test 本地镜像：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.0 -Image synchub:0.1.0
+```
+
+## 11. Docker Compose Development
 
 推荐使用 Docker Compose 启动本地服务：
 
 ```powershell
 $env:SYNCHUB_VERSION = "0.0.1"
+$env:SYNCHUB_IMAGE = "synchub:0.0.1"
 $env:GOPROXY = "https://goproxy.cn,direct"
 docker compose up --build
 ```
@@ -382,9 +410,9 @@ docker info --format '{{json .RegistryConfig.Mirrors}}'
 ["https://hub.rat.dev/"]
 ```
 
-如果 Go module 下载在容器内超时或 EOF，优先保留 compose 中的 `build.network: host`，或在单独构建时使用 `--network=host`。当前 MVP 也可以不依赖 Docker，通过 `go run .\cmd\synchub-api` 完成本地功能验证。
+如果 Go module 下载在容器内超时或 EOF，优先保留 compose 中的 `build.network: host`，或在单独构建时使用 `--network=host`。当前 MVP 的最终部署路径是 Docker 镜像；Windows 下仍可通过 `go run .\cmd\synchub-api` 做快速本地开发验证。
 
-## 11. 备份和恢复本地数据
+## 12. 备份和恢复本地数据
 
 停止 API 写入后执行备份：
 
@@ -410,7 +438,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restore-local.ps1 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-local-backup-restore.ps1
 ```
 
-## 12. 排查建议
+## 13. 排查建议
 
 服务不可用：
 

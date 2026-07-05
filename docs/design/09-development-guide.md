@@ -4,7 +4,8 @@
 
 - Go stable
 - SQLite local database
-- Docker / Docker Compose
+- Docker / Docker Compose for Linux image smoke tests and deployment packaging
+- Windows PowerShell for local development scripts
 
 Later：
 

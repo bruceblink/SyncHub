@@ -54,6 +54,7 @@ function Wait-Ready {
 
 $env:SYNCHUB_VERSION = $Version
 $env:GOPROXY = $GoProxy
+$env:SYNCHUB_IMAGE = "$ProjectName-api:$Version"
 $env:SYNCHUB_PORT = [string]$Port
 $env:SYNCHUB_CONTAINER_NAME = "$ProjectName-api"
 

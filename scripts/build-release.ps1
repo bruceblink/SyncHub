@@ -139,6 +139,7 @@ $binaries = @(
     @{ Name = "synchub-agent"; Package = "./cmd/synchub-agent" }
 )
 $archiveTool = Join-Path (Join-Path $ProjectRoot "scripts") "release-targz.go"
+$releaseComposePath = Join-Path $ProjectRoot "docker-compose.release.yml"
 $ldflags = "-s -w -X github.com/bruceblink/SyncHub/internal/version.Version=$Version"
 $hashLines = New-Object System.Collections.Generic.List[string]
 
@@ -183,6 +184,15 @@ try {
         $hashLines.Add("$hash  $archiveName")
         Remove-Item -LiteralPath $staging -Recurse -Force
     }
+
+    if (-not (Test-Path -LiteralPath $releaseComposePath)) {
+        throw "release compose file is missing: $releaseComposePath"
+    }
+    $releaseComposeName = Split-Path -Leaf $releaseComposePath
+    $releaseComposeDestination = Join-Path $releaseRoot $releaseComposeName
+    Copy-Item -LiteralPath $releaseComposePath -Destination $releaseComposeDestination
+    $releaseComposeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseComposeDestination).Hash.ToLowerInvariant()
+    $hashLines.Add("$releaseComposeHash  $releaseComposeName")
 
     $hashLines | Set-Content -LiteralPath (Join-Path $releaseRoot "SHA256SUMS.txt") -Encoding ascii
     Write-Output "release artifacts written: $releaseRoot"

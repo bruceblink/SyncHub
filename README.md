@@ -86,12 +86,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
 
 The MVP check script runs formatting, vet, unit/integration tests, local API smoke checks, and local backup/restore smoke checks.
 
-Build MVP release artifacts:
+Build and smoke-test the MVP Docker image:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.0 -Image synchub:0.1.0
+```
+
+Build auxiliary MVP release artifacts:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.0
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.0
 ```
+
+The auxiliary release directory also includes `docker-compose.release.yml` for Linux server deployment.
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the release gate.
 See [docs/releases/v0.1.0.md](docs/releases/v0.1.0.md) for the MVP release notes.
@@ -135,7 +143,26 @@ Use `--pause --json` or `--resume --json` when an external client needs a machin
 Use `--reset-state` to delete the workspace agent state and pause control files before rerunning local verification.
 Use `--reset-state --json` when an external client needs a machine-readable reset result.
 
-For a containerized local server:
+For the release Docker image on a Linux server:
+
+```bash
+docker pull ghcr.io/bruceblink/synchub:0.1.0
+docker run -d --name synchub-api \
+  -p 8765:8765 \
+  -e JWT_SECRET=change-me \
+  -v synchub-data:/data \
+  ghcr.io/bruceblink/synchub:0.1.0
+```
+
+Or use the release compose file:
+
+```bash
+export JWT_SECRET=change-me
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.0
+docker compose -f docker-compose.release.yml up -d
+```
+
+For a containerized local development server:
 
 ```bash
 docker compose up --build

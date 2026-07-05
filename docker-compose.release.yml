@@ -1,15 +1,6 @@
 services:
   synchub-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      network: host
-      args:
-        VERSION: ${SYNCHUB_VERSION:-dev}
-        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
-        GO_IMAGE: ${GO_IMAGE:-golang:1.26-alpine}
-        RUNTIME_IMAGE: ${RUNTIME_IMAGE:-alpine:3.22}
-    image: ${SYNCHUB_IMAGE:-synchub:dev}
+    image: ${SYNCHUB_IMAGE:-ghcr.io/bruceblink/synchub:0.1.0}
     container_name: ${SYNCHUB_CONTAINER_NAME:-synchub-api}
     ports:
       - "${SYNCHUB_PORT:-8765}:8765"
@@ -23,7 +14,7 @@ services:
       VERSION_CLEANUP_INTERVAL_SECONDS: 3600
       VERSION_RETENTION_MIN_VERSIONS: 20
       VERSION_RETENTION_MAX_AGE_DAYS: 30
-      JWT_SECRET: "dev-secret-change-me"
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET before starting SyncHub}
     volumes:
       - synchub-data:/data
     restart: unless-stopped

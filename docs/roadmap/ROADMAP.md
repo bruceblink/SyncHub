@@ -21,7 +21,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - Storage: Local FS for current MVP; S3 / OSS / MinIO compatible storage is deferred
 - API schema: OpenAPI
 - Observability: slog / zap + OpenTelemetry + metrics
-- Packaging: Docker / Docker Compose
+- Packaging: Docker image release / Linux Docker Compose deployment
 
 ## 总体目标
 
@@ -33,7 +33,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 2. 元数据、版本和变更日志正确。
 3. Agent 能稳定增量同步。
 4. 冲突不会静默覆盖用户文件。
-5. Docker Compose 本地部署和恢复流程稳定。
+5. Docker 镜像发布、Linux Compose 部署和恢复流程稳定。
 
 当前阶段明确不做：
 
@@ -68,7 +68,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 引入基础依赖：gin、SQLite driver、jwt、argon2、uuid、OpenTelemetry。
 - 建立配置加载：环境变量 + typed config。
 - 建立错误模型：domain error -> API error response。
-- 建立本地 SQLite 开发数据库和 Docker Compose API 部署。
+- 建立本地 SQLite 开发数据库、Docker 镜像构建和 Linux Compose API 部署。
 - 建立 CI 命令：fmt、vet、test。
 
 验收标准：

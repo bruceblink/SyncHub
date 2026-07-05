@@ -3,6 +3,7 @@
 ## 项目定位
 
 SyncHub 是一个面向个人开发者工作区的多设备同步工具，当前重点是 REST API、CLI / Agent、增量同步、版本恢复和用户级隔离存储。
+发布和部署主路径是 Linux 服务器上的 Docker 镜像；Windows 仅作为本地开发和验证环境。
 
 第一阶段优先服务以下场景：
 
@@ -51,7 +52,7 @@ GUI、WebDAV、S3 和第三方客户端适配都属于 Later，不参与当前 M
 - Storage: Local FS
 - API schema: OpenAPI
 - Observability: slog / zap + OpenTelemetry + metrics
-- Packaging: Docker / Docker Compose
+- Packaging: Docker image release / Linux Docker Compose deployment
 
 ## 系统边界
 

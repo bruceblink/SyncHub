@@ -20,6 +20,21 @@
 - 使用 `synchub-agent --path . --pause` / `--resume` 可通过工作区内控制文件暂停或恢复同步循环；加 `--json` 可输出机器可读控制结果。
 - 使用 `synchub-agent --path . --reset-state` 可删除该工作区的 Agent 状态和暂停控制文件，适合本地重新验证同步循环；加 `--json` 可输出机器可读重置结果。
 
+## Linux Docker 部署
+
+发布版以 GHCR Docker 镜像为主交付物。Linux 服务器使用 Release 附带的 `docker-compose.release.yml`：
+
+```bash
+export JWT_SECRET=change-me
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.0
+docker compose -f docker-compose.release.yml pull
+docker compose -f docker-compose.release.yml up -d
+docker compose -f docker-compose.release.yml ps
+curl -fsS http://127.0.0.1:8765/readyz
+```
+
+升级时更新 `SYNCHUB_IMAGE` 后重复 `pull` 和 `up -d`。`synchub-data` volume 持久化 `/data/synchub.db` 和 `/data/storage`。
+
 ## 本地备份
 
 开发环境默认使用 `.data/synchub.db` 和 `.data/storage`。在停止写入或停止 API 后执行：

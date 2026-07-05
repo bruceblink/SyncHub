@@ -2,11 +2,13 @@
 
 ## 首期部署形态
 
-Phase 1 使用 Docker Compose 部署：
+Phase 1 以 Docker 镜像为交付物，在 Linux 服务器使用 Docker Compose 部署：
 
 - `synchub-api`
-- SQLite database file for development
-- `local-storage` volume
+- SQLite database file in `/data/synchub.db`
+- Local object storage in `/data/storage`
+- Persistent Docker volume mounted at `/data`
+- Windows 仅作为本地开发和发布前验证环境
 
 Later 按明确需求再评估：
 
@@ -20,13 +22,13 @@ Later 按明确需求再评估：
 必需：
 
 - `JWT_SECRET`
-- `STORAGE_BACKEND`
-- `LOCAL_STORAGE_ROOT`
 
 可选：
 
 - `DATABASE_DRIVER`，默认 `sqlite`
-- `DATABASE_URL`，SQLite 默认 `./.data/synchub.db`
+- `DATABASE_URL`，镜像内 SQLite 默认 `/data/synchub.db`
+- `STORAGE_BACKEND`，镜像内默认 `local`
+- `LOCAL_STORAGE_ROOT`，镜像内默认 `/data/storage`
 - `LOG_LEVEL`
 - `HTTP_ADDR`，默认 `:8765`
 - `UPLOAD_CHUNK_SIZE`
@@ -46,18 +48,40 @@ Later adapter 配置：
 - `S3_ACCESS_KEY_ID`
 - `S3_SECRET_ACCESS_KEY`
 
+## Linux 服务器快速部署
+
+```bash
+docker pull ghcr.io/bruceblink/synchub:0.1.0
+docker run -d --name synchub-api \
+  -p 8765:8765 \
+  -e JWT_SECRET=change-me \
+  -v synchub-data:/data \
+  ghcr.io/bruceblink/synchub:0.1.0
+```
+
+使用 Compose：
+
+```bash
+export JWT_SECRET=change-me
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.0
+docker compose -f docker-compose.release.yml up -d
+```
+
 ## 数据卷
 
-- SQLite 开发数据库文件必须持久化。
-- Local FS storage root 必须持久化。
+- SQLite 数据库文件必须通过 `/data` 持久化。
+- Local FS storage root 必须通过 `/data/storage` 持久化。
 - staging storage 可以和 object storage 放在同一 volume，但需要后台清理策略。
 
 ## 发布流程
 
-1. 构建镜像。
-2. 运行 migration。
-3. 滚动替换 API container。
-4. 健康检查通过后开放流量。
+1. Tag 触发 Release workflow。
+2. Linux runner 运行 MVP gate。
+3. 构建并 smoke-test Docker image。
+4. 推送 `ghcr.io/bruceblink/synchub:<version>`、`:<tag>`、`:latest`。
+5. 发布 GitHub Release，附带 `docker-compose.release.yml`、辅助二进制 archives 和 `SHA256SUMS.txt`。
+6. Linux 服务器拉取新镜像并重启 API container。
+7. 健康检查通过后开放流量。
 
 ## Docker 构建排查
 
@@ -68,6 +92,7 @@ Later adapter 配置：
 
 构建时可以通过 `--build-arg VERSION=0.0.1` 写入 `/version` 返回的版本号。
 构建时可以通过 `--build-arg GOPROXY=https://goproxy.cn,direct` 指定 Go module proxy；`docker-compose.yml` 默认使用 `${GOPROXY:-https://goproxy.cn,direct}`。
+构建时可以通过 `--build-arg GO_IMAGE=...` 和 `--build-arg RUNTIME_IMAGE=...` 覆盖基础镜像源。
 本地网络对容器 NAT 不稳定时，compose 构建阶段使用 `build.network: host`，单独构建可使用 `docker build --network=host ...`。
 
 如果 `docker build` 在 `load metadata` 阶段失败，并出现 `failed to resolve source metadata`、`registry-1.docker.io` 连接超时或代理提示，通常说明 Docker Desktop 无法访问 Docker Hub，而不是项目编译失败。优先检查：

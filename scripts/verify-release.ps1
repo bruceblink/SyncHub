@@ -159,6 +159,7 @@ elseif (-not [System.IO.Path]::IsPathRooted($ReleaseDir)) {
 $ReleaseDir = (Resolve-Path -LiteralPath $ReleaseDir).ProviderPath
 $archiveTool = Join-Path (Join-Path $ProjectRoot "scripts") "release-targz.go"
 $unixExecutableFiles = @("synchub-api", "synchub-cli", "synchub-agent")
+$deploymentFiles = @("docker-compose.release.yml")
 
 $checksumPath = Join-Path $ReleaseDir "SHA256SUMS.txt"
 Assert-PathExists -Path $checksumPath -Message "checksum file is missing"
@@ -168,7 +169,7 @@ foreach ($line in Get-Content -LiteralPath $checksumPath) {
     if ([string]::IsNullOrWhiteSpace($line)) {
         continue
     }
-    if ($line -notmatch '^(?<hash>[0-9a-fA-F]{64})\s+\*?(?<name>.+\.(zip|tar\.gz))$') {
+    if ($line -notmatch '^(?<hash>[0-9a-fA-F]{64})\s+\*?(?<name>[^/\\]+)$') {
         throw "invalid checksum line: $line"
     }
     $name = $Matches.name.Trim()
@@ -176,6 +177,16 @@ foreach ($line in Get-Content -LiteralPath $checksumPath) {
         throw "duplicate checksum entry: $name"
     }
     $checksums[$name] = $Matches.hash.ToLowerInvariant()
+}
+
+foreach ($deploymentFile in $deploymentFiles) {
+    $deploymentPath = Join-Path $ReleaseDir $deploymentFile
+    Assert-PathExists -Path $deploymentPath -Message "deployment file is missing"
+    if (-not $checksums.ContainsKey($deploymentFile)) {
+        throw "checksum entry is missing: $deploymentFile"
+    }
+    $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $deploymentPath).Hash.ToLowerInvariant()
+    Assert-Equal -Actual $actualHash -Expected $checksums[$deploymentFile] -Message "checksum mismatch for $deploymentFile"
 }
 
 $hostTarget = "$(Get-HostGOOS)/$(Get-HostGOARCH)"
