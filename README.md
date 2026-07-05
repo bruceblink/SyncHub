@@ -99,7 +99,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.0
 ```
 
-The auxiliary release directory also includes `docker-compose.release.yml` for Linux server deployment.
+The auxiliary release directory also includes `docker-compose.release.yml` and `fly.toml` for deployment.
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the release gate.
 See [docs/releases/v0.1.0.md](docs/releases/v0.1.0.md) for the MVP release notes.
@@ -160,6 +160,16 @@ Or use the release compose file:
 export JWT_SECRET=change-me
 export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.0
 docker compose -f docker-compose.release.yml up -d
+```
+
+Or deploy the release Docker image to Fly.io:
+
+```powershell
+# Edit fly.toml: set app name, primary_region, and image tag.
+fly apps create synchub-your-name
+fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
+fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
+fly deploy --config .\fly.toml
 ```
 
 For a containerized local development server:

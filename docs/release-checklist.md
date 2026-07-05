@@ -28,7 +28,7 @@ The release Docker image is the primary deployment artifact. The script builds t
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.0
 ```
 
-The script writes the release compose file, auxiliary Linux CLI/server archives, a Windows developer archive, and `SHA256SUMS.txt` under `dist\synchub-0.1.0`. The archives are fallback/manual-install artifacts; Docker images plus `docker-compose.release.yml` are the normal release and deployment path.
+The script writes the release deployment files, auxiliary Linux CLI/server archives, a Windows developer archive, and `SHA256SUMS.txt` under `dist\synchub-0.1.0`. The archives are fallback/manual-install artifacts; Docker images plus `docker-compose.release.yml` or `fly.toml` are the normal release and deployment path.
 
 ## 4. Verify Release Assets
 
@@ -66,4 +66,4 @@ git push origin main
 git push origin v0.1.0
 ```
 
-Pushing a `v*` tag triggers the Release workflow on Linux. The workflow reruns the deterministic MVP gate, smoke-tests the Docker image, pushes `ghcr.io/bruceblink/synchub:<version>` plus matching tags, and publishes the GitHub Release with `docker-compose.release.yml`, auxiliary archives, and `SHA256SUMS.txt`. The full local MVP gate above remains the pre-tag check for the local API smoke flow.
+Pushing a `v*` tag triggers the Release workflow on Linux. The workflow reruns the deterministic MVP gate, smoke-tests the Docker image, pushes `ghcr.io/bruceblink/synchub:<version>` plus matching tags, and publishes the GitHub Release with `docker-compose.release.yml`, `fly.toml`, auxiliary archives, and `SHA256SUMS.txt`. The full local MVP gate above remains the pre-tag check for the local API smoke flow.

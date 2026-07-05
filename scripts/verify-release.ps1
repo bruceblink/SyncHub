@@ -159,7 +159,7 @@ elseif (-not [System.IO.Path]::IsPathRooted($ReleaseDir)) {
 $ReleaseDir = (Resolve-Path -LiteralPath $ReleaseDir).ProviderPath
 $archiveTool = Join-Path (Join-Path $ProjectRoot "scripts") "release-targz.go"
 $unixExecutableFiles = @("synchub-api", "synchub-cli", "synchub-agent")
-$deploymentFiles = @("docker-compose.release.yml")
+$deploymentFiles = @("docker-compose.release.yml", "fly.toml")
 
 $checksumPath = Join-Path $ReleaseDir "SHA256SUMS.txt"
 Assert-PathExists -Path $checksumPath -Message "checksum file is missing"

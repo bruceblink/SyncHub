@@ -88,7 +88,95 @@ docker run -d --name synchub-api \
 - SQLite 数据库：`/data/synchub.db`
 - 文件对象：`/data/storage`
 
-### 2.3 常用服务端环境变量
+### 2.3 部署到 Fly.io
+
+SyncHub MVP 可以直接部署到 Fly.io。当前推荐使用单个 Fly Machine + 一个挂载到 `/data` 的 Fly Volume：
+
+- `/data/synchub.db` 保存 SQLite 数据库。
+- `/data/storage` 保存文件对象。
+- `JWT_SECRET` 使用 Fly secrets 设置，不写入 `fly.toml`。
+- 不要把 Machine 数量扩到 2 个或更多；Fly Volume 不会自动复制，当前 SQLite + 本地存储适合单实例部署。
+
+在 Windows 开发机安装并登录 flyctl：
+
+```powershell
+pwsh -Command "iwr https://fly.io/install.ps1 -useb | iex"
+fly auth login
+```
+
+编辑项目根目录或 Release 附带的 `fly.toml`：
+
+- 把 `app = "synchub-your-name"` 改成全局唯一的 Fly app 名称。
+- 按需要调整 `primary_region`，例如 `nrt`、`hkg`、`sin`、`sjc`。
+- 把 `[build].image` 改成要部署的 SyncHub 镜像版本，例如 `ghcr.io/bruceblink/synchub:0.1.0`。
+
+创建 App 和数据卷：
+
+```powershell
+$env:FLY_APP = "synchub-your-name"
+$env:FLY_REGION = "nrt"
+
+fly apps create $env:FLY_APP
+fly volumes create synchub_data --app $env:FLY_APP --region $env:FLY_REGION --size 1
+```
+
+设置服务端密钥：
+
+```powershell
+fly secrets set --app $env:FLY_APP JWT_SECRET="replace-with-a-long-random-secret"
+```
+
+部署：
+
+```powershell
+fly deploy --config .\fly.toml
+```
+
+检查服务：
+
+```powershell
+fly status --app $env:FLY_APP
+fly checks list --app $env:FLY_APP
+fly logs --app $env:FLY_APP
+curl.exe -fsS "https://$env:FLY_APP.fly.dev/readyz"
+curl.exe -fsS "https://$env:FLY_APP.fly.dev/version"
+```
+
+后续 CLI 登录时，服务端地址就是 Fly 提供的 HTTPS 地址：
+
+```powershell
+$env:SYNCHUB_SERVER = "https://$env:FLY_APP.fly.dev"
+synchub-cli register --server $env:SYNCHUB_SERVER --email user@example.com --password "change-me"
+synchub-cli login --server $env:SYNCHUB_SERVER --email user@example.com --password "change-me"
+```
+
+如果还没有发布 GHCR 镜像，或 GHCR package 不是公开可拉取，可以临时改为在 Fly.io 上从源码构建。把 `fly.toml` 中的 `[build]` 改成：
+
+```toml
+[build]
+  dockerfile = "Dockerfile"
+
+[build.args]
+  VERSION = "0.1.0"
+  GOPROXY = "https://proxy.golang.org,direct"
+```
+
+然后重新执行：
+
+```powershell
+fly deploy --config .\fly.toml
+```
+
+升级到新镜像版本时，编辑 `fly.toml` 的 `[build].image`，再部署：
+
+```powershell
+fly deploy --config .\fly.toml
+curl.exe -fsS "https://$env:FLY_APP.fly.dev/readyz"
+```
+
+Fly 会为 Volume 提供自动快照，但不要把它当作唯一备份。重要数据建议定期导出 `/data` 或至少保留可恢复的 Volume snapshot。
+
+### 2.4 常用服务端环境变量
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |

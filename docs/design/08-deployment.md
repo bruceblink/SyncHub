@@ -10,6 +10,15 @@ Phase 1 以 Docker 镜像为交付物，在 Linux 服务器使用 Docker Compose
 - Persistent Docker volume mounted at `/data`
 - Windows 仅作为本地开发和发布前验证环境
 
+Fly.io 也是首期支持的 Docker 镜像部署目标：
+
+- 单个 Fly Machine 运行 `synchub-api`
+- Fly Volume `synchub_data` 挂载到 `/data`
+- SQLite database file in `/data/synchub.db`
+- Local object storage in `/data/storage`
+- `JWT_SECRET` 使用 Fly secrets 管理
+- 由于 Fly Volume 不自动复制，MVP 不做多 Machine 横向扩展
+
 Later 按明确需求再评估：
 
 - `redis`
@@ -67,11 +76,23 @@ export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.0
 docker compose -f docker-compose.release.yml up -d
 ```
 
+## Fly.io 快速部署
+
+```powershell
+# Edit fly.toml: set app name, primary_region, and image tag.
+fly apps create synchub-your-name
+fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
+fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
+fly deploy --config .\fly.toml
+curl.exe -fsS https://synchub-your-name.fly.dev/readyz
+```
+
 ## 数据卷
 
 - SQLite 数据库文件必须通过 `/data` 持久化。
 - Local FS storage root 必须通过 `/data/storage` 持久化。
 - staging storage 可以和 object storage 放在同一 volume，但需要后台清理策略。
+- Fly.io 部署必须保持单实例，除非后续引入 LiteFS/PostgreSQL 和对象存储复制方案。
 
 ## 发布流程
 
@@ -79,7 +100,7 @@ docker compose -f docker-compose.release.yml up -d
 2. Linux runner 运行 MVP gate。
 3. 构建并 smoke-test Docker image。
 4. 推送 `ghcr.io/bruceblink/synchub:<version>`、`:<tag>`、`:latest`。
-5. 发布 GitHub Release，附带 `docker-compose.release.yml`、辅助二进制 archives 和 `SHA256SUMS.txt`。
+5. 发布 GitHub Release，附带 `docker-compose.release.yml`、`fly.toml`、辅助二进制 archives 和 `SHA256SUMS.txt`。
 6. Linux 服务器拉取新镜像并重启 API container。
 7. 健康检查通过后开放流量。
 

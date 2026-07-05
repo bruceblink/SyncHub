@@ -35,6 +35,22 @@ curl -fsS http://127.0.0.1:8765/readyz
 
 升级时更新 `SYNCHUB_IMAGE` 后重复 `pull` 和 `up -d`。`synchub-data` volume 持久化 `/data/synchub.db` 和 `/data/storage`。
 
+## Fly.io 部署
+
+Fly.io 使用同一个 GHCR Docker 镜像和 Release 附带的 `fly.toml`。MVP 推荐单 Machine + 单 Fly Volume：
+
+```powershell
+# Edit fly.toml: set app name, primary_region, and image tag.
+fly apps create synchub-your-name
+fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
+fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
+fly deploy --config .\fly.toml
+fly checks list --app synchub-your-name
+curl.exe -fsS https://synchub-your-name.fly.dev/readyz
+```
+
+不要把当前 MVP 扩成多 Machine。Fly Volume 不会自动复制，多个实例会让 SQLite 和 `/data/storage` 产生分叉。需要高可用时，先设计 LiteFS/PostgreSQL 和对象存储复制方案。
+
 ## 本地备份
 
 开发环境默认使用 `.data/synchub.db` 和 `.data/storage`。在停止写入或停止 API 后执行：
