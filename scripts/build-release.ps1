@@ -3,7 +3,7 @@ param(
     [string]$Version,
     [string]$ProjectRoot = "",
     [string]$OutputDir = "",
-    [string[]]$Targets = @("windows/amd64", "linux/amd64", "linux/arm64", "darwin/arm64")
+    [string[]]$Targets = @("linux/amd64", "linux/arm64", "windows/amd64")
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +22,28 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-HostGo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $savedGOOS = $env:GOOS
+    $savedGOARCH = $env:GOARCH
+    $savedCGO = $env:CGO_ENABLED
+    try {
+        [Environment]::SetEnvironmentVariable("GOOS", $null, "Process")
+        [Environment]::SetEnvironmentVariable("GOARCH", $null, "Process")
+        [Environment]::SetEnvironmentVariable("CGO_ENABLED", $null, "Process")
+        Invoke-Checked -FilePath "go" -Arguments $Arguments
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable("GOOS", $savedGOOS, "Process")
+        [Environment]::SetEnvironmentVariable("GOARCH", $savedGOARCH, "Process")
+        [Environment]::SetEnvironmentVariable("CGO_ENABLED", $savedCGO, "Process")
+    }
+}
+
 function Assert-Target {
     param(
         [Parameter(Mandatory = $true)]
@@ -32,6 +54,49 @@ function Assert-Target {
     if ($parts.Count -ne 2 -or [string]::IsNullOrWhiteSpace($parts[0]) -or [string]::IsNullOrWhiteSpace($parts[1])) {
         throw "target must use GOOS/GOARCH format: $Target"
     }
+}
+
+function Get-ArchiveName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ArtifactName,
+        [Parameter(Mandatory = $true)]
+        [string]$GOOS
+    )
+
+    if ($GOOS -eq "windows") {
+        return "$ArtifactName.zip"
+    }
+    return "$ArtifactName.tar.gz"
+}
+
+function Write-ReleaseArchive {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourceDir,
+        [Parameter(Mandatory = $true)]
+        [string]$ArchivePath,
+        [Parameter(Mandatory = $true)]
+        [string]$GOOS,
+        [Parameter(Mandatory = $true)]
+        [string[]]$ExecutableFiles,
+        [Parameter(Mandatory = $true)]
+        [string]$ArchiveTool
+    )
+
+    if ($GOOS -eq "windows") {
+        Compress-Archive -Path (Join-Path $SourceDir "*") -DestinationPath $ArchivePath
+        return
+    }
+
+    Invoke-HostGo -Arguments @(
+        "run",
+        $ArchiveTool,
+        "-mode", "create",
+        "-source", $SourceDir,
+        "-archive", $ArchivePath,
+        "-exec", ($ExecutableFiles -join ",")
+    )
 }
 
 $Version = $Version.Trim()
@@ -73,6 +138,7 @@ $binaries = @(
     @{ Name = "synchub-cli"; Package = "./cmd/synchub-cli" },
     @{ Name = "synchub-agent"; Package = "./cmd/synchub-agent" }
 )
+$archiveTool = Join-Path (Join-Path $ProjectRoot "scripts") "release-targz.go"
 $ldflags = "-s -w -X github.com/bruceblink/SyncHub/internal/version.Version=$Version"
 $hashLines = New-Object System.Collections.Generic.List[string]
 
@@ -110,10 +176,11 @@ try {
         Copy-Item -LiteralPath (Join-Path $ProjectRoot "README.md") -Destination $staging
         Copy-Item -LiteralPath (Join-Path $ProjectRoot "LICENSE") -Destination $staging
 
-        $archivePath = Join-Path $releaseRoot "$artifactName.zip"
-        Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $archivePath
+        $archiveName = Get-ArchiveName -ArtifactName $artifactName -GOOS $goos
+        $archivePath = Join-Path $releaseRoot $archiveName
+        Write-ReleaseArchive -SourceDir $staging -ArchivePath $archivePath -GOOS $goos -ExecutableFiles ($binaries | ForEach-Object { $_.Name }) -ArchiveTool $archiveTool
         $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
-        $hashLines.Add("$hash  $(Split-Path -Leaf $archivePath)")
+        $hashLines.Add("$hash  $archiveName")
         Remove-Item -LiteralPath $staging -Recurse -Force
     }
 

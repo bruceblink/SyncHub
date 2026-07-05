@@ -20,7 +20,7 @@ MVP checks passed
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.0
 ```
 
-The script writes versioned archives and `SHA256SUMS.txt` under `dist\synchub-0.1.0`.
+The script writes Linux server archives, a Windows developer archive, and `SHA256SUMS.txt` under `dist\synchub-0.1.0`. Windows artifacts are ZIP files; Linux artifacts are `tar.gz` files so Unix execute bits survive on the deployment host.
 
 ## 3. Verify Release Artifacts
 
@@ -58,4 +58,4 @@ git push origin main
 git push origin v0.1.0
 ```
 
-Pushing a `v*` tag triggers the Release workflow. The workflow reruns the deterministic MVP gate, rebuilds and verifies release artifacts, then publishes the GitHub Release with the archives and `SHA256SUMS.txt`. The full local MVP gate above remains the pre-tag check for the local API smoke flow.
+Pushing a `v*` tag triggers the Release workflow on Linux. The workflow reruns the deterministic MVP gate, rebuilds and verifies release artifacts, then publishes the GitHub Release with the archives and `SHA256SUMS.txt`. The full local MVP gate above remains the pre-tag check for the local API smoke flow.

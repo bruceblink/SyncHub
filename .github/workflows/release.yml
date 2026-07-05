@@ -70,7 +70,9 @@ jobs:
           }
 
           $releaseDir = Join-Path "dist" "synchub-$version"
-          $assets = Get-ChildItem -LiteralPath $releaseDir -File | ForEach-Object { $_.FullName }
+          $assetFiles = @(Get-ChildItem -LiteralPath $releaseDir -File)
+          $assets = @($assetFiles | ForEach-Object { $_.FullName })
+          $assetNames = @($assetFiles | ForEach-Object { $_.Name })
           if ($assets.Count -eq 0) {
               throw "no release assets found in $releaseDir"
           }
@@ -80,6 +82,18 @@ jobs:
               gh release edit $tag --title "SyncHub $version" --notes-file $notes
               if ($LASTEXITCODE -ne 0) {
                   exit $LASTEXITCODE
+              }
+              $existingAssets = @(gh release view $tag --json assets --jq ".assets[].name")
+              if ($LASTEXITCODE -ne 0) {
+                  exit $LASTEXITCODE
+              }
+              foreach ($existingAsset in $existingAssets) {
+                  if ($assetNames -notcontains $existingAsset) {
+                      gh release delete-asset $tag $existingAsset --yes
+                      if ($LASTEXITCODE -ne 0) {
+                          exit $LASTEXITCODE
+                      }
+                  }
               }
               gh release upload $tag @assets --clobber
               if ($LASTEXITCODE -ne 0) {

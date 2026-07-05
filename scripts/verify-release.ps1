@@ -3,7 +3,7 @@ param(
     [string]$Version,
     [string]$ProjectRoot = "",
     [string]$ReleaseDir = "",
-    [string[]]$Targets = @("windows/amd64", "linux/amd64", "linux/arm64", "darwin/arm64")
+    [string[]]$Targets = @("linux/amd64", "linux/arm64", "windows/amd64")
 )
 
 $ErrorActionPreference = "Stop"
@@ -62,6 +62,55 @@ function Invoke-CheckedOutput {
     return [string]($output -join "`n")
 }
 
+function Invoke-Checked {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [string[]]$Arguments = @()
+    )
+
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FilePath $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Invoke-HostGo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $savedGOOS = $env:GOOS
+    $savedGOARCH = $env:GOARCH
+    $savedCGO = $env:CGO_ENABLED
+    try {
+        [Environment]::SetEnvironmentVariable("GOOS", $null, "Process")
+        [Environment]::SetEnvironmentVariable("GOARCH", $null, "Process")
+        [Environment]::SetEnvironmentVariable("CGO_ENABLED", $null, "Process")
+        Invoke-Checked -FilePath "go" -Arguments $Arguments
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable("GOOS", $savedGOOS, "Process")
+        [Environment]::SetEnvironmentVariable("GOARCH", $savedGOARCH, "Process")
+        [Environment]::SetEnvironmentVariable("CGO_ENABLED", $savedCGO, "Process")
+    }
+}
+
+function Get-ArchiveName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ArtifactName,
+        [Parameter(Mandatory = $true)]
+        [string]$GOOS
+    )
+
+    if ($GOOS -eq "windows") {
+        return "$ArtifactName.zip"
+    }
+    return "$ArtifactName.tar.gz"
+}
+
 function Get-HostGOOS {
     if ($PSVersionTable.PSEdition -ne "Core" -or $IsWindows) {
         return "windows"
@@ -108,6 +157,8 @@ elseif (-not [System.IO.Path]::IsPathRooted($ReleaseDir)) {
     $ReleaseDir = Join-Path $ProjectRoot $ReleaseDir
 }
 $ReleaseDir = (Resolve-Path -LiteralPath $ReleaseDir).ProviderPath
+$archiveTool = Join-Path (Join-Path $ProjectRoot "scripts") "release-targz.go"
+$unixExecutableFiles = @("synchub-api", "synchub-cli", "synchub-agent")
 
 $checksumPath = Join-Path $ReleaseDir "SHA256SUMS.txt"
 Assert-PathExists -Path $checksumPath -Message "checksum file is missing"
@@ -117,7 +168,7 @@ foreach ($line in Get-Content -LiteralPath $checksumPath) {
     if ([string]::IsNullOrWhiteSpace($line)) {
         continue
     }
-    if ($line -notmatch '^(?<hash>[0-9a-fA-F]{64})\s+\*?(?<name>.+\.zip)$') {
+    if ($line -notmatch '^(?<hash>[0-9a-fA-F]{64})\s+\*?(?<name>.+\.(zip|tar\.gz))$') {
         throw "invalid checksum line: $line"
     }
     $name = $Matches.name.Trim()
@@ -135,7 +186,7 @@ try {
         Assert-Target -Target $target
         $goos, $goarch = $target -split "/"
         $artifactName = "synchub-$Version-$goos-$goarch"
-        $archiveName = "$artifactName.zip"
+        $archiveName = Get-ArchiveName -ArtifactName $artifactName -GOOS $goos
         $archivePath = Join-Path $ReleaseDir $archiveName
         Assert-PathExists -Path $archivePath -Message "release archive is missing"
 
@@ -146,7 +197,20 @@ try {
         Assert-Equal -Actual $actualHash -Expected $checksums[$archiveName] -Message "checksum mismatch for $archiveName"
 
         $extractDir = Join-Path $tempRoot $artifactName
-        Expand-Archive -LiteralPath $archivePath -DestinationPath $extractDir
+        New-Item -ItemType Directory -Path $extractDir | Out-Null
+        if ($archiveName.EndsWith(".zip")) {
+            Expand-Archive -LiteralPath $archivePath -DestinationPath $extractDir
+        }
+        else {
+            Invoke-HostGo -Arguments @(
+                "run",
+                $archiveTool,
+                "-mode", "extract",
+                "-source", $extractDir,
+                "-archive", $archivePath,
+                "-exec", ($unixExecutableFiles -join ",")
+            )
+        }
 
         Assert-PathExists -Path (Join-Path $extractDir "README.md") -Message "$archiveName missing README.md"
         Assert-PathExists -Path (Join-Path $extractDir "LICENSE") -Message "$archiveName missing LICENSE"
