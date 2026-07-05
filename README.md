@@ -94,6 +94,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1
 ```
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the release gate.
+See [docs/releases/v0.1.0.md](docs/releases/v0.1.0.md) for the MVP release notes.
 
 Minimal CLI flow:
 

@@ -30,7 +30,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1
 
 The verifier checks the expected archives, SHA256 hashes, required bundled files, and the host-platform CLI/agent version output.
 
-## 4. Optional Docker Smoke
+## 4. Review Release Notes
+
+Review [docs/releases/v0.1.0.md](releases/v0.1.0.md) before tagging.
+
+## 5. Optional Docker Smoke
 
 Run this when Docker Desktop and registry access are healthy:
 
@@ -38,7 +42,7 @@ Run this when Docker Desktop and registry access are healthy:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-compose.ps1 -Version 0.1.0
 ```
 
-## 5. Final Git Gate
+## 6. Final Git Gate
 
 ```powershell
 git status --short
