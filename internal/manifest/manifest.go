@@ -167,6 +167,7 @@ func LoadIgnoreRules(root string) (IgnoreRules, error) {
 		}
 		lines := strings.Split(string(raw), "\n")
 		for _, line := range lines {
+			line = strings.TrimPrefix(line, "\ufeff")
 			line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue

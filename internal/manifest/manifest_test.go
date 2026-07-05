@@ -42,7 +42,7 @@ func TestScan(t *testing.T) {
 func TestScanHonorsSynchubIgnore(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, ".synchubignore"), "# local build artifacts\n*.tmp\nbuild/\nlogs/*.log\n")
-	writeFile(t, filepath.Join(root, ".ignore"), "cache/\n*.secret\n")
+	writeFile(t, filepath.Join(root, ".ignore"), "\ufeffcache/\n*.secret\n")
 	writeFile(t, filepath.Join(root, "keep.txt"), "keep")
 	writeFile(t, filepath.Join(root, "scratch.tmp"), "temporary")
 	writeFile(t, filepath.Join(root, "build", "app.bin"), "binary")
