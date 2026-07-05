@@ -22,7 +22,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 
 
 The script writes versioned archives and `SHA256SUMS.txt` under `dist\synchub-0.1.0`.
 
-## 3. Optional Docker Smoke
+## 3. Verify Release Artifacts
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.0
+```
+
+The verifier checks the expected archives, SHA256 hashes, required bundled files, and the host-platform CLI/agent version output.
+
+## 4. Optional Docker Smoke
 
 Run this when Docker Desktop and registry access are healthy:
 
@@ -30,7 +38,7 @@ Run this when Docker Desktop and registry access are healthy:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-compose.ps1 -Version 0.1.0
 ```
 
-## 4. Final Git Gate
+## 5. Final Git Gate
 
 ```powershell
 git status --short

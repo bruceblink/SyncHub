@@ -90,6 +90,7 @@ Build MVP release artifacts:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.0
 ```
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the release gate.
