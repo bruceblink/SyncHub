@@ -26,6 +26,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli logout --json")
 	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace")
 	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace --json")
+	fmt.Fprintln(w, "  synchub-cli workspace init --remote-root /workspace C:\\work\\notes D:\\work\\code")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path .")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path . --json")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path . --dry-run")
@@ -86,6 +87,7 @@ func printWorkspaceUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace")
 	fmt.Fprintln(w, "  synchub-cli workspace init --path . --remote-path /workspace --json")
+	fmt.Fprintln(w, "  synchub-cli workspace init --remote-root /workspace C:\\work\\notes D:\\work\\code")
 }
 
 func printServerUsage(w io.Writer) {

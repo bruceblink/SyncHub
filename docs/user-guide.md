@@ -301,6 +301,12 @@ New-Item -ItemType Directory -Force -Path $workspace | Out-Null
 synchub-cli workspace init --path $workspace --remote-path /notes
 ```
 
+如果要一次初始化多个目录，可以把多个本地路径放在同一个命令里，并用 `--remote-root` 指定共同的远端父路径。下面会分别生成 `/workspace/notes` 和 `/workspace/code`：
+
+```powershell
+synchub-cli workspace init --remote-root /workspace F:\work\notes D:\work\code
+```
+
 初始化后会生成：
 
 ```text

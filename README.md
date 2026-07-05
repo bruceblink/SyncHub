@@ -116,6 +116,12 @@ go run ./cmd/synchub-cli sync trash --path .
 go run ./cmd/synchub-cli sync devices --path .
 ```
 
+Initialize several workspaces in one command by passing multiple paths and a shared remote parent:
+
+```bash
+go run ./cmd/synchub-cli workspace init --remote-root /workspace ./notes ./code
+```
+
 Use `sync doctor` to check workspace config, login config, API readiness, auth, device registration, manifest state, and daemon pause state before manual testing.
 Use `sync once --dry-run` before applying changes if you want to inspect the local push plan and incoming change feed.
 Use `sync trash` to inspect local files moved aside after remote delete events.

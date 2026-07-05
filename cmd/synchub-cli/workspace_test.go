@@ -144,6 +144,149 @@ func TestRunWorkspaceInitCanOutputJSON(t *testing.T) {
 	}
 }
 
+func TestRunWorkspaceInitSupportsMultiplePaths(t *testing.T) {
+	tempDir := t.TempDir()
+	loginConfigPath := filepath.Join(tempDir, "config.json")
+	firstRoot := filepath.Join(tempDir, "alpha")
+	secondRoot := filepath.Join(tempDir, "bravo")
+	for _, root := range []string{firstRoot, secondRoot} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("create workspace root: %v", err)
+		}
+	}
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: "http://localhost:8765",
+		User:      clientUser("u1", "user@example.com"),
+		Tokens: client.TokenPair{
+			AccessToken:  "access",
+			RefreshToken: "refresh",
+			ExpiresIn:    900,
+		},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"workspace",
+		"init",
+		"--path", firstRoot,
+		"--path", secondRoot,
+		"--remote-root", "/devices",
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("workspace init multiple: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "workspaces initialized: 2") || !strings.Contains(out, "workspace initialized: "+firstRoot) || !strings.Contains(out, "workspace initialized: "+secondRoot) {
+		t.Fatalf("stdout = %q", out)
+	}
+	firstConfig, err := readWorkspaceConfig(filepath.Join(firstRoot, ".synchub", "workspace.json"))
+	if err != nil {
+		t.Fatalf("read first workspace config: %v", err)
+	}
+	secondConfig, err := readWorkspaceConfig(filepath.Join(secondRoot, ".synchub", "workspace.json"))
+	if err != nil {
+		t.Fatalf("read second workspace config: %v", err)
+	}
+	if firstConfig.RemotePath != "/devices/alpha" || secondConfig.RemotePath != "/devices/bravo" {
+		t.Fatalf("remote paths = %q %q", firstConfig.RemotePath, secondConfig.RemotePath)
+	}
+	registry, _, err := readWorkspaceRegistry(loginConfigPath)
+	if err != nil {
+		t.Fatalf("read workspace registry: %v", err)
+	}
+	if len(registry.Workspaces) != 2 {
+		t.Fatalf("registry workspaces = %#v", registry.Workspaces)
+	}
+}
+
+func TestRunWorkspaceInitSupportsMultiplePathsAsArgsJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	loginConfigPath := filepath.Join(tempDir, "config.json")
+	firstRoot := filepath.Join(tempDir, "alpha")
+	secondRoot := filepath.Join(tempDir, "bravo")
+	for _, root := range []string{firstRoot, secondRoot} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("create workspace root: %v", err)
+		}
+	}
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: "http://localhost:8765",
+		User:      clientUser("u1", "user@example.com"),
+		Tokens: client.TokenPair{
+			AccessToken:  "access",
+			RefreshToken: "refresh",
+			ExpiresIn:    900,
+		},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"workspace",
+		"init",
+		"--remote-root", "/devices",
+		"--config", loginConfigPath,
+		"--json",
+		firstRoot,
+		secondRoot,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("workspace init multiple json: %v", err)
+	}
+	if strings.Contains(stdout.String(), "workspace initialized") {
+		t.Fatalf("json output includes text init output: %s", stdout.String())
+	}
+	var snapshot workspaceInitBatchSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode workspace init batch json: %v\n%s", err, stdout.String())
+	}
+	if len(snapshot.Workspaces) != 2 {
+		t.Fatalf("workspaces = %#v", snapshot.Workspaces)
+	}
+	if snapshot.Workspaces[0].Workspace.RemotePath != "/devices/alpha" || snapshot.Workspaces[1].Workspace.RemotePath != "/devices/bravo" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestRunWorkspaceInitRejectsRemotePathWithMultiplePaths(t *testing.T) {
+	tempDir := t.TempDir()
+	loginConfigPath := filepath.Join(tempDir, "config.json")
+	firstRoot := filepath.Join(tempDir, "alpha")
+	secondRoot := filepath.Join(tempDir, "bravo")
+	for _, root := range []string{firstRoot, secondRoot} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("create workspace root: %v", err)
+		}
+	}
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL: "http://localhost:8765",
+		User:      clientUser("u1", "user@example.com"),
+		Tokens: client.TokenPair{
+			AccessToken:  "access",
+			RefreshToken: "refresh",
+			ExpiresIn:    900,
+		},
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	err := run(context.Background(), []string{
+		"workspace",
+		"init",
+		"--path", firstRoot,
+		"--path", secondRoot,
+		"--remote-path", "/shared",
+		"--config", loginConfigPath,
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "--remote-path can only be used with one workspace path") {
+		t.Fatalf("error = %v, want remote-path multiple path error", err)
+	}
+}
+
 func TestRunWorkspaceInitRequiresLogin(t *testing.T) {
 	err := run(context.Background(), []string{
 		"workspace",
@@ -189,5 +332,8 @@ func TestRunWorkspaceHelpIncludesInitJSONCommand(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "synchub-cli workspace init --path . --remote-path /workspace --json") {
 		t.Fatalf("workspace help missing init json command: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "synchub-cli workspace init --remote-root /workspace C:\\work\\notes D:\\work\\code") {
+		t.Fatalf("workspace help missing multiple init command: %s", stdout.String())
 	}
 }

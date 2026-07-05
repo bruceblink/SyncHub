@@ -28,6 +28,21 @@ type workspaceConfig struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
+type stringListFlag []string
+
+func (f *stringListFlag) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *stringListFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("workspace path is required")
+	}
+	*f = append(*f, value)
+	return nil
+}
+
 func runWorkspace(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		printWorkspaceUsage(stderr)
@@ -48,8 +63,10 @@ func runWorkspace(args []string, stdout, stderr io.Writer) error {
 func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("workspace init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	rootPath := fs.String("path", ".", "local workspace root")
+	var rootPaths stringListFlag
+	fs.Var(&rootPaths, "path", "local workspace root; repeat for multiple workspaces")
 	remotePath := fs.String("remote-path", "", "remote workspace path")
+	remoteRoot := fs.String("remote-root", "", "remote parent path for multiple workspaces")
 	configPath := fs.String("config", defaultConfigPath(), "login config file path")
 	workspaceConfigPath := fs.String("workspace-config", "", "workspace config file path")
 	jsonOutput := fs.Bool("json", false, "print workspace init result as JSON")
@@ -57,53 +74,50 @@ func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	pathArgs := append([]string{}, rootPaths...)
+	pathArgs = append(pathArgs, fs.Args()...)
+	if len(pathArgs) == 0 {
+		pathArgs = []string{"."}
+	}
+	if len(pathArgs) > 1 && strings.TrimSpace(*workspaceConfigPath) != "" {
+		return errors.New("--workspace-config can only be used with one workspace path")
+	}
+
 	loginConfig, err := readConfig(*configPath)
 	if err != nil {
 		return err
 	}
-	root, err := resolveWorkspaceRoot(*rootPath)
+	results, err := buildWorkspaceInitResults(pathArgs, *remotePath, *remoteRoot, *workspaceConfigPath, loginConfig)
 	if err != nil {
 		return err
 	}
-	remote := *remotePath
-	if strings.TrimSpace(remote) == "" {
-		remote = defaultRemotePath(root)
-	}
-	normalizedRemote, err := normalizeRemotePath(remote)
-	if err != nil {
-		return err
-	}
-	outputPath := *workspaceConfigPath
-	if strings.TrimSpace(outputPath) == "" {
-		outputPath = defaultWorkspaceConfigPath(root)
-	}
-
-	now := time.Now().UTC()
-	cfg := workspaceConfig{
-		Version:    1,
-		Root:       root,
-		RemotePath: normalizedRemote,
-		ServerURL:  loginConfig.ServerURL,
-		UserID:     loginConfig.User.ID,
-		UserEmail:  loginConfig.User.Email,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-	if err := writeJSONFile(outputPath, cfg, 0o600); err != nil {
-		return err
-	}
-	if err := registerWorkspace(*configPath, outputPath, cfg); err != nil {
-		return err
+	for _, result := range results {
+		if err := writeJSONFile(result.Config, result.Workspace, 0o600); err != nil {
+			return err
+		}
+		if err := registerWorkspace(*configPath, result.Config, result.Workspace); err != nil {
+			return err
+		}
 	}
 	if *jsonOutput {
-		return writeWorkspaceInitJSON(stdout, cfg, outputPath)
+		return writeWorkspaceInitJSON(stdout, results)
 	}
-	fmt.Fprintf(stdout, "workspace initialized: %s\n", root)
-	fmt.Fprintf(stdout, "remote path: %s\n", normalizedRemote)
-	fmt.Fprintf(stdout, "config: %s\n", outputPath)
+	if len(results) > 1 {
+		fmt.Fprintf(stdout, "workspaces initialized: %d\n", len(results))
+	}
+	for _, result := range results {
+		fmt.Fprintf(stdout, "workspace initialized: %s\n", result.Workspace.Root)
+		fmt.Fprintf(stdout, "remote path: %s\n", result.Workspace.RemotePath)
+		fmt.Fprintf(stdout, "config: %s\n", result.Config)
+	}
 	fmt.Fprintln(stdout, "daemon: registered for startup discovery")
 	fmt.Fprintln(stdout, "startup command: synchub-cli sync daemon")
 	return nil
+}
+
+type workspaceInitResult struct {
+	Config    string          `json:"config"`
+	Workspace workspaceConfig `json:"workspace"`
 }
 
 type workspaceInitSnapshot struct {
@@ -111,14 +125,95 @@ type workspaceInitSnapshot struct {
 	Workspace workspaceConfig `json:"workspace"`
 }
 
-func writeWorkspaceInitJSON(stdout io.Writer, workspace workspaceConfig, configPath string) error {
+type workspaceInitBatchSnapshot struct {
+	Workspaces []workspaceInitResult `json:"workspaces"`
+}
+
+func writeWorkspaceInitJSON(stdout io.Writer, results []workspaceInitResult) error {
+	if len(results) == 0 {
+		return errors.New("workspace init result is empty")
+	}
+	if len(results) > 1 {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(workspaceInitBatchSnapshot{Workspaces: results})
+	}
+	result := results[0]
 	snapshot := workspaceInitSnapshot{
-		Config:    configPath,
-		Workspace: workspace,
+		Config:    result.Config,
+		Workspace: result.Workspace,
 	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(snapshot)
+}
+
+func buildWorkspaceInitResults(pathArgs []string, remotePath, remoteRoot, workspaceConfigPath string, loginConfig cliConfig) ([]workspaceInitResult, error) {
+	if strings.TrimSpace(remotePath) != "" && strings.TrimSpace(remoteRoot) != "" {
+		return nil, errors.New("--remote-path and --remote-root cannot be used together")
+	}
+	multiple := len(pathArgs) > 1
+	if multiple && strings.TrimSpace(remotePath) != "" {
+		return nil, errors.New("--remote-path can only be used with one workspace path; use --remote-root for multiple paths")
+	}
+
+	results := make([]workspaceInitResult, 0, len(pathArgs))
+	roots := make([]string, 0, len(pathArgs))
+	remotePaths := make(map[string]string, len(pathArgs))
+	now := time.Now().UTC()
+	for _, rootPath := range pathArgs {
+		root, err := resolveWorkspaceRoot(rootPath)
+		if err != nil {
+			return nil, err
+		}
+		for _, existing := range roots {
+			if samePath(existing, root) {
+				return nil, fmt.Errorf("duplicate workspace path: %s", root)
+			}
+		}
+		remote, err := initRemotePath(root, remotePath, remoteRoot)
+		if err != nil {
+			return nil, err
+		}
+		if existing, ok := remotePaths[remote]; ok {
+			return nil, fmt.Errorf("remote path %s is already used by %s", remote, existing)
+		}
+		outputPath := workspaceConfigPath
+		if strings.TrimSpace(outputPath) == "" {
+			outputPath = defaultWorkspaceConfigPath(root)
+		}
+		cfg := workspaceConfig{
+			Version:    1,
+			Root:       root,
+			RemotePath: remote,
+			ServerURL:  loginConfig.ServerURL,
+			UserID:     loginConfig.User.ID,
+			UserEmail:  loginConfig.User.Email,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		roots = append(roots, root)
+		remotePaths[remote] = root
+		results = append(results, workspaceInitResult{
+			Config:    outputPath,
+			Workspace: cfg,
+		})
+	}
+	return results, nil
+}
+
+func initRemotePath(root, remotePath, remoteRoot string) (string, error) {
+	if strings.TrimSpace(remotePath) != "" {
+		return normalizeRemotePath(remotePath)
+	}
+	if strings.TrimSpace(remoteRoot) == "" {
+		return normalizeRemotePath(defaultRemotePath(root))
+	}
+	parent, err := normalizeRemotePath(remoteRoot)
+	if err != nil {
+		return "", err
+	}
+	return normalizeRemotePath(pathpkg.Join(parent, filepath.Base(filepath.Clean(root))))
 }
 
 func loadWorkspace(rootPath, workspaceConfigPath string) (string, workspaceConfig, string, error) {
