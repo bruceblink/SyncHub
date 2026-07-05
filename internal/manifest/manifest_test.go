@@ -41,8 +41,8 @@ func TestScan(t *testing.T) {
 
 func TestScanHonorsSynchubIgnore(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, ".synchubignore"), "# local build artifacts\n*.tmp\nbuild/\nlogs/*.log\n")
-	writeFile(t, filepath.Join(root, ".ignore"), "\ufeffcache/\n*.secret\n")
+	writeFile(t, filepath.Join(root, ".synchubignore"), "\ufeff# local build artifacts\n*.tmp\nbuild/\nlogs/*.log\ncache/\n")
+	writeFile(t, filepath.Join(root, ".ignore"), "*.secret\n")
 	writeFile(t, filepath.Join(root, "keep.txt"), "keep")
 	writeFile(t, filepath.Join(root, "scratch.tmp"), "temporary")
 	writeFile(t, filepath.Join(root, "build", "app.bin"), "binary")
@@ -60,7 +60,7 @@ func TestScanHonorsSynchubIgnore(t *testing.T) {
 	for _, item := range m.Items {
 		got = append(got, item.RelativePath)
 	}
-	want := []string{"keep.txt", "logs/keep.txt"}
+	want := []string{".ignore", ".synchubignore", "keep.txt", "logs/keep.txt", "nested/token.secret"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("items = %v, want %v", got, want)
 	}
@@ -69,9 +69,22 @@ func TestScanHonorsSynchubIgnore(t *testing.T) {
 func TestIgnoreFilePathsIncludesSupportedWorkspaceIgnoreFiles(t *testing.T) {
 	root := t.TempDir()
 	paths := IgnoreFilePaths(root)
-	want := []string{filepath.Join(root, ".synchubignore"), filepath.Join(root, ".ignore")}
+	want := []string{filepath.Join(root, ".synchubignore")}
 	if strings.Join(paths, ",") != strings.Join(want, ",") {
 		t.Fatalf("paths = %v, want %v", paths, want)
+	}
+}
+
+func TestScanAlwaysIncludesSynchubIgnore(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".synchubignore"), ".synchubignore\n")
+
+	m, err := Scan(context.Background(), root, "/workspace")
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(m.Items) != 1 || m.Items[0].RelativePath != ".synchubignore" {
+		t.Fatalf("items = %#v, want .synchubignore", m.Items)
 	}
 }
 

@@ -16,9 +16,7 @@ import (
 	"time"
 )
 
-const primaryIgnoreFileName = ".synchubignore"
-
-var ignoreFileNames = []string{primaryIgnoreFileName, ".ignore"}
+const ignoreFileName = ".synchubignore"
 
 type Manifest struct {
 	Version     int       `json:"version"`
@@ -97,7 +95,7 @@ func Scan(ctx context.Context, root, remotePath string) (Manifest, error) {
 			return err
 		}
 		relative = filepath.ToSlash(relative)
-		if isIgnoreFile(relative) || ignoreRules.Match(relative, false) {
+		if relative != ignoreFileName && ignoreRules.Match(relative, false) {
 			return nil
 		}
 		info, err := d.Info()
@@ -157,39 +155,33 @@ type ignoreRule struct {
 
 func LoadIgnoreRules(root string) (IgnoreRules, error) {
 	rules := IgnoreRules{}
-	for _, name := range ignoreFileNames {
-		raw, err := os.ReadFile(filepath.Join(root, name))
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, err
+	raw, err := os.ReadFile(filepath.Join(root, ignoreFileName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return rules, nil
 		}
-		lines := strings.Split(string(raw), "\n")
-		for _, line := range lines {
-			line = strings.TrimPrefix(line, "\ufeff")
-			line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			line = strings.TrimPrefix(filepath.ToSlash(line), "/")
-			directory := strings.HasSuffix(line, "/")
-			line = strings.TrimSuffix(line, "/")
-			if line == "" {
-				continue
-			}
-			rules = append(rules, ignoreRule{pattern: line, directory: directory})
+		return nil, err
+	}
+	lines := strings.Split(string(raw), "\n")
+	for _, line := range lines {
+		line = strings.TrimPrefix(line, "\ufeff")
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
+		line = strings.TrimPrefix(filepath.ToSlash(line), "/")
+		directory := strings.HasSuffix(line, "/")
+		line = strings.TrimSuffix(line, "/")
+		if line == "" {
+			continue
+		}
+		rules = append(rules, ignoreRule{pattern: line, directory: directory})
 	}
 	return rules, nil
 }
 
 func IgnoreFilePaths(root string) []string {
-	paths := make([]string, 0, len(ignoreFileNames))
-	for _, name := range ignoreFileNames {
-		paths = append(paths, filepath.Join(root, name))
-	}
-	return paths
+	return []string{filepath.Join(root, ignoreFileName)}
 }
 
 func (rules IgnoreRules) Match(relativePath string, directory bool) bool {
@@ -228,16 +220,6 @@ func matchIgnoreRule(pattern, relativePath string) bool {
 	for _, part := range strings.Split(relativePath, "/") {
 		ok, err := pathpkg.Match(pattern, part)
 		if err == nil && ok {
-			return true
-		}
-	}
-	return false
-}
-
-func isIgnoreFile(relativePath string) bool {
-	relativePath = strings.TrimPrefix(filepath.ToSlash(relativePath), "/")
-	for _, name := range ignoreFileNames {
-		if relativePath == name {
 			return true
 		}
 	}

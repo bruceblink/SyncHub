@@ -222,9 +222,6 @@ func TestRunManifestIgnoresListsWorkspaceRules(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".synchubignore"), []byte("# generated files\n*.tmp\nbuild/\nlogs/*.log\n"), 0o644); err != nil {
 		t.Fatalf("write ignore file: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".ignore"), []byte("cache/\n"), 0o644); err != nil {
-		t.Fatalf("write .ignore file: %v", err)
-	}
 
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{
@@ -238,12 +235,10 @@ func TestRunManifestIgnoresListsWorkspaceRules(t *testing.T) {
 	out := stdout.String()
 	for _, want := range []string{
 		"ignore file: " + filepath.Join(root, ".synchubignore"),
-		"ignore file: " + filepath.Join(root, ".ignore"),
-		"rules: 4",
+		"rules: 3",
 		"*.tmp",
 		"build/",
 		"logs/*.log",
-		"cache/",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
@@ -278,7 +273,7 @@ func TestRunManifestIgnoresCanOutputJSON(t *testing.T) {
 	if snapshot.Root != root || snapshot.IgnoreFile != filepath.Join(root, ".synchubignore") {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
-	wantIgnoreFiles := []string{filepath.Join(root, ".synchubignore"), filepath.Join(root, ".ignore")}
+	wantIgnoreFiles := []string{filepath.Join(root, ".synchubignore")}
 	if strings.Join(snapshot.IgnoreFiles, ",") != strings.Join(wantIgnoreFiles, ",") {
 		t.Fatalf("ignore files = %#v, want %#v", snapshot.IgnoreFiles, wantIgnoreFiles)
 	}
@@ -326,7 +321,7 @@ func TestRunManifestIgnoresEmptyRulesCanOutputJSON(t *testing.T) {
 	if snapshot.Root != root || snapshot.IgnoreFile != filepath.Join(root, ".synchubignore") {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
-	wantIgnoreFiles := []string{filepath.Join(root, ".synchubignore"), filepath.Join(root, ".ignore")}
+	wantIgnoreFiles := []string{filepath.Join(root, ".synchubignore")}
 	if strings.Join(snapshot.IgnoreFiles, ",") != strings.Join(wantIgnoreFiles, ",") {
 		t.Fatalf("ignore files = %#v, want %#v", snapshot.IgnoreFiles, wantIgnoreFiles)
 	}

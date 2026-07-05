@@ -120,7 +120,7 @@ Use `sync doctor` to check workspace config, login config, API readiness, auth, 
 Use `sync once --dry-run` before applying changes if you want to inspect the local push plan and incoming change feed.
 Use `sync trash` to inspect local files moved aside after remote delete events.
 `sync status` also shows a local trash summary when these files exist.
-Create a `.synchubignore` or `.ignore` file at the workspace root to exclude local build outputs or other paths from manifest scanning, watch detection, and sync push.
+Create a `.synchubignore` file at the workspace root to exclude local build outputs or other paths from manifest scanning, watch detection, and sync push. The `.synchubignore` file is synchronized like a normal workspace file so devices share the same rules.
 
 `workspace init` registers the workspace in the user-level workspace registry. A login/startup task can then run one command to watch every registered workspace:
 
