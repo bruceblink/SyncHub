@@ -1,5 +1,5 @@
 param(
-    [string]$ProjectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).ProviderPath,
+    [string]$ProjectRoot = "",
     [int]$Port = 18765
 )
 
@@ -33,6 +33,13 @@ function Invoke-ScriptStep {
     & $Script
 }
 
+$scriptRoot = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptRoot)) {
+    $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = Join-Path $scriptRoot ".."
+}
 $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
 
 Push-Location $ProjectRoot

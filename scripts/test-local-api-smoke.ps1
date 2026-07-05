@@ -1,9 +1,18 @@
 param(
-    [string]$ProjectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).ProviderPath,
+    [string]$ProjectRoot = "",
     [int]$Port = 18765
 )
 
 $ErrorActionPreference = "Stop"
+
+$scriptRoot = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptRoot)) {
+    $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = Join-Path $scriptRoot ".."
+}
+$ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
 
 function Remove-DirectoryWithRetry {
     param(

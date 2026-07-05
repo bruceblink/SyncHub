@@ -86,6 +86,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
 
 The MVP check script runs formatting, vet, unit/integration tests, local API smoke checks, and local backup/restore smoke checks.
 
+Build MVP release artifacts:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.0
+```
+
+See [docs/release-checklist.md](docs/release-checklist.md) for the release gate.
+
 Minimal CLI flow:
 
 ```bash

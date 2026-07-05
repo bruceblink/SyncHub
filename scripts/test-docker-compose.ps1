@@ -1,5 +1,5 @@
 param(
-    [string]$ProjectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).ProviderPath,
+    [string]$ProjectRoot = "",
     [int]$Port = 18766,
     [string]$Version = "0.0.1",
     [string]$GoProxy = "https://goproxy.cn,direct",
@@ -7,6 +7,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$scriptRoot = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptRoot)) {
+    $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = Join-Path $scriptRoot ".."
+}
+$ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
 
 function Invoke-Compose {
     param(
@@ -43,7 +52,6 @@ function Wait-Ready {
     throw "SyncHub API did not become ready at $URL within ${TimeoutSeconds}s"
 }
 
-$ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
 $env:SYNCHUB_VERSION = $Version
 $env:GOPROXY = $GoProxy
 $env:SYNCHUB_PORT = [string]$Port
