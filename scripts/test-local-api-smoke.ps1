@@ -20,7 +20,7 @@ function Remove-DirectoryWithRetry {
         [string]$Path
     )
 
-    for ($attempt = 1; $attempt -le 10; $attempt++) {
+    for ($attempt = 1; $attempt -le 30; $attempt++) {
         try {
             if (Test-Path -LiteralPath $Path) {
                 Remove-Item -LiteralPath $Path -Recurse -Force
@@ -28,12 +28,30 @@ function Remove-DirectoryWithRetry {
             return
         }
         catch {
-            if ($attempt -eq 10) {
+            if ($attempt -eq 30) {
                 throw
             }
-            Start-Sleep -Milliseconds 200
+            Start-Sleep -Milliseconds 500
         }
     }
+}
+
+function Write-GitHubAnnotation {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Level,
+        [Parameter(Mandatory = $true)]
+        [string]$Title,
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    if ($env:GITHUB_ACTIONS -ne "true") {
+        return
+    }
+    $escapedTitle = $Title.Replace("%", "%25").Replace("`r", "%0D").Replace("`n", "%0A").Replace(":", "%3A").Replace(",", "%2C")
+    $escapedMessage = $Message.Replace("%", "%25").Replace("`r", "%0D").Replace("`n", "%0A")
+    Write-Output "::$Level title=$escapedTitle::$escapedMessage"
 }
 
 function Join-ChildPath {
@@ -120,6 +138,7 @@ $apiErr = Join-Path $tempRoot "api.err.log"
 $serverURL = "http://127.0.0.1:$Port"
 $apiProcess = $null
 $isWindows = $PSVersionTable.PSEdition -ne "Core" -or $IsWindows
+$supportsStartWindowStyle = $isWindows -and $PSVersionTable.PSEdition -ne "Core"
 $apiBinaryName = if ($isWindows) { "synchub-api.exe" } else { "synchub-api" }
 $cliBinaryName = if ($isWindows) { "synchub-cli.exe" } else { "synchub-cli" }
 $agentBinaryName = if ($isWindows) { "synchub-agent.exe" } else { "synchub-agent" }
@@ -147,7 +166,7 @@ try {
         RedirectStandardOutput = $apiOut
         RedirectStandardError  = $apiErr
     }
-    if ($isWindows) {
+    if ($supportsStartWindowStyle) {
         $startArgs.WindowStyle = "Hidden"
     }
     $apiProcess = Start-Process @startArgs
@@ -247,8 +266,13 @@ try {
 catch {
     $caught = $_
     if (Test-Path -LiteralPath $apiErr) {
-        [Console]::Error.WriteLine((Get-Content -LiteralPath $apiErr -Raw))
+        $apiErrText = Get-Content -LiteralPath $apiErr -Raw
+        [Console]::Error.WriteLine($apiErrText)
+        if (-not [string]::IsNullOrWhiteSpace($apiErrText)) {
+            Write-GitHubAnnotation -Level "error" -Title "api stderr" -Message $apiErrText
+        }
     }
+    Write-GitHubAnnotation -Level "error" -Title "local api smoke failed" -Message $caught.Exception.Message
     throw $caught
 }
 finally {
@@ -257,6 +281,13 @@ finally {
         $apiProcess.WaitForExit()
     }
     if (Test-Path -LiteralPath $tempRoot) {
-        Remove-DirectoryWithRetry -Path $tempRoot
+        try {
+            Remove-DirectoryWithRetry -Path $tempRoot
+        }
+        catch {
+            $message = "temporary cleanup failed: $($_.Exception.Message)"
+            Write-Warning $message
+            Write-GitHubAnnotation -Level "warning" -Title "temporary cleanup failed" -Message $message
+        }
     }
 }
