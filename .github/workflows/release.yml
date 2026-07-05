@@ -131,10 +131,10 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          IMAGE_TAGS: ${{ steps.image.outputs.tags }}
         run: |
           $tag = "${{ steps.release.outputs.tag }}"
           $version = "${{ steps.release.outputs.version }}"
+          $image = "${{ steps.image.outputs.image }}"
           $notes = "${{ steps.release.outputs.notes }}"
           if (-not (Test-Path -LiteralPath $notes)) {
               throw "release notes file is missing: $notes"
@@ -178,13 +178,15 @@ jobs:
               }
           }
 
-          $tags = $env:IMAGE_TAGS -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+          $tags = @(
+              "${image}:$tag",
+              "${image}:$version"
+          )
+          if ($version -notmatch "-") {
+              $tags += "${image}:latest"
+          }
           $digest = "${{ steps.docker.outputs.digest }}"
-          $tagList = ($tags | ForEach-Object { "- ``$_``" }) -join "`n"
-          $imageSummary = @"
-          ## Docker Image
-
-          $tagList
-          - Digest: `$digest`
-          "@
-          $imageSummary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          $summary = @("## Docker Image", "")
+          $summary += $tags | ForEach-Object { "- ``$_``" }
+          $summary += "- Digest: ``$digest``"
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
