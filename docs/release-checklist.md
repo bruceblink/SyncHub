@@ -20,7 +20,7 @@ MVP checks passed
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.1 -Image synchub:0.1.1
 ```
 
-The release Docker image is the primary deployment artifact. The script builds the image, checks the embedded CLI version, starts the API container, and verifies `/readyz` plus `/version`.
+The release Docker image is the primary deployment artifact. The script builds the image, checks the image version label, verifies that the runtime image does not include `synchub-cli`, starts the API container, and verifies `/readyz` plus `/version`.
 
 ## 3. Build Release Assets
 

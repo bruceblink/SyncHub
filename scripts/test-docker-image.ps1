@@ -111,11 +111,12 @@ try {
         Invoke-Docker -Arguments $buildArgs
     }
 
-    $cliVersion = Invoke-DockerOutput -Arguments @("run", "--rm", "--entrypoint", "/usr/local/bin/synchub-cli", $Image, "version")
-    $expectedVersion = "SyncHub $Version"
-    if ($cliVersion.Trim() -ne $expectedVersion) {
-        throw "CLI version mismatch actual=[$($cliVersion.Trim())] expected=[$expectedVersion]"
+    $imageInspect = Invoke-DockerOutput -Arguments @("image", "inspect", $Image) | ConvertFrom-Json
+    $imageVersion = [string]$imageInspect[0].Config.Labels."org.opencontainers.image.version"
+    if ($imageVersion.Trim() -ne $Version) {
+        throw "image version label mismatch actual=[$($imageVersion.Trim())] expected=[$Version]"
     }
+    Invoke-Docker -Arguments @("run", "--rm", "--entrypoint", "/bin/sh", $Image, "-c", "test ! -e /usr/local/bin/synchub-cli")
 
     Invoke-DockerBestEffort -Arguments @("rm", "-f", $ContainerName)
     Invoke-DockerBestEffort -Arguments @("volume", "rm", "-f", $VolumeName)

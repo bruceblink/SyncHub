@@ -17,7 +17,6 @@ RUN go mod download
 COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-api ./cmd/synchub-api
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-cli ./cmd/synchub-cli
 
 FROM ${RUNTIME_IMAGE}
 
@@ -39,7 +38,6 @@ RUN apk add --no-cache ca-certificates \
 WORKDIR /app
 
 COPY --from=build /out/synchub-api /usr/local/bin/synchub-api
-COPY --from=build /out/synchub-cli /usr/local/bin/synchub-cli
 
 RUN mkdir -p /data/storage && chown -R synchub:synchub /data
 

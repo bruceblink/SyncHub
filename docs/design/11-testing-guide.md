@@ -45,7 +45,7 @@ Docker 镜像交付链路可以单独验证：
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.1 -Image synchub:0.1.1
 ```
 
-该脚本会构建镜像、校验镜像内 CLI 版本、启动 API container，并验证 `/readyz` 和 `/version`。Release workflow 将它作为 Docker 镜像发布前的必过 smoke gate。
+该脚本会构建镜像、校验镜像版本标签、确认 runtime image 不包含 `synchub-cli`、启动 API container，并验证 `/readyz` 和 `/version`。Release workflow 将它作为 Docker 镜像发布前的必过 smoke gate。
 
 Docker Compose 本地部署链路也可以单独验证：
 
