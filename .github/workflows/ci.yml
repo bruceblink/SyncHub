@@ -36,7 +36,7 @@ jobs:
         run: ./scripts/test-local-backup-restore.ps1
 
   local-api-smoke:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
