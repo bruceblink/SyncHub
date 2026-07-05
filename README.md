@@ -88,20 +88,20 @@ The MVP check script runs formatting, vet, unit/integration tests, local API smo
 Build and smoke-test the MVP Docker image:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.0 -Image synchub:0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.1 -Image synchub:0.1.1
 ```
 
 Build auxiliary MVP release artifacts:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.0
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.1
 ```
 
 The auxiliary release directory also includes `docker-compose.release.yml` and `fly.toml` for deployment.
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the release gate.
-See [docs/releases/v0.1.0.md](docs/releases/v0.1.0.md) for the MVP release notes.
+See [docs/releases/v0.1.1.md](docs/releases/v0.1.1.md) for the MVP release notes.
 
 Minimal CLI flow:
 
@@ -146,19 +146,19 @@ Use `--reset-state --json` when an external client needs a machine-readable rese
 For the release Docker image on a Linux server:
 
 ```bash
-docker pull ghcr.io/bruceblink/synchub:0.1.0
+docker pull ghcr.io/bruceblink/synchub:0.1.1
 docker run -d --name synchub-api \
   -p 8765:8765 \
   -e JWT_SECRET=change-me \
   -v synchub-data:/data \
-  ghcr.io/bruceblink/synchub:0.1.0
+  ghcr.io/bruceblink/synchub:0.1.1
 ```
 
 Or use the release compose file:
 
 ```bash
 export JWT_SECRET=change-me
-export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.0
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
 docker compose -f docker-compose.release.yml up -d
 ```
 

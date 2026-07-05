@@ -28,7 +28,7 @@
 
 ```bash
 export JWT_SECRET=change-me
-export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.0
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
 docker compose -f docker-compose.release.yml pull
 docker compose -f docker-compose.release.yml up -d
 docker compose -f docker-compose.release.yml ps

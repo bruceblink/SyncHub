@@ -1,6 +1,6 @@
 services:
   synchub-api:
-    image: ${SYNCHUB_IMAGE:-ghcr.io/bruceblink/synchub:0.1.0}
+    image: ${SYNCHUB_IMAGE:-ghcr.io/bruceblink/synchub:0.1.1}
     container_name: ${SYNCHUB_CONTAINER_NAME:-synchub-api}
     ports:
       - "${SYNCHUB_PORT:-8765}:8765"
