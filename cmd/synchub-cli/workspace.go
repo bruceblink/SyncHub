@@ -75,7 +75,7 @@ func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 	}
 	outputPath := *workspaceConfigPath
 	if strings.TrimSpace(outputPath) == "" {
-		outputPath = filepath.Join(root, ".synchub", "workspace.json")
+		outputPath = defaultWorkspaceConfigPath(root)
 	}
 
 	now := time.Now().UTC()
@@ -92,13 +92,17 @@ func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 	if err := writeJSONFile(outputPath, cfg, 0o600); err != nil {
 		return err
 	}
+	if err := registerWorkspace(*configPath, outputPath, cfg); err != nil {
+		return err
+	}
 	if *jsonOutput {
 		return writeWorkspaceInitJSON(stdout, cfg, outputPath)
 	}
 	fmt.Fprintf(stdout, "workspace initialized: %s\n", root)
 	fmt.Fprintf(stdout, "remote path: %s\n", normalizedRemote)
 	fmt.Fprintf(stdout, "config: %s\n", outputPath)
-	fmt.Fprintf(stdout, "next: synchub-cli sync daemon --path %s\n", root)
+	fmt.Fprintln(stdout, "daemon: registered for startup discovery")
+	fmt.Fprintln(stdout, "startup command: synchub-cli sync daemon")
 	return nil
 }
 
@@ -124,7 +128,7 @@ func loadWorkspace(rootPath, workspaceConfigPath string) (string, workspaceConfi
 	}
 	configPath := workspaceConfigPath
 	if strings.TrimSpace(configPath) == "" {
-		configPath = filepath.Join(root, ".synchub", "workspace.json")
+		configPath = defaultWorkspaceConfigPath(root)
 	}
 	workspace, err := readWorkspaceConfig(configPath)
 	if err != nil {
@@ -134,6 +138,10 @@ func loadWorkspace(rootPath, workspaceConfigPath string) (string, workspaceConfi
 		root = workspace.Root
 	}
 	return root, workspace, configPath, nil
+}
+
+func defaultWorkspaceConfigPath(root string) string {
+	return filepath.Join(root, ".synchub", "workspace.json")
 }
 
 func loadWorkspaceAndManifestPath(rootPath, workspaceConfigPath, manifestPath string) (string, workspaceConfig, string, error) {

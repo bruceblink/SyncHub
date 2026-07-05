@@ -122,13 +122,13 @@ Use `sync trash` to inspect local files moved aside after remote delete events.
 `sync status` also shows a local trash summary when these files exist.
 Create a `.synchubignore` file at the workspace root to exclude local build outputs or other paths from manifest scanning, watch detection, and sync push.
 
-Run the daemon loop for an initialized workspace:
+`workspace init` registers the workspace in the user-level workspace registry. A login/startup task can then run one command to watch every registered workspace:
 
 ```bash
 go run ./cmd/synchub-cli sync daemon
 ```
 
-The daemon watches local changes by default and also runs a scheduled sync as a fallback.
+The daemon does not depend on the current directory when `--path` is omitted. It loads the registered workspaces for the current login config, watches local changes by default, and also runs a scheduled sync as a fallback. Use `--path <workspace>` only when you want to operate on one workspace explicitly.
 For a single daemon sync cycle, add `--once`.
 For a daemon-driven preview, use `--once --dry-run`.
 Use `--once --json` or `--once --dry-run --json` when an external client needs the underlying `sync once` result in a machine-readable format.

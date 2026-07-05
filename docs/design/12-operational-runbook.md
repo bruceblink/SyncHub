@@ -14,7 +14,8 @@
 - 过期上传会话由 API 进程内 worker 周期性标记为 `expired`，间隔由 `UPLOAD_CLEANUP_INTERVAL_SECONDS` 控制。
 - 过期文件版本由 API 进程内 worker 周期性清理，间隔由 `VERSION_CLEANUP_INTERVAL_SECONDS` 控制；未设置时跟随上传清理间隔。
 - 清理任务每轮处理数量由 `CLEANUP_BATCH_LIMIT` 控制，默认 `1000`。
-- CLI daemon 默认监听本地 workspace 变化，并按周期兜底重试同步；设置 `synchub-cli sync daemon --cycles N` 可执行固定轮次后退出，适合本地验证和脚本化 smoke test。
+- CLI daemon 默认读取用户级 workspace registry，监听所有已初始化 workspace，并按周期兜底重试同步；适合开机自启或用户登录自启。
+- 设置 `synchub-cli sync daemon --cycles N` 可对已注册 workspace 执行固定轮次后退出，适合本地验证和脚本化 smoke test。
 - 使用 `synchub-cli sync daemon --no-watch --interval 30s` 可关闭本地变化监听，仅按固定周期同步。
 - 设置 `synchub-cli sync daemon --max-failures N` 后，连续失败达到 N 次会退出，便于由 systemd 或其他 supervisor 重启。
 - 使用 `synchub-cli sync daemon --path . --status` 可查看该工作区最近一次 daemon 运行状态、失败次数和最后错误；加 `--json` 可输出机器可读状态。

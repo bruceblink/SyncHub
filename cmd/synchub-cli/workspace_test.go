@@ -45,7 +45,10 @@ func TestRunWorkspaceInitWritesConfig(t *testing.T) {
 	if !strings.Contains(stdout.String(), "workspace initialized") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "next: synchub-cli sync daemon --path "+workspaceRoot) {
+	if !strings.Contains(stdout.String(), "daemon: registered for startup discovery") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "startup command: synchub-cli sync daemon") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 
@@ -65,6 +68,17 @@ func TestRunWorkspaceInitWritesConfig(t *testing.T) {
 	}
 	if cfg.CreatedAt.IsZero() || cfg.UpdatedAt.IsZero() {
 		t.Fatalf("workspace config missing timestamps: %#v", cfg)
+	}
+
+	registry, _, err := readWorkspaceRegistry(loginConfigPath)
+	if err != nil {
+		t.Fatalf("read workspace registry: %v", err)
+	}
+	if len(registry.Workspaces) != 1 {
+		t.Fatalf("registry workspaces = %#v", registry.Workspaces)
+	}
+	if registry.Workspaces[0].Root != workspaceRoot || registry.Workspaces[0].WorkspaceConfigPath != filepath.Join(workspaceRoot, ".synchub", "workspace.json") || registry.Workspaces[0].ConfigPath != loginConfigPath {
+		t.Fatalf("registry entry = %#v", registry.Workspaces[0])
 	}
 }
 

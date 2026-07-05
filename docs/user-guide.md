@@ -307,10 +307,10 @@ synchub-cli workspace init --path $workspace --remote-path /notes
 <workspace>/.synchub/workspace.json
 ```
 
-初始化完成后，CLI 会提示下一步启动内置 daemon。日常使用可以直接运行：
+初始化时还会把该目录写入用户级 workspace registry。以后系统登录后只要启动一次 daemon，它就会读取 registry 并监听所有已初始化 workspace，不依赖当前目录：
 
 ```powershell
-synchub-cli sync daemon --path $workspace
+synchub-cli sync daemon
 ```
 
 建议先运行诊断：
@@ -408,13 +408,19 @@ synchub-cli sync devices --path $workspace --json
 
 Daemon 是 `synchub-cli` 内置的后台同步模式，适合日常持续同步；不再需要单独安装或启动 `synchub-agent`。
 
-日常使用只需要在已初始化的工作区运行：
+日常使用只需要启动一次 daemon。它会读取用户级 workspace registry，并监听所有已初始化 workspace：
+
+```powershell
+synchub-cli sync daemon
+```
+
+这个命令适合放进系统开机自启或用户登录自启任务。Daemon 默认监听本地变化，有变化时尽快触发同步，同时按 `--interval` 做兜底同步。
+
+只操作某个 workspace 时，再显式传入 `--path`：
 
 ```powershell
 synchub-cli sync daemon --path $workspace
 ```
-
-Daemon 默认监听本地变化，有变化时尽快触发同步，同时按 `--interval` 做兜底同步。
 
 执行一次 Daemon 同步：
 
@@ -800,6 +806,7 @@ synchub-cli sync pull --path $workspace
 Daemon：
 
 ```powershell
+synchub-cli sync daemon
 synchub-cli sync daemon --path $workspace
 synchub-cli sync daemon --path $workspace --once
 synchub-cli sync daemon --path $workspace --status

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -66,4 +68,91 @@ func TestRunSyncDaemonHelpUsesCLICommand(t *testing.T) {
 	if !strings.Contains(stdout.String(), "synchub-cli sync daemon --path . --once") {
 		t.Fatalf("stdout = %q, want daemon usage", stdout.String())
 	}
+}
+
+func TestRunSyncDaemonWithoutPathUsesRegisteredWorkspaces(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	workspaceRoots := []string{
+		filepath.Join(tempDir, "workspace-a"),
+		filepath.Join(tempDir, "workspace-b"),
+	}
+	for _, root := range workspaceRoots {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("create workspace root: %v", err)
+		}
+		cfg := workspaceConfig{
+			Version:    1,
+			Root:       root,
+			RemotePath: "/workspace",
+			ServerURL:  "http://localhost:8765",
+			UserID:     "u1",
+			UserEmail:  "user@example.com",
+		}
+		workspaceConfigPath := defaultWorkspaceConfigPath(root)
+		if err := writeJSONFile(workspaceConfigPath, cfg, 0o600); err != nil {
+			t.Fatalf("write workspace config: %v", err)
+		}
+		if err := registerWorkspace(configPath, workspaceConfigPath, cfg); err != nil {
+			t.Fatalf("register workspace: %v", err)
+		}
+	}
+
+	var got [][]string
+	err := runSyncDaemonWithSyncOnce(context.Background(), []string{
+		"--config", configPath,
+		"--once",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, func(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+		_ = ctx
+		_ = stdout
+		_ = stderr
+		got = append(got, append([]string{}, args...))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("sync daemon registered workspaces: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("sync calls = %d, want 2: %#v", len(got), got)
+	}
+	for i, root := range workspaceRoots {
+		if value := testDaemonFlagValue(got[i], "path"); value != root {
+			t.Fatalf("call %d path = %q, want %q; args=%#v", i, value, root, got[i])
+		}
+		if value := testDaemonFlagValue(got[i], "config"); value != configPath {
+			t.Fatalf("call %d config = %q, want %q; args=%#v", i, value, configPath, got[i])
+		}
+		if value := testDaemonFlagValue(got[i], "workspace-config"); value != defaultWorkspaceConfigPath(root) {
+			t.Fatalf("call %d workspace config = %q, want %q; args=%#v", i, value, defaultWorkspaceConfigPath(root), got[i])
+		}
+	}
+}
+
+func TestRunSyncDaemonWithoutPathRequiresRegisteredWorkspace(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	err := runSyncDaemonWithSyncOnce(context.Background(), []string{
+		"--config", configPath,
+		"--once",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, []string, io.Writer, io.Writer) error {
+		t.Fatal("runner should not be called without registered workspaces")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "no initialized workspaces registered") {
+		t.Fatalf("error = %v, want no registered workspaces", err)
+	}
+}
+
+func testDaemonFlagValue(args []string, name string) string {
+	prefix := "--" + name + "="
+	flagName := "--" + name
+	for i, arg := range args {
+		if strings.HasPrefix(arg, prefix) {
+			return strings.TrimPrefix(arg, prefix)
+		}
+		if arg == flagName && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
