@@ -79,13 +79,15 @@ docker compose -f docker-compose.release.yml up -d
 ## Fly.io 快速部署
 
 ```powershell
-# Edit fly.toml: set app name, primary_region, and image tag.
+# Edit fly.toml: set app name and primary_region.
 fly apps create synchub-your-name
 fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
 fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
 fly deploy --config .\fly.toml
 curl.exe -fsS https://synchub-your-name.fly.dev/readyz
 ```
+
+The CI workflow uses `superfly/flyctl-actions/setup-flyctl` and deploys from the project Dockerfile after the `main` branch test job passes. Configure `FLY_API_TOKEN` as a repository secret for automatic deployment.
 
 ## 数据卷
 

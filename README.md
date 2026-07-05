@@ -168,15 +168,17 @@ export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
 docker compose -f docker-compose.release.yml up -d
 ```
 
-Or deploy the release Docker image to Fly.io:
+Or deploy to Fly.io from the project Dockerfile:
 
 ```powershell
-# Edit fly.toml: set app name, primary_region, and image tag.
+# Edit fly.toml: set app name and primary_region.
 fly apps create synchub-your-name
 fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
 fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
 fly deploy --config .\fly.toml
 ```
+
+GitHub Actions deploys the Fly app automatically after the `main` branch CI job passes. Configure the repository secret `FLY_API_TOKEN` before relying on CI deployment.
 
 For a containerized local development server:
 

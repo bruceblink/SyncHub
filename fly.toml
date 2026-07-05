@@ -7,9 +7,10 @@ kill_signal = "SIGINT"
 kill_timeout = "5s"
 
 [build]
-  # The MVP release path deploys the published Docker image directly.
-  # Update this tag for each SyncHub release.
-  image = "ghcr.io/bruceblink/synchub:0.1.1"
+  dockerfile = "Dockerfile"
+
+[build.args]
+  GOPROXY = "https://proxy.golang.org,direct"
 
 [env]
   HTTP_ADDR = ":8765"

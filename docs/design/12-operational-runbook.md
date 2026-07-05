@@ -39,10 +39,10 @@ curl -fsS http://127.0.0.1:8765/readyz
 
 ## Fly.io 部署
 
-Fly.io 使用同一个 GHCR Docker 镜像和 Release 附带的 `fly.toml`。MVP 推荐单 Machine + 单 Fly Volume：
+Fly.io 使用项目 Dockerfile 和 `fly.toml` 从源码构建部署。MVP 推荐单 Machine + 单 Fly Volume：
 
 ```powershell
-# Edit fly.toml: set app name, primary_region, and image tag.
+# Edit fly.toml: set app name and primary_region.
 fly apps create synchub-your-name
 fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
 fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
@@ -50,6 +50,8 @@ fly deploy --config .\fly.toml
 fly checks list --app synchub-your-name
 curl.exe -fsS https://synchub-your-name.fly.dev/readyz
 ```
+
+GitHub Actions 在 `main` 分支 CI 通过后自动部署 Fly app；仓库需要配置 `FLY_API_TOKEN` secret。
 
 不要把当前 MVP 扩成多 Machine。Fly Volume 不会自动复制，多个实例会让 SQLite 和 `/data/storage` 产生分叉。需要高可用时，先设计 LiteFS/PostgreSQL 和对象存储复制方案。
 

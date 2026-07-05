@@ -35,6 +35,42 @@ jobs:
         shell: pwsh
         run: ./scripts/test-local-backup-restore.ps1
 
+  deploy:
+    runs-on: ubuntu-latest
+    needs:
+      - go
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: fly-production
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+        with:
+          version: 0.4.66
+
+      - name: Resolve build metadata
+        id: build
+        shell: bash
+        run: |
+          echo "version=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Fly.io
+        run: >
+          flyctl deploy
+          --config fly.toml
+          --remote-only
+          --depot-scope=app
+          --build-arg VERSION=${{ steps.build.outputs.version }}
+          --build-arg VCS_REF=${{ github.sha }}
+          --build-arg BUILD_DATE=${{ steps.build.outputs.created }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
   local-api-smoke:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

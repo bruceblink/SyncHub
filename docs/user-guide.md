@@ -108,7 +108,7 @@ fly auth login
 
 - 把 `app = "synchub-your-name"` 改成全局唯一的 Fly app 名称。
 - 按需要调整 `primary_region`，例如 `nrt`、`hkg`、`sin`、`sjc`。
-- 把 `[build].image` 改成要部署的 SyncHub 镜像版本，例如 `ghcr.io/bruceblink/synchub:0.1.1`。
+- 默认使用项目根目录的 `Dockerfile` 在 Fly remote builder 上构建，不再需要在 `fly.toml` 固定镜像版本。
 
 创建 App 和数据卷：
 
@@ -132,6 +132,8 @@ fly secrets set --app $env:FLY_APP JWT_SECRET="replace-with-a-long-random-secret
 fly deploy --config .\fly.toml
 ```
 
+如果使用 GitHub Actions 自动部署，在仓库 Secrets 中设置 `FLY_API_TOKEN`。之后推送到 `main` 时，CI 测试通过后会自动执行 Fly 部署。
+
 检查服务：
 
 ```powershell
@@ -150,24 +152,7 @@ synchub-cli register --server $env:SYNCHUB_SERVER --email user@example.com --pas
 synchub-cli login --server $env:SYNCHUB_SERVER --email user@example.com --password "change-me"
 ```
 
-如果还没有发布 GHCR 镜像，或 GHCR package 不是公开可拉取，可以临时改为在 Fly.io 上从源码构建。把 `fly.toml` 中的 `[build]` 改成：
-
-```toml
-[build]
-  dockerfile = "Dockerfile"
-
-[build.args]
-  VERSION = "0.1.1"
-  GOPROXY = "https://proxy.golang.org,direct"
-```
-
-然后重新执行：
-
-```powershell
-fly deploy --config .\fly.toml
-```
-
-升级到新镜像版本时，编辑 `fly.toml` 的 `[build].image`，再部署：
+手动升级时，从最新代码重新部署：
 
 ```powershell
 fly deploy --config .\fly.toml
