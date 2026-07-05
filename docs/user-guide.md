@@ -251,6 +251,7 @@ Agent 是对 `synchub-cli sync once` 的循环封装。
 
 ```powershell
 go run .\cmd\synchub-agent --path $deviceA --config $login --once --device-name device-a --platform windows
+go run .\cmd\synchub-agent --path $deviceA --config $login --once --device-name device-a --platform windows --json
 ```
 
 查看 Agent 状态：

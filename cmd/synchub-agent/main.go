@@ -98,6 +98,14 @@ type agentResetSnapshot struct {
 	Removed   []string             `json:"removed"`
 }
 
+type agentCycleSnapshot struct {
+	Action    string               `json:"action"`
+	Workspace agentStatusWorkspace `json:"workspace"`
+	Skipped   bool                 `json:"skipped"`
+	Reason    string               `json:"reason,omitempty"`
+	State     agentState           `json:"state"`
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -420,8 +428,22 @@ func (s *syncLoopState) runCycle(ctx context.Context, opts agentOptions, stdout,
 		if ok {
 			previousPtr = &previous
 		}
-		if stateErr := writeAgentState(agentPausedState(opts, s.cyclesRun+1, previousPtr)); stateErr != nil {
+		state := agentPausedState(opts, s.cyclesRun+1, previousPtr)
+		if stateErr := writeAgentState(state); stateErr != nil {
 			fmt.Fprintf(stderr, "write agent state failed: %v\n", stateErr)
+		}
+		if opts.JSON {
+			if err := writeAgentCycleJSON(stdout, agentCycleSnapshot{
+				Action:    "skipped",
+				Workspace: agentStatusWorkspace{Root: agentSnapshotRoot(opts.RootPath)},
+				Skipped:   true,
+				Reason:    "agent is paused",
+				State:     state,
+			}); err != nil {
+				return false, err
+			}
+			s.cyclesRun++
+			return shouldStopAfterCycles(opts, s.cyclesRun), nil
 		}
 		fmt.Fprintln(stdout, "sync skipped: agent is paused")
 		s.cyclesRun++
@@ -455,6 +477,20 @@ func (s *syncLoopState) runCycle(ctx context.Context, opts agentOptions, stdout,
 		return true, s.lastErr
 	}
 	return false, nil
+}
+
+func writeAgentCycleJSON(stdout io.Writer, snapshot agentCycleSnapshot) error {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
+}
+
+func agentSnapshotRoot(root string) string {
+	resolved, err := resolveAgentRoot(root)
+	if err != nil {
+		return root
+	}
+	return resolved
 }
 
 func agentSuccessState(opts agentOptions, cyclesRun int) agentState {
@@ -639,6 +675,9 @@ func runSyncCycle(ctx context.Context, opts agentOptions, stdout, stderr io.Writ
 		fmt.Fprintf(stderr, "sync failed: %v\n", err)
 		return err
 	}
+	if opts.JSON {
+		return nil
+	}
 	fmt.Fprintf(stdout, "sync completed: %s\n", agentNow().UTC().Format(time.RFC3339))
 	return nil
 }
@@ -678,7 +717,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state; requires --once")
 	fs.BoolVar(&opts.Watch, "watch", false, "trigger sync when local workspace changes are detected")
 	fs.BoolVar(&opts.Status, "status", false, "print the last agent state and exit")
-	fs.BoolVar(&opts.JSON, "json", false, "print status, pause, resume, or reset-state output as JSON")
+	fs.BoolVar(&opts.JSON, "json", false, "print one-shot, status, pause, resume, or reset-state output as JSON")
 	fs.BoolVar(&opts.Pause, "pause", false, "pause sync cycles for this workspace and exit")
 	fs.BoolVar(&opts.Resume, "resume", false, "resume sync cycles for this workspace and exit")
 	fs.BoolVar(&opts.ResetState, "reset-state", false, "delete agent state and pause control files for this workspace and exit")
@@ -722,8 +761,8 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	if opts.Status && opts.Watch {
 		return agentOptions{}, errors.New("status cannot be used with --watch")
 	}
-	if opts.JSON && !opts.Status && !opts.Pause && !opts.Resume && !opts.ResetState {
-		return agentOptions{}, errors.New("json output requires --status, --pause, --resume, or --reset-state")
+	if opts.JSON && !opts.Once && !opts.Status && !opts.Pause && !opts.Resume && !opts.ResetState {
+		return agentOptions{}, errors.New("json output requires --once, --status, --pause, --resume, or --reset-state")
 	}
 	if opts.Pause && opts.Resume {
 		return agentOptions{}, errors.New("pause cannot be used with --resume")
@@ -763,7 +802,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-agent --version")
 	fmt.Fprintln(w, "  synchub-agent --path .")
 	fmt.Fprintln(w, "  synchub-agent --path . --once")
+	fmt.Fprintln(w, "  synchub-agent --path . --once --json")
 	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run")
+	fmt.Fprintln(w, "  synchub-agent --path . --once --dry-run --json")
 	fmt.Fprintln(w, "  synchub-agent --path . --status")
 	fmt.Fprintln(w, "  synchub-agent --path . --status --json")
 	fmt.Fprintln(w, "  synchub-agent --path . --pause")
@@ -838,6 +879,9 @@ func buildSyncOnceArgs(opts agentOptions) []string {
 	args = append(args, "--limit", fmt.Sprintf("%d", opts.Limit))
 	if opts.DryRun {
 		args = append(args, "--dry-run")
+	}
+	if opts.JSON {
+		args = append(args, "--json")
 	}
 	return args
 }

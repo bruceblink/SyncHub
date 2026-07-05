@@ -90,6 +90,47 @@ func TestRunOnceWritesAgentState(t *testing.T) {
 	}
 }
 
+func TestRunOnceCanOutputJSON(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	var got agentOptions
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"--path", root,
+		"--once",
+		"--json",
+	}, &stdout, &bytes.Buffer{}, func(ctx context.Context, opts agentOptions, stdout, stderr io.Writer) error {
+		_ = ctx
+		_ = stderr
+		got = opts
+		_, _ = stdout.Write([]byte("{\"dry_run\":false}\n"))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run agent once json: %v", err)
+	}
+	if !got.Once || !got.JSON {
+		t.Fatalf("options = %#v", got)
+	}
+	if strings.Contains(stdout.String(), "sync completed:") {
+		t.Fatalf("json output includes completion text: %s", stdout.String())
+	}
+	var output map[string]bool
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("decode one-shot json: %v\n%s", err, stdout.String())
+	}
+	if output["dry_run"] {
+		t.Fatalf("output = %#v", output)
+	}
+	state := readAgentState(t, root)
+	if state.Status != "ok" || state.CyclesRun != 1 || state.LastSuccessAt == nil {
+		t.Fatalf("agent state = %#v", state)
+	}
+}
+
 func TestRunOnceWritesFailureAgentState(t *testing.T) {
 	originalNow := agentNow
 	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
@@ -784,6 +825,43 @@ func TestRunOnceSkipsSyncWhenPaused(t *testing.T) {
 	}
 }
 
+func TestRunOnceJSONSkipsSyncWhenPaused(t *testing.T) {
+	originalNow := agentNow
+	agentNow = func() time.Time { return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC) }
+	defer func() { agentNow = originalNow }()
+
+	root := t.TempDir()
+	if err := writeAgentControl(root, agentControl{Version: 1, Paused: true, UpdatedAt: agentNow().UTC()}); err != nil {
+		t.Fatalf("write control: %v", err)
+	}
+	called := false
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"--path", root,
+		"--once",
+		"--json",
+	}, &stdout, &bytes.Buffer{}, func(context.Context, agentOptions, io.Writer, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run paused once json: %v", err)
+	}
+	if called {
+		t.Fatal("runner should not be called while paused")
+	}
+	if strings.Contains(stdout.String(), "sync skipped:") {
+		t.Fatalf("json output includes text skip output: %s", stdout.String())
+	}
+	var snapshot agentCycleSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode paused one-shot json: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Action != "skipped" || !snapshot.Skipped || snapshot.Reason != "agent is paused" || snapshot.Workspace.Root != root || snapshot.State.Status != "paused" || snapshot.State.CyclesRun != 1 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
 func TestRunLoopReturnsFinalCycleError(t *testing.T) {
 	root := t.TempDir()
 	wantErr := errors.New("sync failed")
@@ -846,6 +924,14 @@ func TestRunHelpPrintsUsage(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "synchub-agent --path . --once --dry-run") || !strings.Contains(stdout.String(), "synchub-agent --path . --cycles 3") {
 		t.Fatalf("usage output = %q", stdout.String())
+	}
+	for _, want := range []string{
+		"synchub-agent --path . --once --json",
+		"synchub-agent --path . --once --dry-run --json",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("usage output missing %q: %q", want, stdout.String())
+		}
 	}
 	if !strings.Contains(stdout.String(), "synchub-agent --path . --status --json") {
 		t.Fatalf("usage output missing status json: %q", stdout.String())
@@ -945,8 +1031,8 @@ func TestParseOptionsRejectsStatusWithWatch(t *testing.T) {
 
 func TestParseOptionsRejectsJSONWithoutStatus(t *testing.T) {
 	_, err := parseOptions([]string{"--json"}, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "json output requires --status, --pause, --resume, or --reset-state") {
-		t.Fatalf("error = %v, want json output requires status pause resume or reset state", err)
+	if err == nil || !strings.Contains(err.Error(), "json output requires --once, --status, --pause, --resume, or --reset-state") {
+		t.Fatalf("error = %v, want json output requires once status pause resume or reset state", err)
 	}
 }
 
@@ -1011,6 +1097,14 @@ func TestBuildSyncOnceArgs(t *testing.T) {
 		"--limit", "20",
 		"--dry-run",
 	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSyncOnceArgsIncludesJSON(t *testing.T) {
+	got := buildSyncOnceArgs(agentOptions{RootPath: "workspace", ConfigPath: "login.json", Limit: 500, JSON: true})
+	want := []string{"sync", "once", "--path", "workspace", "--config", "login.json", "--limit", "500", "--json"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %#v, want %#v", got, want)
 	}
