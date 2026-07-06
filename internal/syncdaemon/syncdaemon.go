@@ -40,6 +40,7 @@ type agentOptions struct {
 	DryRun              bool
 	Watch               bool
 	NoWatch             bool
+	Foreground          bool
 	Status              bool
 	JSON                bool
 	Pause               bool
@@ -721,6 +722,7 @@ func parseOptions(args []string, stdout, stderr io.Writer) (agentOptions, error)
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "preview one sync cycle without uploading, downloading, or updating local state; requires --once")
 	fs.BoolVar(&opts.Watch, "watch", false, "trigger sync when local workspace changes are detected; kept for compatibility because daemon loops watch by default")
 	fs.BoolVar(&opts.NoWatch, "no-watch", false, "disable local workspace watching and sync only on the interval")
+	fs.BoolVar(&opts.Foreground, "foreground", false, "run the daemon loop in the current terminal instead of starting a background process")
 	fs.BoolVar(&opts.Status, "status", false, "print the last daemon state and exit")
 	fs.BoolVar(&opts.JSON, "json", false, "print one-shot, status, pause, resume, or reset-state output as JSON")
 	fs.BoolVar(&opts.Pause, "pause", false, "pause sync cycles for this workspace and exit")
@@ -816,6 +818,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  synchub-cli sync daemon --version")
 	fmt.Fprintln(w, "  synchub-cli sync daemon")
+	fmt.Fprintln(w, "  synchub-cli sync daemon --foreground")
 	fmt.Fprintln(w, "  synchub-cli sync daemon --path .")
 	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --once")
 	fmt.Fprintln(w, "  synchub-cli sync daemon --path . --once --json")

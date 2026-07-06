@@ -736,6 +736,7 @@ func TestRunSyncHelpIncludesOperationalCommands(t *testing.T) {
 		"synchub-cli sync pull --path . --dry-run",
 		"synchub-cli sync pull --path . --dry-run --json",
 		"synchub-cli sync daemon",
+		"synchub-cli sync daemon --foreground",
 		"synchub-cli sync daemon --status",
 		"synchub-cli sync trash --path .",
 		"synchub-cli sync trash restore --path . --batch 20260702T010000.000000000Z --entry docs/",

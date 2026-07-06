@@ -2,14 +2,21 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bruceblink/SyncHub/internal/syncdaemon"
 )
+
+var startSyncDaemonBackground = startSyncDaemonBackgroundProcess
 
 func runSyncDaemon(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	return runSyncDaemonWithSyncOnce(ctx, args, stdout, stderr, func(ctx context.Context, syncArgs []string, stdout, stderr io.Writer) error {
@@ -21,10 +28,124 @@ func runSyncDaemon(ctx context.Context, args []string, stdout, stderr io.Writer)
 }
 
 func runSyncDaemonWithSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer, runner syncdaemon.SyncOnceArgsRunner) error {
+	if shouldStartSyncDaemonInBackground(args) {
+		return startSyncDaemonBackground(args, stdout, stderr)
+	}
 	if shouldRunRegisteredWorkspaceDaemons(args) {
 		return runRegisteredWorkspaceDaemons(ctx, args, stdout, stderr, runner)
 	}
 	return syncdaemon.RunWithSyncOnce(ctx, args, stdout, stderr, runner)
+}
+
+func shouldStartSyncDaemonInBackground(args []string) bool {
+	if daemonHelpRequested(args) || daemonVersionRequested(args) {
+		return false
+	}
+	if daemonFlagPresent(args, "foreground") ||
+		daemonFlagPresent(args, "json") ||
+		daemonFlagPresent(args, "dry-run") ||
+		daemonFlagPresent(args, "cycles") ||
+		daemonActionExits(args) {
+		return false
+	}
+	return true
+}
+
+type daemonProcessInfo struct {
+	PID       int       `json:"pid"`
+	Args      []string  `json:"args"`
+	LogPath   string    `json:"log_path"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+func startSyncDaemonBackgroundProcess(args []string, stdout, stderr io.Writer) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	logPath, err := daemonLogPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return err
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logFile.Close()
+
+	childArgs := append([]string{"sync", "daemon", "--foreground"}, args...)
+	cmd := exec.Command(exe, childArgs...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Stdin = nil
+	cmd.Env = os.Environ()
+	configureBackgroundProcess(cmd)
+	if wd, err := os.Getwd(); err == nil {
+		cmd.Dir = wd
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	pid := cmd.Process.Pid
+	if err := writeDaemonProcessInfo(daemonProcessInfo{
+		PID:       pid,
+		Args:      childArgs,
+		LogPath:   logPath,
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		fmt.Fprintf(stderr, "write daemon process state failed: %v\n", err)
+	}
+	if err := cmd.Process.Release(); err != nil {
+		fmt.Fprintf(stderr, "release daemon process failed: %v\n", err)
+	}
+	fmt.Fprintln(stdout, "daemon started in background")
+	fmt.Fprintf(stdout, "pid: %d\n", pid)
+	fmt.Fprintf(stdout, "log: %s\n", logPath)
+	fmt.Fprintln(stdout, "status: synchub-cli sync daemon --status")
+	return nil
+}
+
+func daemonLogPath() (string, error) {
+	dir, err := daemonStateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "daemon.log"), nil
+}
+
+func daemonProcessInfoPath() (string, error) {
+	dir, err := daemonStateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "daemon-process.json"), nil
+}
+
+func daemonStateDir() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil || strings.TrimSpace(dir) == "" {
+		return filepath.Join(".synchub"), nil
+	}
+	return filepath.Join(dir, "SyncHub"), nil
+}
+
+func writeDaemonProcessInfo(info daemonProcessInfo) error {
+	path, err := daemonProcessInfoPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(path, raw, 0o600)
 }
 
 func runRegisteredWorkspaceDaemons(ctx context.Context, args []string, stdout, stderr io.Writer, runner syncdaemon.SyncOnceArgsRunner) error {
@@ -166,11 +287,8 @@ func daemonArgsForWorkspace(args []string, entry workspaceRegistryEntry, hasConf
 }
 
 func shouldRunRegisteredWorkspaceDaemons(args []string) bool {
-	if len(args) > 0 {
-		switch args[0] {
-		case "help", "-h", "--help", "--version":
-			return false
-		}
+	if daemonHelpRequested(args) || daemonVersionRequested(args) {
+		return false
 	}
 	return !daemonFlagPresent(args, "path")
 }
@@ -186,9 +304,11 @@ func daemonActionExits(args []string) bool {
 
 func daemonFlagPresent(args []string, name string) bool {
 	prefix := "--" + name + "="
+	shortPrefix := "-" + name + "="
 	flagName := "--" + name
+	shortFlagName := "-" + name
 	for _, arg := range args {
-		if arg == flagName || strings.HasPrefix(arg, prefix) {
+		if arg == flagName || arg == shortFlagName || strings.HasPrefix(arg, prefix) || strings.HasPrefix(arg, shortPrefix) {
 			return true
 		}
 	}
@@ -197,14 +317,41 @@ func daemonFlagPresent(args []string, name string) bool {
 
 func daemonFlagValue(args []string, name, fallback string) string {
 	prefix := "--" + name + "="
+	shortPrefix := "-" + name + "="
 	flagName := "--" + name
+	shortFlagName := "-" + name
 	for i, arg := range args {
 		if strings.HasPrefix(arg, prefix) {
 			return strings.TrimPrefix(arg, prefix)
 		}
-		if arg == flagName && i+1 < len(args) {
+		if strings.HasPrefix(arg, shortPrefix) {
+			return strings.TrimPrefix(arg, shortPrefix)
+		}
+		if (arg == flagName || arg == shortFlagName) && i+1 < len(args) {
 			return args[i+1]
 		}
 	}
 	return fallback
+}
+
+func daemonHelpRequested(args []string) bool {
+	for i, arg := range args {
+		switch arg {
+		case "-h", "--h", "-help", "--help":
+			return true
+		case "help":
+			return i == 0
+		}
+	}
+	return false
+}
+
+func daemonVersionRequested(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "-version", "--version":
+			return true
+		}
+	}
+	return false
 }

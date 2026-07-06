@@ -445,13 +445,19 @@ synchub-cli sync devices --path $workspace --json
 
 Daemon 是 `synchub-cli` 内置的后台同步模式，适合日常持续同步；不再需要单独安装或启动 `synchub-agent`。
 
-日常使用只需要启动一次 daemon。它会读取用户级 workspace registry，并监听所有已初始化 workspace：
+日常使用只需要启动一次 daemon。默认命令会创建后台进程后立即返回，不会一直占住当前终端。它会读取用户级 workspace registry，并监听所有已初始化 workspace：
 
 ```powershell
 synchub-cli sync daemon
 ```
 
-这个命令适合放进系统开机自启或用户登录自启任务。Daemon 默认监听本地变化，有变化时尽快触发同步，同时按 `--interval` 做兜底同步。
+这个命令适合放进系统开机自启或用户登录自启任务。Daemon 默认监听本地变化，有变化时尽快触发同步，同时按 `--interval` 做兜底同步。后台日志默认写入用户配置目录下的 `SyncHub\daemon.log`。
+
+如果需要在当前终端里观察实时日志，显式使用 `--foreground`：
+
+```powershell
+synchub-cli sync daemon --foreground
+```
 
 只操作某个 workspace 时，再显式传入 `--path`：
 

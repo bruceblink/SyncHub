@@ -1077,6 +1077,19 @@ func TestParseOptionsCanDisableDefaultWatch(t *testing.T) {
 	}
 }
 
+func TestParseOptionsAcceptsForeground(t *testing.T) {
+	opts, err := parseOptions([]string{"--foreground"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parse options: %v", err)
+	}
+	if !opts.Foreground {
+		t.Fatalf("foreground = false, want true")
+	}
+	if !opts.Watch {
+		t.Fatalf("watch = false, want default watch loop")
+	}
+}
+
 func TestParseOptionsRejectsStatusWithOnce(t *testing.T) {
 	_, err := parseOptions([]string{"--status", "--once"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "status cannot be used with --once") {

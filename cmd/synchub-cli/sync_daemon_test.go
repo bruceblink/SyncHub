@@ -11,6 +11,108 @@ import (
 	"testing"
 )
 
+func TestRunSyncDaemonStartsBackgroundByDefault(t *testing.T) {
+	original := startSyncDaemonBackground
+	defer func() { startSyncDaemonBackground = original }()
+
+	var got []string
+	startSyncDaemonBackground = func(args []string, stdout, stderr io.Writer) error {
+		_ = stderr
+		got = append([]string{}, args...)
+		_, _ = stdout.Write([]byte("daemon started in background\n"))
+		return nil
+	}
+
+	var stdout bytes.Buffer
+	err := runSyncDaemonWithSyncOnce(context.Background(), []string{
+		"--config", "login.json",
+		"--interval", "30s",
+	}, &stdout, &bytes.Buffer{}, func(context.Context, []string, io.Writer, io.Writer) error {
+		t.Fatal("runner should not be called when daemon starts in background")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("sync daemon background: %v", err)
+	}
+	want := []string{"--config", "login.json", "--interval", "30s"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("background args = %#v, want %#v", got, want)
+	}
+	if !strings.Contains(stdout.String(), "daemon started in background") {
+		t.Fatalf("stdout = %q, want background start", stdout.String())
+	}
+}
+
+func TestRunSyncDaemonForegroundRunsLoop(t *testing.T) {
+	root := t.TempDir()
+	var got []string
+
+	err := runSyncDaemonWithSyncOnce(context.Background(), []string{
+		"--foreground",
+		"--path", root,
+		"--no-watch",
+		"--cycles", "1",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, func(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+		_ = ctx
+		_ = stdout
+		_ = stderr
+		got = append([]string{}, args...)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("sync daemon foreground: %v", err)
+	}
+	if testDaemonFlagValue(got, "path") != root {
+		t.Fatalf("foreground sync args = %#v, want path %q", got, root)
+	}
+}
+
+func TestRunSyncDaemonSingleDashHelpDoesNotStartBackground(t *testing.T) {
+	original := startSyncDaemonBackground
+	defer func() { startSyncDaemonBackground = original }()
+
+	startSyncDaemonBackground = func([]string, io.Writer, io.Writer) error {
+		t.Fatal("background daemon should not start for -h")
+		return nil
+	}
+
+	var stdout bytes.Buffer
+	err := runSyncDaemonWithSyncOnce(context.Background(), []string{"-h"}, &stdout, &bytes.Buffer{}, func(context.Context, []string, io.Writer, io.Writer) error {
+		t.Fatal("runner should not be called for help")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("sync daemon help: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "synchub-cli sync daemon") {
+		t.Fatalf("stdout = %q, want daemon usage", stdout.String())
+	}
+}
+
+func TestRunSyncDaemonSingleDashForegroundRunsLoop(t *testing.T) {
+	root := t.TempDir()
+	var got []string
+
+	err := runSyncDaemonWithSyncOnce(context.Background(), []string{
+		"-foreground",
+		"-path", root,
+		"-no-watch",
+		"-cycles", "1",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, func(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+		_ = ctx
+		_ = stdout
+		_ = stderr
+		got = append([]string{}, args...)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("sync daemon foreground: %v", err)
+	}
+	if testDaemonFlagValue(got, "path") != root {
+		t.Fatalf("foreground sync args = %#v, want path %q", got, root)
+	}
+}
+
 func TestRunSyncDaemonOnceInvokesSyncOnce(t *testing.T) {
 	root := t.TempDir()
 	var got []string
