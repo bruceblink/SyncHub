@@ -89,6 +89,24 @@ curl.exe -fsS https://synchub-your-name.fly.dev/readyz
 
 Automatic Fly.io deployment is handled by the Fly.io GitHub integration. The repository CI workflow stays test-only, and Fly.io reports a separate deployment check on push.
 
+### Cloudflare 自定义域名
+
+域名托管在 Cloudflare 时，先在 Fly 上添加证书并查看 DNS 记录：
+
+```powershell
+$env:FLY_APP = "synchub-your-name"
+$env:SYNCHUB_DOMAIN = "sync.example.com"
+fly certs add $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+fly certs setup $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+```
+
+在 Cloudflare DNS 中添加 `fly certs setup` 输出的 `AAAA` 或 `CNAME` 记录。首次配置建议使用 `DNS only`，证书验证通过后再按需开启 Cloudflare 代理；开启代理时补充 Fly 输出的 ownership `TXT` 记录。最后检查：
+
+```powershell
+fly certs check $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
+```
+
 ## 数据卷
 
 - SQLite 数据库文件必须通过 `/data` 持久化。

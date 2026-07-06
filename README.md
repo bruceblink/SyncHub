@@ -178,6 +178,19 @@ fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-s
 fly deploy --config .\fly.toml
 ```
 
+To use a Cloudflare-hosted custom domain, add a Fly certificate, copy the DNS
+records from `fly certs setup`, and start with Cloudflare proxy disabled:
+
+```powershell
+$env:FLY_APP = "synchub-your-name"
+$env:SYNCHUB_DOMAIN = "sync.example.com"
+
+fly certs add $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+fly certs setup $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+fly certs check $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
+```
+
 For automatic deployment, enable the Fly.io GitHub integration for this repository. The repository CI stays focused on tests, while Fly.io reports its own deployment check on push.
 
 For a containerized local development server:

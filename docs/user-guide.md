@@ -144,6 +144,52 @@ curl.exe -fsS "https://$env:FLY_APP.fly.dev/readyz"
 curl.exe -fsS "https://$env:FLY_APP.fly.dev/version"
 ```
 
+#### 2.3.1 Cloudflare 自定义域名
+
+如果域名 DNS 托管在 Cloudflare，可以把一个子域名指向 Fly app。下面以 `sync.example.com` 为例：
+
+```powershell
+$env:FLY_APP = "synchub-your-name"
+$env:SYNCHUB_DOMAIN = "sync.example.com"
+
+fly certs add $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+fly certs setup $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+```
+
+`fly certs setup` 会输出 DNS 记录。进入 Cloudflare DNS 后，优先按输出添加 `AAAA` 记录：
+
+```text
+Type: AAAA
+Name: sync
+Content: <flyctl 输出的 IPv6 地址>
+Proxy status: DNS only
+```
+
+也可以使用 `CNAME` 记录：
+
+```text
+Type: CNAME
+Name: sync
+Target: <flyctl 输出的 CNAME target>
+Proxy status: DNS only
+```
+
+先使用 `DNS only` 最简单，证书签发和排查都更直观。如果之后要开启 Cloudflare 代理，再按 `fly certs setup` 输出补充 `TXT _fly-ownership...` 记录，并将 Cloudflare SSL/TLS 模式保持为 Full 或 Full strict。
+
+等待 DNS 生效后检查证书和服务：
+
+```powershell
+fly certs check $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
+curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/version"
+```
+
+后续 CLI 登录时，也可以直接使用自定义域名：
+
+```powershell
+$env:SYNCHUB_SERVER = "https://$env:SYNCHUB_DOMAIN"
+```
+
 后续 CLI 登录时，服务端地址就是 Fly 提供的 HTTPS 地址：
 
 ```powershell

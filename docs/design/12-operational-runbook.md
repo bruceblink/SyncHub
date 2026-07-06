@@ -53,6 +53,19 @@ curl.exe -fsS https://synchub-your-name.fly.dev/readyz
 
 自动部署由 Fly.io GitHub 集成负责；本仓库 CI 保持测试职责，Fly.io 会在 push 后报告独立部署检查。
 
+Cloudflare 托管自定义域名时，用 Fly 证书命令生成 DNS 指引，然后在 Cloudflare 添加记录：
+
+```powershell
+$env:FLY_APP = "synchub-your-name"
+$env:SYNCHUB_DOMAIN = "sync.example.com"
+fly certs add $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+fly certs setup $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+fly certs check $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
+```
+
+首选 `AAAA` 或 `CNAME` 记录并保持 Cloudflare `DNS only`；如需开启代理，补充 `fly certs setup` 输出的 ownership `TXT` 记录。
+
 不要把当前 MVP 扩成多 Machine。Fly Volume 不会自动复制，多个实例会让 SQLite 和 `/data/storage` 产生分叉。需要高可用时，先设计 LiteFS/PostgreSQL 和对象存储复制方案。
 
 ## 本地备份
