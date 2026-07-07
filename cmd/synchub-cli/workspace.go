@@ -51,6 +51,8 @@ func runWorkspace(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "init":
 		return runWorkspaceInit(args[1:], stdout, stderr)
+	case "list":
+		return runWorkspaceList(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printWorkspaceUsage(stdout)
 		return nil
@@ -115,6 +117,32 @@ func runWorkspaceInit(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+func runWorkspaceList(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("workspace list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	jsonOutput := fs.Bool("json", false, "print registered workspaces as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	registry, registryPath, err := readWorkspaceRegistry(*configPath)
+	if err != nil {
+		return err
+	}
+	snapshot := workspaceListSnapshot{
+		Registry:   registryPath,
+		Workspaces: workspaceListEntries(registry.Workspaces),
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(snapshot)
+	}
+	printWorkspaceListText(stdout, snapshot)
+	return nil
+}
+
 type workspaceInitResult struct {
 	Config    string          `json:"config"`
 	Workspace workspaceConfig `json:"workspace"`
@@ -127,6 +155,23 @@ type workspaceInitSnapshot struct {
 
 type workspaceInitBatchSnapshot struct {
 	Workspaces []workspaceInitResult `json:"workspaces"`
+}
+
+type workspaceListSnapshot struct {
+	Registry   string               `json:"registry"`
+	Workspaces []workspaceListEntry `json:"workspaces"`
+}
+
+type workspaceListEntry struct {
+	Root                string    `json:"root"`
+	WorkspaceConfigPath string    `json:"workspace_config_path"`
+	ConfigPath          string    `json:"config_path"`
+	RemotePath          string    `json:"remote_path"`
+	ServerURL           string    `json:"server_url"`
+	UserEmail           string    `json:"user_email"`
+	Available           bool      `json:"available"`
+	Reason              string    `json:"reason,omitempty"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 func writeWorkspaceInitJSON(stdout io.Writer, results []workspaceInitResult) error {
@@ -146,6 +191,72 @@ func writeWorkspaceInitJSON(stdout io.Writer, results []workspaceInitResult) err
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(snapshot)
+}
+
+func workspaceListEntries(entries []workspaceRegistryEntry) []workspaceListEntry {
+	result := make([]workspaceListEntry, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, workspaceListEntryForRegistry(entry))
+	}
+	return result
+}
+
+func workspaceListEntryForRegistry(entry workspaceRegistryEntry) workspaceListEntry {
+	root := cleanAbsPath(entry.Root)
+	workspaceConfigPath := cleanAbsPath(entry.WorkspaceConfigPath)
+	if workspaceConfigPath == "" && root != "" {
+		workspaceConfigPath = defaultWorkspaceConfigPath(root)
+	}
+	item := workspaceListEntry{
+		Root:                root,
+		WorkspaceConfigPath: workspaceConfigPath,
+		ConfigPath:          cleanAbsPath(entry.ConfigPath),
+		RemotePath:          entry.RemotePath,
+		ServerURL:           entry.ServerURL,
+		UserEmail:           entry.UserEmail,
+		Available:           true,
+		UpdatedAt:           entry.UpdatedAt,
+	}
+	if root == "" {
+		item.Available = false
+		item.Reason = "workspace root is empty"
+		return item
+	}
+	if info, err := os.Stat(root); err != nil {
+		item.Available = false
+		item.Reason = err.Error()
+		return item
+	} else if !info.IsDir() {
+		item.Available = false
+		item.Reason = "workspace root is not a directory"
+		return item
+	}
+	if _, err := readWorkspaceConfig(workspaceConfigPath); err != nil {
+		item.Available = false
+		item.Reason = err.Error()
+	}
+	return item
+}
+
+func printWorkspaceListText(stdout io.Writer, snapshot workspaceListSnapshot) {
+	fmt.Fprintf(stdout, "registry: %s\n", snapshot.Registry)
+	fmt.Fprintf(stdout, "workspaces: %d\n", len(snapshot.Workspaces))
+	for _, workspace := range snapshot.Workspaces {
+		fmt.Fprintf(stdout, "workspace: %s\n", workspace.Root)
+		fmt.Fprintf(stdout, "remote path: %s\n", workspace.RemotePath)
+		fmt.Fprintf(stdout, "user: %s\n", workspace.UserEmail)
+		fmt.Fprintf(stdout, "server: %s\n", workspace.ServerURL)
+		fmt.Fprintf(stdout, "config: %s\n", workspace.ConfigPath)
+		fmt.Fprintf(stdout, "workspace config: %s\n", workspace.WorkspaceConfigPath)
+		if workspace.Available {
+			fmt.Fprintln(stdout, "status: ok")
+			continue
+		}
+		fmt.Fprintln(stdout, "status: missing")
+		if strings.TrimSpace(workspace.Reason) != "" {
+			fmt.Fprintf(stdout, "reason: %s\n", workspace.Reason)
+		}
+	}
 }
 
 func buildWorkspaceInitResults(pathArgs []string, remotePath, remoteRoot, workspaceConfigPath string, loginConfig cliConfig) ([]workspaceInitResult, error) {

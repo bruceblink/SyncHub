@@ -347,6 +347,7 @@ synchub-cli workspace init --remote-root /workspace F:\work\notes D:\work\code
 初始化时还会把该目录写入用户级 workspace registry。以后系统登录后只要启动一次 daemon，它就会读取 registry 并监听所有已初始化 workspace，不依赖当前目录：
 
 ```powershell
+synchub-cli workspace list
 synchub-cli sync daemon
 ```
 
