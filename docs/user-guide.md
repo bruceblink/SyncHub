@@ -397,6 +397,8 @@ synchub-cli sync once --path $workspace --device-name laptop --platform windows
 synchub-cli sync status --path $workspace
 ```
 
+输出会包含该工作区是否已写入用户级 workspace registry；如果没有注册，无 `--path` 的 daemon 不会自动发现它。
+
 查看远端待拉取变更和远端冲突：
 
 ```powershell

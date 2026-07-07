@@ -37,6 +37,7 @@ type syncAgentControl struct {
 
 type syncStatusSnapshot struct {
 	Workspace      syncStatusWorkspace         `json:"workspace"`
+	Registry       syncStatusRegistry          `json:"registry"`
 	Manifest       syncStatusManifest          `json:"manifest"`
 	PendingChanges syncStatusChangeSummary     `json:"pending_changes,omitempty"`
 	Trash          syncStatusTrashSummaryValue `json:"trash,omitempty"`
@@ -54,6 +55,13 @@ type syncStatusWorkspace struct {
 	DeviceName          string `json:"device_name,omitempty"`
 	DevicePlatform      string `json:"device_platform,omitempty"`
 	LastAppliedChangeID int64  `json:"last_applied_change_id,omitempty"`
+}
+
+type syncStatusRegistry struct {
+	Path       string `json:"path,omitempty"`
+	Registered bool   `json:"registered"`
+	Available  bool   `json:"available"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 type syncStatusManifest struct {
@@ -159,6 +167,11 @@ func runSyncStatus(ctx context.Context, args []string, stdout, stderr io.Writer)
 			Path: localManifestPath,
 		},
 	}
+	registry, err := syncStatusRegistrySummary(root, workspacePath, *loginConfigPath)
+	if err != nil {
+		return err
+	}
+	status.Registry = registry
 	m, err := readManifest(localManifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -222,6 +235,7 @@ func printSyncStatusText(stdout io.Writer, status syncStatusSnapshot) error {
 	fmt.Fprintf(stdout, "workspace: %s\n", status.Workspace.Root)
 	fmt.Fprintf(stdout, "remote path: %s\n", status.Workspace.RemotePath)
 	fmt.Fprintf(stdout, "user: %s\n", status.Workspace.UserEmail)
+	printSyncStatusRegistry(stdout, status.Registry)
 	if status.Workspace.DeviceID != "" {
 		fmt.Fprintf(stdout, "device: %s\n", status.Workspace.DeviceID)
 		if strings.TrimSpace(status.Workspace.DeviceName) != "" {
@@ -308,6 +322,46 @@ func syncStatusNextAction(status syncStatusSnapshot) string {
 		return "run synchub-cli sync once --path ."
 	}
 	return ""
+}
+
+func syncStatusRegistrySummary(root, workspaceConfigPath, configPath string) (syncStatusRegistry, error) {
+	registry, registryPath, err := readWorkspaceRegistry(configPath)
+	if err != nil {
+		return syncStatusRegistry{Path: registryPath, Reason: err.Error()}, nil
+	}
+	summary := syncStatusRegistry{Path: registryPath}
+	for _, entry := range registry.Workspaces {
+		if !samePath(entry.Root, root) && !samePath(entry.WorkspaceConfigPath, workspaceConfigPath) {
+			continue
+		}
+		item := workspaceListEntryForRegistry(entry)
+		summary.Registered = true
+		summary.Available = item.Available
+		summary.Reason = item.Reason
+		return summary, nil
+	}
+	return summary, nil
+}
+
+func printSyncStatusRegistry(stdout io.Writer, summary syncStatusRegistry) {
+	if strings.TrimSpace(summary.Path) != "" {
+		fmt.Fprintf(stdout, "registry: %s\n", summary.Path)
+	}
+	if summary.Registered {
+		if summary.Available {
+			fmt.Fprintln(stdout, "registry registered: yes")
+			return
+		}
+		fmt.Fprintln(stdout, "registry registered: stale")
+		if strings.TrimSpace(summary.Reason) != "" {
+			fmt.Fprintf(stdout, "registry reason: %s\n", summary.Reason)
+		}
+		return
+	}
+	fmt.Fprintln(stdout, "registry registered: no")
+	if strings.TrimSpace(summary.Reason) != "" {
+		fmt.Fprintf(stdout, "registry reason: %s\n", summary.Reason)
+	}
 }
 
 func syncStatusChangeSummaryFromChanges(changes []watch.Change) syncStatusChangeSummary {

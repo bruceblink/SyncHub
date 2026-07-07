@@ -76,6 +76,87 @@ func TestRunSyncStatusShowsManifestSummary(t *testing.T) {
 	}
 }
 
+func TestRunSyncStatusShowsWorkspaceRegistryRegistration(t *testing.T) {
+	root := t.TempDir()
+	cfg := workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  "http://localhost:8765",
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}
+	writeTestWorkspaceConfigValue(t, root, cfg)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := registerWorkspace(loginConfigPath, defaultWorkspaceConfigPath(root), cfg); err != nil {
+		t.Fatalf("register workspace: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"status",
+		"--path", root,
+		"--config", loginConfigPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"registry: " + filepath.Join(root, ".synchub", "workspaces.json"),
+		"registry registered: yes",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunSyncStatusShowsMissingWorkspaceRegistryJSON(t *testing.T) {
+	root := t.TempDir()
+	writeTestWorkspaceConfig(t, root)
+	if err := writeJSONFile(filepath.Join(root, ".synchub", "manifest.json"), manifest.Manifest{
+		Version:     1,
+		Root:        root,
+		RemotePath:  "/workspace",
+		GeneratedAt: time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	}, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"status",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync status json: %v", err)
+	}
+	var status syncStatusSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("decode status json: %v\n%s", err, stdout.String())
+	}
+	if status.Registry.Path != filepath.Join(root, ".synchub", "workspaces.json") {
+		t.Fatalf("registry path = %q", status.Registry.Path)
+	}
+	if status.Registry.Registered || status.Registry.Available {
+		t.Fatalf("registry = %#v, want unregistered unavailable", status.Registry)
+	}
+}
+
 func TestRunSyncStatusShowsLocalTrashSummary(t *testing.T) {
 	root := t.TempDir()
 	writeTestWorkspaceConfig(t, root)
