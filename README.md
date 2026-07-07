@@ -109,6 +109,7 @@ Minimal CLI flow:
 go run ./cmd/synchub-cli register --server http://localhost:8765 --email user@example.com --password password
 go run ./cmd/synchub-cli workspace init --path . --remote-path /workspace
 go run ./cmd/synchub-cli workspace list
+go run ./cmd/synchub-cli workspace prune --dry-run
 go run ./cmd/synchub-cli sync doctor --path .
 go run ./cmd/synchub-cli sync once --path . --dry-run
 go run ./cmd/synchub-cli sync once --path .

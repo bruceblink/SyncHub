@@ -351,6 +351,13 @@ synchub-cli workspace list
 synchub-cli sync daemon
 ```
 
+如果迁移或删除过本地目录，可以先预览并清理失效 registry 条目：
+
+```powershell
+synchub-cli workspace prune --dry-run
+synchub-cli workspace prune
+```
+
 建议先运行诊断：
 
 ```powershell

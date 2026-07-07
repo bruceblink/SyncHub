@@ -355,6 +355,128 @@ func TestRunWorkspaceListReportsStaleEntriesJSON(t *testing.T) {
 	}
 }
 
+func TestRunWorkspacePruneRemovesStaleEntries(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	keepRoot := filepath.Join(tempDir, "keep")
+	if err := os.MkdirAll(keepRoot, 0o755); err != nil {
+		t.Fatalf("create keep root: %v", err)
+	}
+	keepConfig := workspaceConfig{
+		Version:    1,
+		Root:       keepRoot,
+		RemotePath: "/keep",
+		ServerURL:  "http://localhost:8765",
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}
+	if err := writeJSONFile(defaultWorkspaceConfigPath(keepRoot), keepConfig, 0o600); err != nil {
+		t.Fatalf("write keep workspace config: %v", err)
+	}
+	registryPath := filepath.Join(tempDir, "workspaces.json")
+	missingRoot := filepath.Join(tempDir, "missing")
+	registry := workspaceRegistry{
+		Version: 1,
+		Workspaces: []workspaceRegistryEntry{
+			{
+				Root:                keepRoot,
+				WorkspaceConfigPath: defaultWorkspaceConfigPath(keepRoot),
+				ConfigPath:          configPath,
+				RemotePath:          "/keep",
+				ServerURL:           "http://localhost:8765",
+				UserEmail:           "user@example.com",
+			},
+			{
+				Root:                missingRoot,
+				WorkspaceConfigPath: defaultWorkspaceConfigPath(missingRoot),
+				ConfigPath:          configPath,
+				RemotePath:          "/missing",
+				ServerURL:           "http://localhost:8765",
+				UserEmail:           "user@example.com",
+			},
+		},
+	}
+	if err := writeJSONFile(registryPath, registry, 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"workspace",
+		"prune",
+		"--config", configPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("workspace prune: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"removed: 1",
+		"kept: 1",
+		"workspace: " + missingRoot,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("workspace prune output missing %q:\n%s", want, out)
+		}
+	}
+	pruned, err := readWorkspaceRegistryFile(registryPath)
+	if err != nil {
+		t.Fatalf("read pruned registry: %v", err)
+	}
+	if len(pruned.Workspaces) != 1 || pruned.Workspaces[0].Root != keepRoot {
+		t.Fatalf("pruned registry = %#v", pruned.Workspaces)
+	}
+	if pruned.UpdatedAt.IsZero() {
+		t.Fatalf("pruned registry missing updated timestamp: %#v", pruned)
+	}
+}
+
+func TestRunWorkspacePruneDryRunDoesNotWriteRegistryJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	registryPath := filepath.Join(tempDir, "workspaces.json")
+	registry := workspaceRegistry{
+		Version: 1,
+		Workspaces: []workspaceRegistryEntry{{
+			Root:                filepath.Join(tempDir, "missing"),
+			WorkspaceConfigPath: filepath.Join(tempDir, "missing", ".synchub", "workspace.json"),
+			ConfigPath:          configPath,
+			RemotePath:          "/missing",
+			ServerURL:           "http://localhost:8765",
+			UserEmail:           "user@example.com",
+		}},
+	}
+	if err := writeJSONFile(registryPath, registry, 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"workspace",
+		"prune",
+		"--config", configPath,
+		"--dry-run",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("workspace prune dry run json: %v", err)
+	}
+	var snapshot workspacePruneSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode workspace prune json: %v\n%s", err, stdout.String())
+	}
+	if !snapshot.DryRun || len(snapshot.Removed) != 1 || len(snapshot.Kept) != 0 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	remaining, err := readWorkspaceRegistryFile(registryPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	if len(remaining.Workspaces) != 1 {
+		t.Fatalf("dry run changed registry: %#v", remaining.Workspaces)
+	}
+}
+
 func TestRunWorkspaceInitRejectsRemotePathWithMultiplePaths(t *testing.T) {
 	tempDir := t.TempDir()
 	loginConfigPath := filepath.Join(tempDir, "config.json")
@@ -441,5 +563,8 @@ func TestRunWorkspaceHelpIncludesInitJSONCommand(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "synchub-cli workspace list --json") {
 		t.Fatalf("workspace help missing list json command: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "synchub-cli workspace prune --dry-run") {
+		t.Fatalf("workspace help missing prune command: %s", stdout.String())
 	}
 }

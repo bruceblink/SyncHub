@@ -53,6 +53,8 @@ func runWorkspace(args []string, stdout, stderr io.Writer) error {
 		return runWorkspaceInit(args[1:], stdout, stderr)
 	case "list":
 		return runWorkspaceList(args[1:], stdout, stderr)
+	case "prune":
+		return runWorkspacePrune(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printWorkspaceUsage(stdout)
 		return nil
@@ -143,6 +145,50 @@ func runWorkspaceList(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+func runWorkspacePrune(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("workspace prune", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	dryRun := fs.Bool("dry-run", false, "preview stale workspace registry entries without removing them")
+	jsonOutput := fs.Bool("json", false, "print prune result as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	registry, registryPath, err := readWorkspaceRegistry(*configPath)
+	if err != nil {
+		return err
+	}
+	kept := make([]workspaceRegistryEntry, 0, len(registry.Workspaces))
+	snapshot := workspacePruneSnapshot{Registry: registryPath, DryRun: *dryRun}
+	for _, entry := range registry.Workspaces {
+		item := workspaceListEntryForRegistry(entry)
+		if item.Available {
+			kept = append(kept, entry)
+			snapshot.Kept = append(snapshot.Kept, item)
+			continue
+		}
+		snapshot.Removed = append(snapshot.Removed, item)
+	}
+	if !*dryRun && len(snapshot.Removed) > 0 {
+		if registry.Version == 0 {
+			registry.Version = 1
+		}
+		registry.Workspaces = kept
+		registry.UpdatedAt = time.Now().UTC()
+		if err := writeJSONFile(registryPath, registry, 0o600); err != nil {
+			return err
+		}
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(snapshot)
+	}
+	printWorkspacePruneText(stdout, snapshot)
+	return nil
+}
+
 type workspaceInitResult struct {
 	Config    string          `json:"config"`
 	Workspace workspaceConfig `json:"workspace"`
@@ -172,6 +218,13 @@ type workspaceListEntry struct {
 	Available           bool      `json:"available"`
 	Reason              string    `json:"reason,omitempty"`
 	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+type workspacePruneSnapshot struct {
+	Registry string               `json:"registry"`
+	DryRun   bool                 `json:"dry_run"`
+	Removed  []workspaceListEntry `json:"removed"`
+	Kept     []workspaceListEntry `json:"kept"`
 }
 
 func writeWorkspaceInitJSON(stdout io.Writer, results []workspaceInitResult) error {
@@ -256,6 +309,17 @@ func printWorkspaceListText(stdout io.Writer, snapshot workspaceListSnapshot) {
 		if strings.TrimSpace(workspace.Reason) != "" {
 			fmt.Fprintf(stdout, "reason: %s\n", workspace.Reason)
 		}
+	}
+}
+
+func printWorkspacePruneText(stdout io.Writer, snapshot workspacePruneSnapshot) {
+	fmt.Fprintf(stdout, "registry: %s\n", snapshot.Registry)
+	fmt.Fprintf(stdout, "dry run: %t\n", snapshot.DryRun)
+	fmt.Fprintf(stdout, "removed: %d\n", len(snapshot.Removed))
+	fmt.Fprintf(stdout, "kept: %d\n", len(snapshot.Kept))
+	for _, workspace := range snapshot.Removed {
+		fmt.Fprintf(stdout, "workspace: %s\n", workspace.Root)
+		fmt.Fprintf(stdout, "reason: %s\n", workspace.Reason)
 	}
 }
 
