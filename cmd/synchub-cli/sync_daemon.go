@@ -245,7 +245,7 @@ func runnableWorkspaceEntries(configPath string, stderr io.Writer) ([]workspaceR
 		entries = append(entries, entry)
 	}
 	if len(entries) == 0 {
-		return fallbackCurrentWorkspaceEntry(configPath)
+		return nil, nil
 	}
 	return entries, nil
 }

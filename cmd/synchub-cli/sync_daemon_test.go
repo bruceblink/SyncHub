@@ -245,6 +245,69 @@ func TestRunSyncDaemonWithoutPathRequiresRegisteredWorkspace(t *testing.T) {
 	}
 }
 
+func TestRunSyncDaemonWithoutPathDoesNotFallbackWhenRegistryIsStale(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	currentRoot := filepath.Join(tempDir, "current")
+	if err := os.MkdirAll(currentRoot, 0o755); err != nil {
+		t.Fatalf("create current workspace root: %v", err)
+	}
+	cfg := workspaceConfig{
+		Version:    1,
+		Root:       currentRoot,
+		RemotePath: "/current",
+		ServerURL:  "http://localhost:8765",
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}
+	if err := writeJSONFile(defaultWorkspaceConfigPath(currentRoot), cfg, 0o600); err != nil {
+		t.Fatalf("write current workspace config: %v", err)
+	}
+	registry := workspaceRegistry{
+		Version: 1,
+		Workspaces: []workspaceRegistryEntry{{
+			Root:                filepath.Join(tempDir, "missing"),
+			WorkspaceConfigPath: filepath.Join(tempDir, "missing", ".synchub", "workspace.json"),
+			ConfigPath:          configPath,
+			RemotePath:          "/missing",
+			ServerURL:           "http://localhost:8765",
+			UserID:              "u1",
+			UserEmail:           "user@example.com",
+		}},
+	}
+	registryPath := filepath.Join(tempDir, "workspaces.json")
+	if err := writeJSONFile(registryPath, registry, 0o600); err != nil {
+		t.Fatalf("write workspace registry: %v", err)
+	}
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(currentRoot); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	}()
+
+	var stderr bytes.Buffer
+	err = runSyncDaemonWithSyncOnce(context.Background(), []string{
+		"--config", configPath,
+		"--once",
+	}, &bytes.Buffer{}, &stderr, func(context.Context, []string, io.Writer, io.Writer) error {
+		t.Fatal("runner should not be called when registry entries are stale")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "no initialized workspaces registered") {
+		t.Fatalf("error = %v, want no registered workspaces", err)
+	}
+	if !strings.Contains(stderr.String(), "skip workspace") {
+		t.Fatalf("stderr = %q, want stale workspace warning", stderr.String())
+	}
+}
+
 func testDaemonFlagValue(args []string, name string) string {
 	prefix := "--" + name + "="
 	flagName := "--" + name
