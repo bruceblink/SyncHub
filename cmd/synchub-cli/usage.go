@@ -31,6 +31,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli workspace list --json")
 	fmt.Fprintln(w, "  synchub-cli workspace prune --dry-run")
 	fmt.Fprintln(w, "  synchub-cli workspace prune --json")
+	fmt.Fprintln(w, "  synchub-cli workspace remove --path .")
+	fmt.Fprintln(w, "  synchub-cli workspace remove --path . --json")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path .")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path . --json")
 	fmt.Fprintln(w, "  synchub-cli manifest scan --path . --dry-run")
@@ -97,6 +99,8 @@ func printWorkspaceUsage(w io.Writer) {
 	fmt.Fprintln(w, "  synchub-cli workspace list --json")
 	fmt.Fprintln(w, "  synchub-cli workspace prune --dry-run")
 	fmt.Fprintln(w, "  synchub-cli workspace prune --json")
+	fmt.Fprintln(w, "  synchub-cli workspace remove --path .")
+	fmt.Fprintln(w, "  synchub-cli workspace remove --path . --json")
 }
 
 func printServerUsage(w io.Writer) {

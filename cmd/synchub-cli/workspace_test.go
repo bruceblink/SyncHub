@@ -477,6 +477,125 @@ func TestRunWorkspacePruneDryRunDoesNotWriteRegistryJSON(t *testing.T) {
 	}
 }
 
+func TestRunWorkspaceRemoveByPathRemovesRegisteredEntry(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	firstRoot := filepath.Join(tempDir, "first")
+	secondRoot := filepath.Join(tempDir, "second")
+	for _, root := range []string{firstRoot, secondRoot} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("create workspace root: %v", err)
+		}
+		cfg := workspaceConfig{
+			Version:    1,
+			Root:       root,
+			RemotePath: "/" + filepath.Base(root),
+			ServerURL:  "http://localhost:8765",
+			UserID:     "u1",
+			UserEmail:  "user@example.com",
+		}
+		if err := writeJSONFile(defaultWorkspaceConfigPath(root), cfg, 0o600); err != nil {
+			t.Fatalf("write workspace config: %v", err)
+		}
+		if err := registerWorkspace(configPath, defaultWorkspaceConfigPath(root), cfg); err != nil {
+			t.Fatalf("register workspace: %v", err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"workspace",
+		"remove",
+		"--path", firstRoot,
+		"--config", configPath,
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("workspace remove: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"removed: 1",
+		"kept: 1",
+		"workspace: " + firstRoot,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("workspace remove output missing %q:\n%s", want, out)
+		}
+	}
+	registry, _, err := readWorkspaceRegistry(configPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	if len(registry.Workspaces) != 1 || registry.Workspaces[0].Root != secondRoot {
+		t.Fatalf("registry = %#v", registry.Workspaces)
+	}
+	if registry.UpdatedAt.IsZero() {
+		t.Fatalf("registry missing updated timestamp: %#v", registry)
+	}
+}
+
+func TestRunWorkspaceRemoveByConfigDryRunJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	workspaceRoot := filepath.Join(tempDir, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("create workspace root: %v", err)
+	}
+	workspaceConfigPath := filepath.Join(tempDir, "custom-workspace.json")
+	cfg := workspaceConfig{
+		Version:    1,
+		Root:       workspaceRoot,
+		RemotePath: "/workspace",
+		ServerURL:  "http://localhost:8765",
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}
+	if err := writeJSONFile(workspaceConfigPath, cfg, 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	if err := registerWorkspace(configPath, workspaceConfigPath, cfg); err != nil {
+		t.Fatalf("register workspace: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"workspace",
+		"remove",
+		"--workspace-config", workspaceConfigPath,
+		"--config", configPath,
+		"--dry-run",
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("workspace remove dry run json: %v", err)
+	}
+	var snapshot workspaceRemoveSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode remove json: %v\n%s", err, stdout.String())
+	}
+	if !snapshot.DryRun || len(snapshot.Removed) != 1 || snapshot.Removed[0].WorkspaceConfigPath != workspaceConfigPath {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	registry, _, err := readWorkspaceRegistry(configPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	if len(registry.Workspaces) != 1 {
+		t.Fatalf("dry run changed registry: %#v", registry.Workspaces)
+	}
+}
+
+func TestRunWorkspaceRemoveRequiresSelector(t *testing.T) {
+	err := run(context.Background(), []string{
+		"workspace",
+		"remove",
+		"--config", filepath.Join(t.TempDir(), "config.json"),
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "workspace path or workspace config is required") {
+		t.Fatalf("error = %v, want selector error", err)
+	}
+}
+
 func TestRunWorkspaceInitRejectsRemotePathWithMultiplePaths(t *testing.T) {
 	tempDir := t.TempDir()
 	loginConfigPath := filepath.Join(tempDir, "config.json")
@@ -566,5 +685,8 @@ func TestRunWorkspaceHelpIncludesInitJSONCommand(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "synchub-cli workspace prune --dry-run") {
 		t.Fatalf("workspace help missing prune command: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "synchub-cli workspace remove --path . --json") {
+		t.Fatalf("workspace help missing remove command: %s", stdout.String())
 	}
 }

@@ -55,6 +55,8 @@ func runWorkspace(args []string, stdout, stderr io.Writer) error {
 		return runWorkspaceList(args[1:], stdout, stderr)
 	case "prune":
 		return runWorkspacePrune(args[1:], stdout, stderr)
+	case "remove":
+		return runWorkspaceRemove(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printWorkspaceUsage(stdout)
 		return nil
@@ -189,6 +191,61 @@ func runWorkspacePrune(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+func runWorkspaceRemove(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("workspace remove", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var rootPaths stringListFlag
+	fs.Var(&rootPaths, "path", "local workspace root to unregister; repeat for multiple workspaces")
+	configPath := fs.String("config", defaultConfigPath(), "login config file path")
+	workspaceConfigPath := fs.String("workspace-config", "", "workspace config path to unregister")
+	dryRun := fs.Bool("dry-run", false, "preview workspace registry entries without removing them")
+	jsonOutput := fs.Bool("json", false, "print remove result as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	pathArgs := append([]string{}, rootPaths...)
+	pathArgs = append(pathArgs, fs.Args()...)
+	if len(pathArgs) == 0 && strings.TrimSpace(*workspaceConfigPath) == "" {
+		return errors.New("workspace path or workspace config is required")
+	}
+
+	registry, registryPath, err := readWorkspaceRegistry(*configPath)
+	if err != nil {
+		return err
+	}
+	roots := cleanWorkspaceRemovePaths(pathArgs)
+	workspaceConfigPaths := cleanWorkspaceRemovePaths([]string{*workspaceConfigPath})
+	kept := make([]workspaceRegistryEntry, 0, len(registry.Workspaces))
+	snapshot := workspaceRemoveSnapshot{Registry: registryPath, DryRun: *dryRun}
+	for _, entry := range registry.Workspaces {
+		item := workspaceListEntryForRegistry(entry)
+		if workspaceRegistryEntrySelected(entry, roots, workspaceConfigPaths) {
+			snapshot.Removed = append(snapshot.Removed, item)
+			continue
+		}
+		kept = append(kept, entry)
+		snapshot.Kept = append(snapshot.Kept, item)
+	}
+	if !*dryRun && len(snapshot.Removed) > 0 {
+		if registry.Version == 0 {
+			registry.Version = 1
+		}
+		registry.Workspaces = kept
+		registry.UpdatedAt = time.Now().UTC()
+		if err := writeJSONFile(registryPath, registry, 0o600); err != nil {
+			return err
+		}
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(snapshot)
+	}
+	printWorkspaceRemoveText(stdout, snapshot)
+	return nil
+}
+
 type workspaceInitResult struct {
 	Config    string          `json:"config"`
 	Workspace workspaceConfig `json:"workspace"`
@@ -221,6 +278,13 @@ type workspaceListEntry struct {
 }
 
 type workspacePruneSnapshot struct {
+	Registry string               `json:"registry"`
+	DryRun   bool                 `json:"dry_run"`
+	Removed  []workspaceListEntry `json:"removed"`
+	Kept     []workspaceListEntry `json:"kept"`
+}
+
+type workspaceRemoveSnapshot struct {
 	Registry string               `json:"registry"`
 	DryRun   bool                 `json:"dry_run"`
 	Removed  []workspaceListEntry `json:"removed"`
@@ -312,6 +376,31 @@ func printWorkspaceListText(stdout io.Writer, snapshot workspaceListSnapshot) {
 	}
 }
 
+func cleanWorkspaceRemovePaths(paths []string) []string {
+	cleaned := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		cleaned = append(cleaned, cleanAbsPath(path))
+	}
+	return cleaned
+}
+
+func workspaceRegistryEntrySelected(entry workspaceRegistryEntry, roots, workspaceConfigPaths []string) bool {
+	for _, root := range roots {
+		if samePath(entry.Root, root) || samePath(entry.WorkspaceConfigPath, defaultWorkspaceConfigPath(root)) {
+			return true
+		}
+	}
+	for _, workspaceConfigPath := range workspaceConfigPaths {
+		if samePath(entry.WorkspaceConfigPath, workspaceConfigPath) {
+			return true
+		}
+	}
+	return false
+}
+
 func printWorkspacePruneText(stdout io.Writer, snapshot workspacePruneSnapshot) {
 	fmt.Fprintf(stdout, "registry: %s\n", snapshot.Registry)
 	fmt.Fprintf(stdout, "dry run: %t\n", snapshot.DryRun)
@@ -320,6 +409,17 @@ func printWorkspacePruneText(stdout io.Writer, snapshot workspacePruneSnapshot) 
 	for _, workspace := range snapshot.Removed {
 		fmt.Fprintf(stdout, "workspace: %s\n", workspace.Root)
 		fmt.Fprintf(stdout, "reason: %s\n", workspace.Reason)
+	}
+}
+
+func printWorkspaceRemoveText(stdout io.Writer, snapshot workspaceRemoveSnapshot) {
+	fmt.Fprintf(stdout, "registry: %s\n", snapshot.Registry)
+	fmt.Fprintf(stdout, "dry run: %t\n", snapshot.DryRun)
+	fmt.Fprintf(stdout, "removed: %d\n", len(snapshot.Removed))
+	fmt.Fprintf(stdout, "kept: %d\n", len(snapshot.Kept))
+	for _, workspace := range snapshot.Removed {
+		fmt.Fprintf(stdout, "workspace: %s\n", workspace.Root)
+		fmt.Fprintf(stdout, "workspace config: %s\n", workspace.WorkspaceConfigPath)
 	}
 }
 

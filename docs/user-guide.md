@@ -358,6 +358,13 @@ synchub-cli workspace prune --dry-run
 synchub-cli workspace prune
 ```
 
+如果只是想停止某个仍然存在的目录被无 `--path` daemon 自动发现，可以手动从 registry 移除它；这个命令只影响 registry，不删除本地文件：
+
+```powershell
+synchub-cli workspace remove --path $workspace --dry-run
+synchub-cli workspace remove --path $workspace
+```
+
 建议先运行诊断：
 
 ```powershell
