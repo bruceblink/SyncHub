@@ -46,6 +46,7 @@ func TestRunSyncDoctorShowsHealthyWorkspace(t *testing.T) {
 		DevicePlatform:      "windows",
 		LastAppliedChangeID: 7,
 	})
+	workspaceConfigPath := filepath.Join(root, ".synchub", "workspace.json")
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
@@ -70,6 +71,16 @@ func TestRunSyncDoctorShowsHealthyWorkspace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write login config: %v", err)
 	}
+	if err := registerWorkspace(loginConfigPath, workspaceConfigPath, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}); err != nil {
+		t.Fatalf("register workspace: %v", err)
+	}
 
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{
@@ -89,6 +100,7 @@ func TestRunSyncDoctorShowsHealthyWorkspace(t *testing.T) {
 		"[ok] login config:",
 		"[ok] server ready: " + server.URL,
 		"[ok] auth: token accepted; devices=1",
+		"[ok] workspace registry:",
 		"[ok] device: dev_1 name=laptop platform=windows cursor=7",
 		"[ok] manifest:",
 		"[ok] daemon: not paused",
@@ -122,6 +134,7 @@ func TestRunSyncDoctorWarnsForMissingDeviceAndManifest(t *testing.T) {
 		UserID:     "u1",
 		UserEmail:  "user@example.com",
 	})
+	workspaceConfigPath := filepath.Join(root, ".synchub", "workspace.json")
 	if err := writeJSONFile(filepath.Join(root, ".synchub", "daemon-control.json"), syncAgentControl{
 		Version:   1,
 		Paused:    true,
@@ -137,6 +150,16 @@ func TestRunSyncDoctorWarnsForMissingDeviceAndManifest(t *testing.T) {
 		AccessTokenExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("write login config: %v", err)
+	}
+	if err := registerWorkspace(loginConfigPath, workspaceConfigPath, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}); err != nil {
+		t.Fatalf("register workspace: %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -162,6 +185,9 @@ func TestRunSyncDoctorWarnsForMissingDeviceAndManifest(t *testing.T) {
 	}
 	if !doctorReportHasCheck(report, "manifest", syncDoctorStatusWarn) {
 		t.Fatalf("missing manifest warning: %#v", report.Checks)
+	}
+	if !doctorReportHasCheck(report, "workspace registry", syncDoctorStatusOK) {
+		t.Fatalf("missing workspace registry ok: %#v", report.Checks)
 	}
 	if !doctorReportHasCheck(report, "daemon", syncDoctorStatusWarn) {
 		t.Fatalf("missing daemon warning: %#v", report.Checks)
@@ -196,6 +222,7 @@ func TestRunSyncDoctorFailsOnAuthError(t *testing.T) {
 		UserEmail:  "user@example.com",
 		DeviceID:   "dev_1",
 	})
+	workspaceConfigPath := filepath.Join(root, ".synchub", "workspace.json")
 	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
 	if err := writeConfig(loginConfigPath, cliConfig{
 		ServerURL:            server.URL,
@@ -204,6 +231,16 @@ func TestRunSyncDoctorFailsOnAuthError(t *testing.T) {
 		AccessTokenExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("write login config: %v", err)
+	}
+	if err := registerWorkspace(loginConfigPath, workspaceConfigPath, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	}); err != nil {
+		t.Fatalf("register workspace: %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -229,9 +266,77 @@ func TestRunSyncDoctorFailsOnAuthError(t *testing.T) {
 	}
 }
 
+func TestRunSyncDoctorWarnsWhenWorkspaceRegistryMissingEntry(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/readyz":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/devices":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[]}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	writeTestWorkspaceConfigValue(t, root, workspaceConfig{
+		Version:    1,
+		Root:       root,
+		RemotePath: "/workspace",
+		ServerURL:  server.URL,
+		UserID:     "u1",
+		UserEmail:  "user@example.com",
+	})
+	loginConfigPath := filepath.Join(root, ".synchub", "login.json")
+	if err := writeConfig(loginConfigPath, cliConfig{
+		ServerURL:            server.URL,
+		User:                 clientUser("u1", "user@example.com"),
+		Tokens:               client.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 900},
+		AccessTokenExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("write login config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{
+		"sync",
+		"doctor",
+		"--path", root,
+		"--config", loginConfigPath,
+		"--json",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("sync doctor registry warning should not fail: %v", err)
+	}
+	var report syncDoctorReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode doctor json: %v\n%s", err, stdout.String())
+	}
+	if !report.OK {
+		t.Fatalf("report ok = false: %#v", report)
+	}
+	if !doctorReportHasCheck(report, "workspace registry", syncDoctorStatusWarn) {
+		t.Fatalf("missing workspace registry warning: %#v", report.Checks)
+	}
+	if !doctorReportHasNext(report, "synchub-cli workspace init --path . --remote-path /workspace") {
+		t.Fatalf("missing registry next step: %#v", report.Next)
+	}
+}
+
 func doctorReportHasCheck(report syncDoctorReport, name, status string) bool {
 	for _, check := range report.Checks {
 		if check.Name == name && check.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func doctorReportHasNext(report syncDoctorReport, command string) bool {
+	for _, next := range report.Next {
+		if next == command {
 			return true
 		}
 	}

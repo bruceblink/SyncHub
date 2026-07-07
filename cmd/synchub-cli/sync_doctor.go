@@ -74,6 +74,7 @@ func runSyncDoctor(ctx context.Context, args []string, stdout, stderr io.Writer)
 		report.add(syncDoctorStatusSkipped, "auth", "login config or server readiness check did not pass")
 	}
 	if workspaceOK {
+		runSyncDoctorRegistryCheck(&report, root, report.Workspace.ConfigPath, workspace, *configPath)
 		runSyncDoctorDeviceCheck(&report, workspace, devices, authOK)
 		runSyncDoctorManifestCheck(ctx, &report, root, workspace, *manifestPath)
 	}
@@ -163,6 +164,30 @@ func runSyncDoctorWorkspaceCheck(report *syncDoctorReport, rootPath, workspaceCo
 	}
 	report.add(syncDoctorStatusOK, "workspace config", fmt.Sprintf("%s remote=%s user=%s", configPath, workspace.RemotePath, workspace.UserEmail))
 	return root, workspace, true
+}
+
+func runSyncDoctorRegistryCheck(report *syncDoctorReport, root, workspaceConfigPath string, workspace workspaceConfig, configPath string) {
+	registry, registryPath, err := readWorkspaceRegistry(configPath)
+	if err != nil {
+		report.add(syncDoctorStatusFail, "workspace registry", err.Error())
+		return
+	}
+	for _, entry := range registry.Workspaces {
+		if !samePath(entry.Root, root) && !samePath(entry.WorkspaceConfigPath, workspaceConfigPath) {
+			continue
+		}
+		item := workspaceListEntryForRegistry(entry)
+		if !item.Available {
+			report.add(syncDoctorStatusWarn, "workspace registry", fmt.Sprintf("%s has stale entry for %s: %s", registryPath, root, item.Reason))
+			report.addNext("synchub-cli workspace init --path . --remote-path " + workspace.RemotePath)
+			report.addNext("synchub-cli workspace prune --dry-run")
+			return
+		}
+		report.add(syncDoctorStatusOK, "workspace registry", fmt.Sprintf("%s registered", registryPath))
+		return
+	}
+	report.add(syncDoctorStatusWarn, "workspace registry", fmt.Sprintf("%s does not register %s", registryPath, root))
+	report.addNext("synchub-cli workspace init --path . --remote-path " + workspace.RemotePath)
 }
 
 func runSyncDoctorLoginCheck(report *syncDoctorReport, configPath string) (cliConfig, bool) {

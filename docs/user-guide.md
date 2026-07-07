@@ -365,7 +365,7 @@ synchub-cli workspace remove --path $workspace --dry-run
 synchub-cli workspace remove --path $workspace
 ```
 
-建议先运行诊断：
+建议先运行诊断，检查 workspace 配置、registry 注册、登录、服务端、设备、manifest 和 daemon 状态：
 
 ```powershell
 synchub-cli sync doctor --path $workspace
