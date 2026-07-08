@@ -5,7 +5,7 @@
 Phase 1 以 Docker 镜像为交付物，在 Linux 服务器使用 Docker Compose 部署：
 
 - `synchub-api`
-- SQLite database file in `/data/synchub.db`
+- PostgreSQL metadata database via `DATABASE_URL`
 - Local object storage in `/data/storage`
 - Persistent Docker volume mounted at `/data`
 - Windows 仅作为本地开发和发布前验证环境
@@ -14,9 +14,9 @@ Fly.io 也是首期支持的 Docker 镜像部署目标：
 
 - 单个 Fly Machine 运行 `synchub-api`
 - Fly Volume `synchub_data` 挂载到 `/data`
-- SQLite database file in `/data/synchub.db`
+- PostgreSQL metadata database via `DATABASE_URL`
 - Local object storage in `/data/storage`
-- `JWT_SECRET` 使用 Fly secrets 管理
+- `JWT_SECRET` 和 `DATABASE_URL` 使用 Fly secrets 管理
 - 由于 Fly Volume 不自动复制，MVP 不做多 Machine 横向扩展
 
 Later 按明确需求再评估：
@@ -24,7 +24,7 @@ Later 按明确需求再评估：
 - `redis`
 - `synchub-worker`
 - `minio`（本地模拟 S3-compatible storage）
-- `postgres` 或 `mysql`（生产或多人部署）
+- `mysql`（生产或多人部署）
 
 ## 环境变量
 
@@ -34,8 +34,8 @@ Later 按明确需求再评估：
 
 可选：
 
-- `DATABASE_DRIVER`，默认 `sqlite`
-- `DATABASE_URL`，镜像内 SQLite 默认 `/data/synchub.db`
+- `DATABASE_DRIVER`，部署文件默认 `postgres`，也可省略并从 `DATABASE_URL` 推断
+- `DATABASE_URL`，PostgreSQL 连接串；部署时必须通过环境变量或 secret 提供
 - `STORAGE_BACKEND`，镜像内默认 `local`
 - `LOCAL_STORAGE_ROOT`，镜像内默认 `/data/storage`
 - `LOG_LEVEL`
@@ -64,6 +64,8 @@ docker pull ghcr.io/bruceblink/synchub:0.1.1
 docker run -d --name synchub-api \
   -p 8765:8765 \
   -e JWT_SECRET=change-me \
+  -e DATABASE_DRIVER=postgres \
+  -e DATABASE_URL="$DATABASE_URL" \
   -v synchub-data:/data \
   ghcr.io/bruceblink/synchub:0.1.1
 ```
@@ -72,6 +74,7 @@ docker run -d --name synchub-api \
 
 ```bash
 export JWT_SECRET=change-me
+export DATABASE_URL='postgresql://user:password@host:5432/synchub?sslmode=require'
 export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
 docker compose -f docker-compose.release.yml up -d
 ```
@@ -83,6 +86,7 @@ docker compose -f docker-compose.release.yml up -d
 fly apps create synchub-your-name
 fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
 fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
+fly secrets set --app synchub-your-name DATABASE_URL="postgresql://user:password@host:5432/synchub?sslmode=require"
 fly deploy --config .\fly.toml
 curl.exe -fsS https://synchub-your-name.fly.dev/readyz
 ```
@@ -109,10 +113,10 @@ curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
 
 ## 数据卷
 
-- SQLite 数据库文件必须通过 `/data` 持久化。
+- PostgreSQL 数据库由外部服务持久化，并需要独立备份。
 - Local FS storage root 必须通过 `/data/storage` 持久化。
 - staging storage 可以和 object storage 放在同一 volume，但需要后台清理策略。
-- Fly.io 部署必须保持单实例，除非后续引入 LiteFS/PostgreSQL 和对象存储复制方案。
+- Fly.io 部署必须保持单实例，除非后续引入对象存储复制方案。
 
 ## 发布流程
 
@@ -161,6 +165,6 @@ curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
 
 ## 备份
 
-- SQLite 开发数据库可随本地数据目录备份；生产级 PostgreSQL / MySQL 需要定期备份。
+- PostgreSQL 需要定期备份；SQLite 开发数据库可随本地数据目录备份。
 - Local FS storage 按对象目录备份。
 - 数据库和 storage 备份需要时间点接近，否则恢复后可能出现孤儿对象；孤儿对象由修复任务处理。

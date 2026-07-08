@@ -14,7 +14,7 @@ $databasePath = Join-Path $resolvedDataDir "synchub.db"
 $storagePath = Join-Path $resolvedDataDir "storage"
 
 if (-not (Test-Path -LiteralPath $databasePath -PathType Leaf)) {
-    throw "SQLite database not found: $databasePath"
+    throw "SQLite fallback database not found: $databasePath"
 }
 
 if (-not (Test-Path -LiteralPath $storagePath -PathType Container)) {

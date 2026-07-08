@@ -57,15 +57,16 @@
 
 职责：
 
+- PostgreSQL migration runner。
 - SQLite 开发库初始化和 schema bootstrap。
 - repository 实现。
 - transaction helper。
 
 Later：
 
-- PostgreSQL / MySQL adapter 的连接初始化。
-- migration 运行入口或 migration 工具集成。
-- sqlc 生成 query 的封装（大型关系型数据库 adapter 阶段）。
+- MySQL adapter 的连接初始化。
+- 外部 migration 工具集成。
+- sqlc 生成 query 的封装（查询复杂度增长后再评估）。
 
 Repository 边界：
 

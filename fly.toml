@@ -14,8 +14,7 @@ kill_timeout = "5s"
 
 [env]
   HTTP_ADDR = ":8765"
-  DATABASE_DRIVER = "sqlite"
-  DATABASE_URL = "/data/synchub.db"
+  DATABASE_DRIVER = "postgres"
   STORAGE_BACKEND = "local"
   LOCAL_STORAGE_ROOT = "/data/storage"
   CLEANUP_BATCH_LIMIT = "1000"

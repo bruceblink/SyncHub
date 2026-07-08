@@ -44,8 +44,7 @@ RUN mkdir -p /data/storage && chown -R synchub:synchub /data
 USER synchub
 
 ENV HTTP_ADDR=:8765 \
-    DATABASE_DRIVER=sqlite \
-    DATABASE_URL=/data/synchub.db \
+    DATABASE_DRIVER=postgres \
     STORAGE_BACKEND=local \
     LOCAL_STORAGE_ROOT=/data/storage \
     VERSION_CLEANUP_INTERVAL_SECONDS=3600 \

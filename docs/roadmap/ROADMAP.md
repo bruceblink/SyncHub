@@ -15,8 +15,8 @@ SyncHub 主技术栈确定为 Go + Gin。
 
 - Language: Go stable
 - Web: Gin
-- DB: SQLite for current MVP; PostgreSQL / MySQL adapters later only if SQLite limits are proven
-- Migration: embedded SQLite bootstrap first; external migration tools are deferred
+- DB: PostgreSQL for server metadata; SQLite remains available for local development and smoke tests
+- Migration: embedded PostgreSQL migration runner plus SQLite bootstrap; external migration tools are deferred
 - Auth: JWT access token + refresh token
 - Storage: Local FS for current MVP; S3 / OSS / MinIO compatible storage is deferred
 - API schema: OpenAPI
@@ -25,7 +25,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 
 ## 总体目标
 
-先做一个可靠的个人开发者工作区同步闭环：单用户、多设备、SQLite、Local FS、CLI daemon。
+先做一个可靠的个人开发者工作区同步闭环：单用户、多设备、PostgreSQL、Local FS、CLI daemon。
 
 优先级顺序：
 
@@ -41,7 +41,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - S3 / OSS / MinIO storage backend。
 - 团队空间、共享目录和复杂权限模型。
 - 独立客户端 SDK、第三方客户端适配层、Web / desktop / mobile 客户端规划。
-- PostgreSQL / MySQL 生产级 adapter，除非 SQLite 单机闭环已经稳定且出现明确瓶颈。
+- MySQL 生产级 adapter。
 
 ## Phase 0: Go 工程基础
 
@@ -68,7 +68,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 引入基础依赖：gin、SQLite driver、jwt、argon2、uuid、OpenTelemetry。
 - 建立配置加载：环境变量 + typed config。
 - 建立错误模型：domain error -> API error response。
-- 建立本地 SQLite 开发数据库、Docker 镜像构建和 Linux Compose API 部署。
+- 建立 PostgreSQL metadata path、本地 SQLite fallback、Docker 镜像构建和 Linux Compose API 部署。
 - 建立 CI 命令：fmt、vet、test。
 
 验收标准：
@@ -87,7 +87,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 任务：
 
 - users、refresh_tokens migration。
-- SQLite repository wrapper。
+- SQLite repository wrapper 和 PostgreSQL repository wrapper。
 - 注册、登录、refresh、logout API。
 - Argon2id password hash。
 - JWT access token 和 refresh token。
@@ -105,7 +105,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 任务：
 
 - file_nodes、file_versions、change_events migration。
-- SQLite repository wrapper。
+- SQLite repository wrapper 和 PostgreSQL repository wrapper。
 - 目录创建、列表、按路径查询、移动、删除 API。
 - path normalization。
 - 用户级数据隔离。
@@ -323,7 +323,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 1. 创建 Go module 和目录骨架。
 2. 实现 `cmd/synchub-api` 的 health / ready endpoint。
 3. 建立 SQLite 开发 schema 和 users / refresh_tokens 表。
-4. 保留数据库 repository 边界，后续配置 pgx / MySQL driver、sqlc、migration 工具和 Docker Compose。
+4. 保留数据库 repository 边界，配置 pgx / MySQL driver 预留点、内置 PostgreSQL migration 和 Docker Compose。
 5. 实现 Auth MVP。
 6. 实现 file_nodes / file_versions / change_events migration。
 7. 实现 Storage interface 和 Local FS backend。

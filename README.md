@@ -36,8 +36,8 @@ synchub-cli -> REST API -> SyncHub Server -> Storage
 
 - Go
 - Gin
-- SQLite for local development
-- PostgreSQL / MySQL adapters later
+- PostgreSQL for server metadata
+- SQLite remains available for local development and smoke tests
 - Local FS / S3-compatible storage
 
 ## Roadmap
@@ -57,6 +57,14 @@ go run ./cmd/synchub-api
 ```
 
 The server listens on `http://localhost:8765` by default.
+
+To run the server against PostgreSQL, set `DATABASE_URL` before starting the API.
+PostgreSQL migrations are applied automatically at startup:
+
+```powershell
+$env:DATABASE_URL = "postgresql://user:password@host:5432/synchub?sslmode=require"
+go run ./cmd/synchub-api
+```
 
 Check local binary versions:
 
@@ -159,6 +167,8 @@ docker pull ghcr.io/bruceblink/synchub:0.1.1
 docker run -d --name synchub-api \
   -p 8765:8765 \
   -e JWT_SECRET=change-me \
+  -e DATABASE_DRIVER=postgres \
+  -e DATABASE_URL="$DATABASE_URL" \
   -v synchub-data:/data \
   ghcr.io/bruceblink/synchub:0.1.1
 ```
@@ -167,6 +177,7 @@ Or use the release compose file:
 
 ```bash
 export JWT_SECRET=change-me
+export DATABASE_URL='postgresql://user:password@host:5432/synchub?sslmode=require'
 export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
 docker compose -f docker-compose.release.yml up -d
 ```
@@ -178,6 +189,7 @@ Or deploy to Fly.io from the project Dockerfile:
 fly apps create synchub-your-name
 fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
 fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
+fly secrets set --app synchub-your-name DATABASE_URL="postgresql://user:password@host:5432/synchub?sslmode=require"
 fly deploy --config .\fly.toml
 ```
 
@@ -199,5 +211,6 @@ For automatic deployment, enable the Fly.io GitHub integration for this reposito
 For a containerized local development server:
 
 ```bash
+cp .env.example .env
 docker compose up --build
 ```

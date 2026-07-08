@@ -6,8 +6,8 @@ services:
       - "${SYNCHUB_PORT:-8765}:8765"
     environment:
       HTTP_ADDR: ":8765"
-      DATABASE_DRIVER: sqlite
-      DATABASE_URL: /data/synchub.db
+      DATABASE_DRIVER: ${DATABASE_DRIVER:-postgres}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL before starting SyncHub}
       STORAGE_BACKEND: local
       LOCAL_STORAGE_ROOT: /data/storage
       CLEANUP_BATCH_LIMIT: 1000

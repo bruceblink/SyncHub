@@ -3,14 +3,15 @@
 ## 工具链
 
 - Go stable
-- SQLite local database
+- PostgreSQL metadata database
+- SQLite local database fallback
 - Docker / Docker Compose for Linux image smoke tests and deployment packaging
 - Windows PowerShell for local development scripts
 
 Later：
 
-- sqlc（PostgreSQL / MySQL adapter 阶段）
-- golang-migrate 或 goose（PostgreSQL / MySQL adapter 阶段）
+- sqlc（MySQL adapter 阶段或复杂查询增长后再评估）
+- golang-migrate 或 goose（外部 migration 工具统一后再评估）
 
 ## 推荐命令
 
@@ -30,8 +31,8 @@ go run ./cmd/synchub-cli sync status --path .
 
 服务端通过环境变量读取配置：
 
-- `DATABASE_DRIVER=sqlite`
-- `DATABASE_URL=./.data/synchub.db`
+- `DATABASE_DRIVER=postgres`
+- `DATABASE_URL=postgresql://user:password@host:5432/synchub?sslmode=require`
 - `JWT_SECRET`
 - `STORAGE_BACKEND=local`
 - `LOCAL_STORAGE_ROOT=./.data/storage`
@@ -43,7 +44,7 @@ go run ./cmd/synchub-cli sync status --path .
 
 ## Migration
 
-开发默认 SQLite schema 由 API 启动时自动 bootstrap。
+PostgreSQL migration 和开发默认 SQLite schema 都由 API 启动时自动 bootstrap。
 
 示例使用 golang-migrate：
 
@@ -52,11 +53,11 @@ migrate create -ext sql -dir migrations <name>
 migrate -path migrations -database "$DATABASE_URL" up
 ```
 
-PostgreSQL / MySQL adapter 阶段再启用独立 migration 工具。如果改用 goose，需要在项目 README 和 CI 中统一命令。当前 MVP 只维护 SQLite bootstrap 和已有迁移脚本。
+如后续改用 goose 或 golang-migrate，需要在项目 README、CI 和镜像入口中统一命令。当前 MVP 使用内置 PostgreSQL migration runner，并继续维护 SQLite bootstrap。
 
 ## SQL 生成
 
-PostgreSQL / MySQL adapter 是 Later。恢复该方向时再启用 sqlc：
+sqlc 暂不启用；复杂查询增长后再评估：
 
 ```bash
 sqlc generate
@@ -91,7 +92,7 @@ internal/db/queries/
 ## Definition of Done
 
 - 功能代码合并。
-- SQLite bootstrap 或后续 migration 可在空数据库执行。
+- SQLite bootstrap 或 PostgreSQL migration 可在空数据库执行。
 - 单元测试和关键集成测试通过。
 - `go fmt ./...`、`go vet ./...`、`go test ./...` 通过。
 - 文档或 API spec 已同步更新。

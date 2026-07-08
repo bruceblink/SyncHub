@@ -19,6 +19,7 @@ import (
 	"github.com/bruceblink/SyncHub/internal/storage"
 	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
 	workersvc "github.com/bruceblink/SyncHub/internal/worker"
+	"github.com/bruceblink/SyncHub/migrations"
 )
 
 func main() {
@@ -126,6 +127,10 @@ func openRepository(ctx context.Context, cfg config.Config) (repository, func(),
 		}
 		pool, err := db.Connect(ctx, cfg.DatabaseURL)
 		if err != nil {
+			return nil, nil, err
+		}
+		if err := db.ApplyPostgresMigrations(ctx, pool, migrations.FS); err != nil {
+			pool.Close()
 			return nil, nil, err
 		}
 		return db.NewRepository(pool), pool.Close, nil

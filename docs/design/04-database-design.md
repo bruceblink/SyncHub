@@ -2,26 +2,26 @@
 
 ## 数据库选择
 
-开发阶段默认使用 SQLite，让本地运行、测试和单机 MVP 不依赖外部数据库服务。数据库访问必须经过 repository 边界，业务层不直接绑定具体 SQL 方言。
+部署主路径使用 PostgreSQL 保存元数据。开发和 smoke test 仍可使用 SQLite fallback，让本地运行不强依赖外部数据库服务。数据库访问必须经过 repository 边界，业务层不直接绑定具体 SQL 方言。
 
-PostgreSQL / MySQL adapter 暂不进入当前开发队列。只有 SQLite 单机同步闭环稳定且出现明确部署瓶颈时，再评估 pgx / sqlc、database/sql 或独立 migration 工具。
+MySQL adapter 暂不进入当前开发队列。只有 PostgreSQL + Local FS 闭环稳定且出现明确部署瓶颈时，再评估 sqlc、database/sql 或独立 migration 工具。
 
 ## sqlc 与 GORM 取舍
 
-首期 SQLite repository 使用手写 SQL 保持启动成本低。大型关系型数据库 adapter 默认选择 sqlc + 原生 driver，不把 GORM 作为核心数据访问层。
+当前 PostgreSQL 和 SQLite repository 使用手写 SQL 保持启动成本低。后续如果查询复杂度继续上升，再评估 sqlc；不把 GORM 作为核心数据访问层。
 
 原因：
 
 - SyncHub 的关键路径不是普通 CRUD，而是 upload commit 事务、乐观锁、部分唯一索引、游标分页、change feed、冲突检测和后台清理任务。
 - 这些路径需要明确控制 SQL、事务隔离、锁、索引命中和返回字段，手写 SQL 更直接。
 - sqlc 能保留 SQL 可读性，同时生成 Go 类型，减少手写 scan 和字段映射错误。
-- PostgreSQL 适合后续使用 `FOR UPDATE`、`RETURNING`、批量写入、copy、事务和连接池能力。
+- PostgreSQL 当前使用 `FOR UPDATE`、`RETURNING`、事务和连接池能力；批量写入与 copy 留给后续性能瓶颈阶段。
 
 GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，但不建议进入文件同步、版本、上传提交和 change_events 等核心路径。
 
 ## ID 与时间
 
-- 主键建议使用 UUID 或 ULID。当前 SQLite 开发库使用 text 保存 UUID，后续 PostgreSQL 可映射为 uuid 类型，MySQL 可映射为 char(36) 或 binary(16)。
+- 主键建议使用 UUID 或 ULID。PostgreSQL 使用 uuid 类型；SQLite fallback 使用 text 保存 UUID，MySQL 后续可映射为 char(36) 或 binary(16)。
 - 所有业务表包含 `created_at`、`updated_at`。
 - 软删除资源包含 `deleted_at`。
 - 对外暴露 ID 时保持字符串格式，不暴露自增序列。

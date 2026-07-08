@@ -57,6 +57,12 @@ $env:GOPROXY = $GoProxy
 $env:SYNCHUB_IMAGE = "$ProjectName-api:$Version"
 $env:SYNCHUB_PORT = [string]$Port
 $env:SYNCHUB_CONTAINER_NAME = "$ProjectName-api"
+$previousDatabaseDriver = $env:DATABASE_DRIVER
+$previousDatabaseURL = $env:DATABASE_URL
+if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
+    $env:DATABASE_DRIVER = "sqlite"
+    $env:DATABASE_URL = "/data/synchub.db"
+}
 
 Push-Location $ProjectRoot
 try {
@@ -92,6 +98,8 @@ finally {
         Invoke-Compose -Arguments @("down", "--volumes", "--remove-orphans")
     }
     finally {
+        $env:DATABASE_DRIVER = $previousDatabaseDriver
+        $env:DATABASE_URL = $previousDatabaseURL
         Pop-Location
     }
 }

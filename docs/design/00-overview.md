@@ -46,7 +46,7 @@ GUI、WebDAV、S3 和第三方客户端适配都属于 Later，不参与当前 M
 - Language: Go stable
 - Web: Gin
 - Runtime: Go runtime + goroutine
-- DB: SQLite for current MVP
+- DB: PostgreSQL for server metadata; SQLite fallback for local tests
 - Cache / queue: none for current MVP
 - Auth: JWT access token + refresh token；OAuth2 作为后续登录扩展
 - Storage: Local FS

@@ -1,4 +1,4 @@
-create extension if not exists citext;
+create extension if not exists citext with schema public;
 
 create table users (
     id uuid primary key,

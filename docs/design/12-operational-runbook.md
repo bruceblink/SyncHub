@@ -28,6 +28,7 @@
 
 ```bash
 export JWT_SECRET=change-me
+export DATABASE_URL='postgresql://user:password@host:5432/synchub?sslmode=require'
 export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
 docker compose -f docker-compose.release.yml pull
 docker compose -f docker-compose.release.yml up -d
@@ -35,7 +36,7 @@ docker compose -f docker-compose.release.yml ps
 curl -fsS http://127.0.0.1:8765/readyz
 ```
 
-升级时更新 `SYNCHUB_IMAGE` 后重复 `pull` 和 `up -d`。`synchub-data` volume 持久化 `/data/synchub.db` 和 `/data/storage`。
+升级时更新 `SYNCHUB_IMAGE` 后重复 `pull` 和 `up -d`。PostgreSQL 由 `DATABASE_URL` 指向的外部服务持久化；`synchub-data` volume 持久化 `/data/storage`。
 
 ## Fly.io 部署
 
@@ -46,6 +47,7 @@ Fly.io 使用项目 Dockerfile 和 `fly.toml` 从源码构建部署。MVP 推荐
 fly apps create synchub-your-name
 fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
 fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
+fly secrets set --app synchub-your-name DATABASE_URL="postgresql://user:password@host:5432/synchub?sslmode=require"
 fly deploy --config .\fly.toml
 fly checks list --app synchub-your-name
 curl.exe -fsS https://synchub-your-name.fly.dev/readyz
@@ -66,11 +68,11 @@ curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
 
 首选 `AAAA` 或 `CNAME` 记录并保持 Cloudflare `DNS only`；如需开启代理，补充 `fly certs setup` 输出的 ownership `TXT` 记录。
 
-不要把当前 MVP 扩成多 Machine。Fly Volume 不会自动复制，多个实例会让 SQLite 和 `/data/storage` 产生分叉。需要高可用时，先设计 LiteFS/PostgreSQL 和对象存储复制方案。
+不要把当前 MVP 扩成多 Machine。Fly Volume 不会自动复制，多个实例会让 `/data/storage` 产生分叉。需要高可用时，先设计对象存储复制方案。
 
 ## 本地备份
 
-开发环境默认使用 `.data/synchub.db` 和 `.data/storage`。在停止写入或停止 API 后执行：
+开发环境使用 SQLite fallback 时默认使用 `.data/synchub.db` 和 `.data/storage`。在停止写入或停止 API 后执行：
 
 ```powershell
 .\scripts\backup-local.ps1 -DataDir .data -OutputDir .backups

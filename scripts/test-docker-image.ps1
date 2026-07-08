@@ -121,12 +121,24 @@ try {
     Invoke-DockerBestEffort -Arguments @("rm", "-f", $ContainerName)
     Invoke-DockerBestEffort -Arguments @("volume", "rm", "-f", $VolumeName)
 
+    $containerDatabaseDriver = $env:DATABASE_DRIVER
+    $containerDatabaseURL = $env:DATABASE_URL
+    if ([string]::IsNullOrWhiteSpace($containerDatabaseURL)) {
+        $containerDatabaseDriver = "sqlite"
+        $containerDatabaseURL = "/data/synchub.db"
+    }
+    elseif ([string]::IsNullOrWhiteSpace($containerDatabaseDriver)) {
+        $containerDatabaseDriver = "postgres"
+    }
+
     Invoke-Docker -Arguments @(
         "run",
         "-d",
         "--name", $ContainerName,
         "-p", "${Port}:8765",
         "-e", "JWT_SECRET=image-smoke-secret",
+        "-e", "DATABASE_DRIVER=$containerDatabaseDriver",
+        "-e", "DATABASE_URL=$containerDatabaseURL",
         "-v", "${VolumeName}:/data",
         $Image
     )
