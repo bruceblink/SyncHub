@@ -80,7 +80,7 @@ Useful endpoints:
 
 - `GET /version`
 - `GET /healthz`
-- `GET /readyz`
+- `GET /readyz` (includes database and storage readiness checks)
 - `GET /metrics`
 - `GET /swagger/`
 - `GET /swagger/openapi.yaml`

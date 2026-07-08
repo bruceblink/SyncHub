@@ -768,7 +768,7 @@ docker compose up --build
 | --- | --- |
 | `GET /version` | 当前服务名称和版本。 |
 | `GET /healthz` | 进程存活检查。 |
-| `GET /readyz` | 数据库和存储可用性检查。 |
+| `GET /readyz` | 数据库和存储可用性检查，成功响应会包含各组件状态。 |
 | `GET /metrics` | Prometheus text format 指标。 |
 | `GET /swagger/` | Swagger UI。 |
 | `GET /swagger/openapi.yaml` | OpenAPI YAML。 |

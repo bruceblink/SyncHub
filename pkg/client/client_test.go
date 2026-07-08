@@ -121,7 +121,7 @@ func TestServiceStatusEndpoints(t *testing.T) {
 		case "/healthz":
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ok"}}`))
 		case "/readyz":
-			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready"}}`))
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready","checks":{"database":{"status":"ready"},"storage":{"status":"ready"}}}}`))
 		default:
 			t.Fatalf("request = %s %s", r.Method, r.URL.String())
 		}
@@ -147,7 +147,7 @@ func TestServiceStatusEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ready: %v", err)
 	}
-	if ready.Status != "ready" {
+	if ready.Status != "ready" || ready.Checks["database"].Status != "ready" || ready.Checks["storage"].Status != "ready" {
 		t.Fatalf("ready = %#v", ready)
 	}
 	if want := []string{"/version", "/healthz", "/readyz"}; !reflect.DeepEqual(requests, want) {

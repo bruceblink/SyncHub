@@ -35,6 +35,11 @@ type VersionInfo struct {
 }
 
 type StatusInfo struct {
+	Status string                 `json:"status"`
+	Checks map[string]StatusCheck `json:"checks,omitempty"`
+}
+
+type StatusCheck struct {
 	Status string `json:"status"`
 }
 

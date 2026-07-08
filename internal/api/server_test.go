@@ -57,6 +57,20 @@ func TestReadyzChecksDatabaseAndStorage(t *testing.T) {
 	if store.calls != 1 {
 		t.Fatalf("storage ping calls = %d, want 1", store.calls)
 	}
+	var body struct {
+		Data struct {
+			Status string `json:"status"`
+			Checks map[string]struct {
+				Status string `json:"status"`
+			} `json:"checks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.Status != "ready" || body.Data.Checks["database"].Status != "ready" || body.Data.Checks["storage"].Status != "ready" {
+		t.Fatalf("readiness data = %#v", body.Data)
+	}
 }
 
 func TestVersionEndpoint(t *testing.T) {

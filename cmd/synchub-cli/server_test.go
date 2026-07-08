@@ -44,6 +44,33 @@ func TestRunServerStatusShowsPublicHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestRunServerStatusShowsReadinessComponents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/version":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"name":"SyncHub","version":"0.1.0"}}`))
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ok"}}`))
+		case "/readyz":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready","checks":{"storage":{"status":"ready"},"database":{"status":"ready"}}}}`))
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"server", "status", "--server", server.URL}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("server status: %v", err)
+	}
+	want := "server: " + server.URL + "\nversion: SyncHub 0.1.0\nhealth: ok\nready: ready\n  database: ready\n  storage: ready\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestRunServerStatusCanOutputJSON(t *testing.T) {
 	requests := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +82,7 @@ func TestRunServerStatusCanOutputJSON(t *testing.T) {
 		case "/healthz":
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ok"}}`))
 		case "/readyz":
-			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready"}}`))
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"status":"ready","checks":{"database":{"status":"ready"},"storage":{"status":"ready"}}}}`))
 		default:
 			t.Fatalf("request = %s %s", r.Method, r.URL.String())
 		}
@@ -79,6 +106,9 @@ func TestRunServerStatusCanOutputJSON(t *testing.T) {
 	}
 	if snapshot.Health.Status != "ok" || snapshot.Ready.Status != "ready" {
 		t.Fatalf("snapshot status = %#v", snapshot)
+	}
+	if snapshot.Ready.Checks["database"].Status != "ready" || snapshot.Ready.Checks["storage"].Status != "ready" {
+		t.Fatalf("snapshot checks = %#v", snapshot.Ready.Checks)
 	}
 	if strings.Join(requests, ",") != "/version,/healthz,/readyz" {
 		t.Fatalf("requests = %#v", requests)

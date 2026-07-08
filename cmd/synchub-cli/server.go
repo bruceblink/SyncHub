@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -71,6 +72,7 @@ func runServerStatus(ctx context.Context, args []string, stdout, stderr io.Write
 	fmt.Fprintf(stdout, "version: %s %s\n", version.Name, version.Version)
 	fmt.Fprintf(stdout, "health: %s\n", health.Status)
 	fmt.Fprintf(stdout, "ready: %s\n", ready.Status)
+	printServerStatusChecks(stdout, ready)
 	return nil
 }
 
@@ -91,6 +93,39 @@ func writeServerStatusJSON(stdout io.Writer, server string, version client.Versi
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(snapshot)
+}
+
+func printServerStatusChecks(stdout io.Writer, status client.StatusInfo) {
+	names := serverStatusCheckNames(status.Checks)
+	for _, name := range names {
+		check := status.Checks[name]
+		if strings.TrimSpace(check.Status) == "" {
+			continue
+		}
+		fmt.Fprintf(stdout, "  %s: %s\n", name, check.Status)
+	}
+}
+
+func serverStatusCheckNames(checks map[string]client.StatusCheck) []string {
+	if len(checks) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(checks))
+	seen := map[string]bool{}
+	for _, name := range []string{"database", "storage"} {
+		if _, ok := checks[name]; ok {
+			names = append(names, name)
+			seen[name] = true
+		}
+	}
+	var extra []string
+	for name := range checks {
+		if !seen[name] {
+			extra = append(extra, name)
+		}
+	}
+	sort.Strings(extra)
+	return append(names, extra...)
 }
 
 func runServerWait(ctx context.Context, args []string, stdout, stderr io.Writer) error {

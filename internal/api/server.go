@@ -102,19 +102,26 @@ func requestLogPath(c *gin.Context) string {
 func (s *Server) routes() {
 	s.router.GET("/healthz", func(c *gin.Context) { ok(c, gin.H{"status": "ok"}) })
 	s.router.GET("/readyz", func(c *gin.Context) {
+		checks := gin.H{}
 		if s.db != nil {
 			if err := s.db.Ping(c.Request.Context()); err != nil {
 				fail(c, domain.E(domain.CodeInternal, "database is not ready", err))
 				return
 			}
+			checks["database"] = gin.H{"status": "ready"}
 		}
 		if s.storage != nil {
 			if err := s.storage.Ping(c.Request.Context()); err != nil {
 				fail(c, domain.E(domain.CodeInternal, "storage is not ready", err))
 				return
 			}
+			checks["storage"] = gin.H{"status": "ready"}
 		}
-		ok(c, gin.H{"status": "ready"})
+		data := gin.H{"status": "ready"}
+		if len(checks) > 0 {
+			data["checks"] = checks
+		}
+		ok(c, data)
 	})
 	s.router.GET("/version", func(c *gin.Context) {
 		ok(c, gin.H{"name": version.Name, "version": version.Version})
