@@ -93,6 +93,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
 
 The MVP check script runs formatting, vet, unit/integration tests, local API smoke checks, and local backup/restore smoke checks.
 
+Run the same CLI/API smoke flow against PostgreSQL when `DATABASE_URL` points at a disposable database or test database:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-postgres-api-smoke.ps1 -DatabaseURL $env:DATABASE_URL
+```
+
 Build and smoke-test the MVP Docker image:
 
 ```powershell

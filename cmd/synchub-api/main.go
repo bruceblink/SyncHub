@@ -125,7 +125,7 @@ func openRepository(ctx context.Context, cfg config.Config) (repository, func(),
 		if cfg.DatabaseURL == "" {
 			return nil, nil, errors.New("DATABASE_URL is required for postgres")
 		}
-		pool, err := db.Connect(ctx, cfg.DatabaseURL)
+		pool, err := db.Connect(ctx, cfg.DatabaseURL, cfg.DatabaseSchema)
 		if err != nil {
 			return nil, nil, err
 		}

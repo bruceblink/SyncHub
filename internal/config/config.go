@@ -11,6 +11,7 @@ type Config struct {
 	HTTPAddr               string
 	DatabaseDriver         string
 	DatabaseURL            string
+	DatabaseSchema         string
 	JWTSecret              string
 	StorageBackend         string
 	LocalStorageRoot       string
@@ -46,6 +47,7 @@ func Load() Config {
 		HTTPAddr:               getEnv("HTTP_ADDR", ":8765"),
 		DatabaseDriver:         databaseDriver,
 		DatabaseURL:            databaseURL,
+		DatabaseSchema:         strings.TrimSpace(os.Getenv("DATABASE_SCHEMA")),
 		JWTSecret:              getEnv("JWT_SECRET", "dev-secret-change-me"),
 		StorageBackend:         getEnv("STORAGE_BACKEND", "local"),
 		LocalStorageRoot:       getEnv("LOCAL_STORAGE_ROOT", "./.data/storage"),

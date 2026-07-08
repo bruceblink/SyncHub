@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -87,19 +86,7 @@ func newPostgresMigrationTestRepository(t *testing.T) (*Repository, *pgxpool.Poo
 		_, _ = adminPool.Exec(context.Background(), "drop schema if exists "+pgx.Identifier{schema}.Sanitize()+" cascade")
 	})
 
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("parse test database url: %v", err)
-	}
-	if cfg.ConnConfig.RuntimeParams == nil {
-		cfg.ConnConfig.RuntimeParams = make(map[string]string)
-	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = fmt.Sprintf("%s,public", schema)
-	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		_, err := conn.Exec(ctx, "set search_path to "+pgx.Identifier{schema}.Sanitize()+", public")
-		return err
-	}
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	pool, err := Connect(ctx, dsn, schema)
 	if err != nil {
 		t.Fatalf("connect test schema: %v", err)
 	}

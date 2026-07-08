@@ -2,15 +2,32 @@ package db
 
 import (
 	"context"
+	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+func Connect(ctx context.Context, databaseURL, schema string) (*pgxpool.Pool, error) {
 	if databaseURL == "" {
 		return nil, nil
 	}
-	pool, err := pgxpool.New(ctx, databaseURL)
+	schema = strings.TrimSpace(schema)
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if schema != "" {
+		if cfg.ConnConfig.RuntimeParams == nil {
+			cfg.ConnConfig.RuntimeParams = make(map[string]string)
+		}
+		cfg.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
+		cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+			_, err := conn.Exec(ctx, "set search_path to "+pgx.Identifier{schema}.Sanitize()+", public")
+			return err
+		}
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}

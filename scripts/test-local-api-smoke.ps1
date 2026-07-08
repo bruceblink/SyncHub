@@ -1,6 +1,9 @@
 param(
     [string]$ProjectRoot = "",
-    [int]$Port = 18765
+    [int]$Port = 18765,
+    [string]$DatabaseDriver = "",
+    [string]$DatabaseURL = "",
+    [string]$DatabaseSchema = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -132,6 +135,56 @@ function Assert-PathMissing {
     }
 }
 
+function Get-EnvSnapshot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Names
+    )
+
+    $snapshot = @{}
+    foreach ($name in $Names) {
+        $item = Get-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
+        if ($item) {
+            $snapshot[$name] = @{ Exists = $true; Value = $item.Value }
+        }
+        else {
+            $snapshot[$name] = @{ Exists = $false; Value = "" }
+        }
+    }
+    return $snapshot
+}
+
+function Restore-EnvSnapshot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Snapshot
+    )
+
+    foreach ($name in $Snapshot.Keys) {
+        if ($Snapshot[$name].Exists) {
+            Set-Item -LiteralPath "Env:\$name" -Value $Snapshot[$name].Value
+        }
+        else {
+            Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Set-OptionalEnv {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [string]$Value = ""
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        Remove-Item -LiteralPath "Env:\$Name" -ErrorAction SilentlyContinue
+    }
+    else {
+        Set-Item -LiteralPath "Env:\$Name" -Value $Value
+    }
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "synchub-api-smoke-$([System.Guid]::NewGuid().ToString('N'))"
 $apiOut = Join-Path $tempRoot "api.out.log"
 $apiErr = Join-Path $tempRoot "api.err.log"
@@ -143,6 +196,7 @@ $apiBinaryName = if ($isWindows) { "synchub-api.exe" } else { "synchub-api" }
 $cliBinaryName = if ($isWindows) { "synchub-cli.exe" } else { "synchub-cli" }
 $apiBinary = Join-Path $tempRoot $apiBinaryName
 $cliBinary = Join-Path $tempRoot $cliBinaryName
+$envSnapshot = Get-EnvSnapshot -Names @("HTTP_ADDR", "DATABASE_DRIVER", "DATABASE_URL", "DATABASE_SCHEMA", "LOCAL_STORAGE_ROOT", "JWT_SECRET")
 
 try {
     New-Item -ItemType Directory -Path $tempRoot | Out-Null
@@ -150,9 +204,34 @@ try {
     Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $apiBinary, "./cmd/synchub-api") | Out-Null
     Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $cliBinary, "./cmd/synchub-cli") | Out-Null
 
+    $effectiveDatabaseURL = $DatabaseURL.Trim()
+    $effectiveDatabaseDriver = $DatabaseDriver.Trim().ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($effectiveDatabaseDriver)) {
+        $lowerURL = $effectiveDatabaseURL.ToLowerInvariant()
+        if ($lowerURL.StartsWith("postgres://") -or $lowerURL.StartsWith("postgresql://")) {
+            $effectiveDatabaseDriver = "postgres"
+        }
+        else {
+            $effectiveDatabaseDriver = "sqlite"
+        }
+    }
+    if ($effectiveDatabaseDriver -eq "postgresql") {
+        $effectiveDatabaseDriver = "postgres"
+    }
+    if ($effectiveDatabaseDriver -eq "sqlite" -and [string]::IsNullOrWhiteSpace($effectiveDatabaseURL)) {
+        $effectiveDatabaseURL = Join-Path $tempRoot "synchub.db"
+    }
+    if ($effectiveDatabaseDriver -eq "postgres" -and [string]::IsNullOrWhiteSpace($effectiveDatabaseURL)) {
+        throw "DatabaseURL is required when DatabaseDriver is postgres"
+    }
+    if ($effectiveDatabaseDriver -ne "sqlite" -and $effectiveDatabaseDriver -ne "postgres") {
+        throw "unsupported smoke database driver: $effectiveDatabaseDriver"
+    }
+
     $env:HTTP_ADDR = "127.0.0.1:$Port"
-    $env:DATABASE_DRIVER = "sqlite"
-    $env:DATABASE_URL = Join-Path $tempRoot "synchub.db"
+    $env:DATABASE_DRIVER = $effectiveDatabaseDriver
+    $env:DATABASE_URL = $effectiveDatabaseURL
+    Set-OptionalEnv -Name "DATABASE_SCHEMA" -Value $DatabaseSchema
     $env:LOCAL_STORAGE_ROOT = Join-Path $tempRoot "storage"
     $env:JWT_SECRET = "local-smoke-secret"
 
@@ -290,4 +369,5 @@ finally {
             Write-GitHubAnnotation -Level "warning" -Title "temporary cleanup failed" -Message $message
         }
     }
+    Restore-EnvSnapshot -Snapshot $envSnapshot
 }

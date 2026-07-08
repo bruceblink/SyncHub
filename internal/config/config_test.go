@@ -44,10 +44,14 @@ func TestLoadDefaultsToSQLite(t *testing.T) {
 func TestLoadInfersPostgresFromURL(t *testing.T) {
 	t.Setenv("DATABASE_DRIVER", "")
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/synchub")
+	t.Setenv("DATABASE_SCHEMA", " smoke_schema ")
 
 	cfg := Load()
 	if cfg.DatabaseDriver != "postgres" {
 		t.Fatalf("database driver = %q, want postgres", cfg.DatabaseDriver)
+	}
+	if cfg.DatabaseSchema != "smoke_schema" {
+		t.Fatalf("database schema = %q, want smoke_schema", cfg.DatabaseSchema)
 	}
 }
 

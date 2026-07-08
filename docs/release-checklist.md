@@ -16,6 +16,14 @@ MVP checks passed
 
 ## 2. Build And Smoke Test The Docker Image
 
+If a disposable PostgreSQL database is available, run the API/CLI smoke flow against it before the Docker image check:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-postgres-api-smoke.ps1 -DatabaseURL $env:DATABASE_URL
+```
+
+The script creates a temporary PostgreSQL schema, starts the API with that schema through `DATABASE_SCHEMA`, runs the same local sync/version/daemon smoke flow, and drops the schema on exit.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.1 -Image synchub:0.1.1
 ```

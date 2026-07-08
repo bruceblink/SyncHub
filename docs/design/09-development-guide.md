@@ -33,6 +33,7 @@ go run ./cmd/synchub-cli sync status --path .
 
 - `DATABASE_DRIVER=postgres`
 - `DATABASE_URL=postgresql://user:password@host:5432/synchub?sslmode=require`
+- `DATABASE_SCHEMA=synchub_dev`（可选）
 - `JWT_SECRET`
 - `STORAGE_BACKEND=local`
 - `LOCAL_STORAGE_ROOT=./.data/storage`
