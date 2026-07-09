@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"net"
+	"net/url"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -13,6 +15,10 @@ func Connect(ctx context.Context, databaseURL, schema string) (*pgxpool.Pool, er
 		return nil, nil
 	}
 	schema = strings.TrimSpace(schema)
+	if schema != "" {
+		// Schema-scoped connections must use session state; Neon pooler URLs do not retain it reliably.
+		databaseURL = postgresDatabaseURLForSchema(databaseURL)
+	}
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err
@@ -36,4 +42,32 @@ func Connect(ctx context.Context, databaseURL, schema string) (*pgxpool.Pool, er
 		return nil, err
 	}
 	return pool, nil
+}
+
+func postgresDatabaseURLForSchema(databaseURL string) string {
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		return databaseURL
+	}
+	if parsed.Host == "" {
+		return databaseURL
+	}
+	host := parsed.Hostname()
+	directHost := directNeonHost(host)
+	if directHost == host {
+		return databaseURL
+	}
+	if port := parsed.Port(); port != "" {
+		parsed.Host = net.JoinHostPort(directHost, port)
+	} else {
+		parsed.Host = directHost
+	}
+	return parsed.String()
+}
+
+func directNeonHost(host string) string {
+	if !strings.HasSuffix(host, ".neon.tech") {
+		return host
+	}
+	return strings.Replace(host, "-pooler.", ".", 1)
 }
