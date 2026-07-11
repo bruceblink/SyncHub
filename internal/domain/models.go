@@ -42,6 +42,11 @@ type FileList struct {
 	NextCursor string
 }
 
+type StorageUsage struct {
+	FileCount int64
+	BytesUsed int64
+}
+
 type FileVersion struct {
 	ID                string
 	FileID            string

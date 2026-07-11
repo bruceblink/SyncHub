@@ -21,6 +21,7 @@ type Repository interface {
 	GetFileByPath(ctx context.Context, userID, path string) (domain.FileNode, error)
 	ListFiles(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error)
 	SearchFiles(ctx context.Context, userID, query, cursor string, limit int32) (domain.FileList, error)
+	Usage(ctx context.Context, userID string) (domain.StorageUsage, error)
 	ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error)
 	ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error)
 	PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
@@ -34,6 +35,10 @@ type Repository interface {
 	PutUploadChunk(ctx context.Context, uploadID string, chunkIndex, size int32, sha256sum, storageKey string) (domain.UploadChunk, error)
 	ListUploadChunks(ctx context.Context, uploadID string) ([]domain.UploadChunk, error)
 	CommitUpload(ctx context.Context, userID, uploadID, storageKey string) (domain.FileNode, int64, error)
+}
+
+func (s *Service) Usage(ctx context.Context, userID string) (domain.StorageUsage, error) {
+	return s.repo.Usage(ctx, userID)
 }
 
 type Service struct {

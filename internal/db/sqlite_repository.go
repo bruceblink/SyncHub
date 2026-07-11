@@ -274,6 +274,12 @@ func (r *SQLiteRepository) SearchFiles(ctx context.Context, userID, query, curso
 	return result, nil
 }
 
+func (r *SQLiteRepository) Usage(ctx context.Context, userID string) (domain.StorageUsage, error) {
+	var usage domain.StorageUsage
+	err := r.db.QueryRowContext(ctx, `select count(*), coalesce(sum(size), 0) from file_nodes where user_id = ? and node_type = ? and deleted_at is null`, userID, domain.NodeTypeFile).Scan(&usage.FileCount, &usage.BytesUsed)
+	return usage, wrapSQLiteDBErr(err)
+}
+
 func (r *SQLiteRepository) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100

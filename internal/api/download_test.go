@@ -190,6 +190,11 @@ func (r *downloadFileRepo) SearchFiles(ctx context.Context, userID, query, curso
 	return domain.FileList{}, errNotImplemented()
 }
 
+func (r *downloadFileRepo) Usage(ctx context.Context, userID string) (domain.StorageUsage, error) {
+	_, _ = ctx, userID
+	return domain.StorageUsage{}, errNotImplemented()
+}
+
 func (r *downloadFileRepo) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
 	_, _, _, _ = ctx, userID, cursor, limit
 	return domain.FileList{}, errNotImplemented()

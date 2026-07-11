@@ -225,6 +225,63 @@ func TestSQLiteSearchFilesMatchesNameAndPathWithoutDeletedItems(t *testing.T) {
 	}
 }
 
+func TestSQLiteUsageCountsActiveFilesOnly(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	server := New(authsvc.NewService(repo, "test-secret", time.Minute, time.Hour), filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour), repo)
+	registered := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "usage@example.com", "password": "password123"})
+	var auth struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, registered, &auth)
+	token := auth.Data.Tokens.AccessToken
+	created := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/docs"})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("directory = %d", created.Code)
+	}
+	content := []byte("usage bytes")
+	checksum := sha256.Sum256(content)
+	init := doJSON(t, server, http.MethodPost, "/api/v1/uploads", token, map[string]any{"path": "/docs/file.txt", "size": len(content), "sha256": hex.EncodeToString(checksum[:]), "chunk_size": len(content)})
+	var upload struct {
+		Data struct {
+			UploadID string `json:"upload_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, init, &upload)
+	putChunk(t, server, token, upload.Data.UploadID, content, hex.EncodeToString(checksum[:]))
+	committed := doJSON(t, server, http.MethodPost, "/api/v1/uploads/"+upload.Data.UploadID+"/commit", token, map[string]any{})
+	if committed.Code != http.StatusOK {
+		t.Fatalf("commit = %d", committed.Code)
+	}
+	var commit struct {
+		Data struct {
+			FileID  string `json:"file_id"`
+			Version int64  `json:"version"`
+		} `json:"data"`
+	}
+	decodeBody(t, committed, &commit)
+	usage := doJSON(t, server, http.MethodGet, "/api/v1/account/usage", token, nil)
+	if usage.Code != http.StatusOK || !bytes.Contains(usage.Body.Bytes(), []byte(`"file_count":1`)) || !bytes.Contains(usage.Body.Bytes(), []byte(`"bytes_used":11`)) {
+		t.Fatalf("usage = %d: %s", usage.Code, usage.Body.String())
+	}
+	deleted := doJSON(t, server, http.MethodDelete, "/api/v1/files/"+commit.Data.FileID, token, map[string]any{"base_version": commit.Data.Version})
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	usage = doJSON(t, server, http.MethodGet, "/api/v1/account/usage", token, nil)
+	if usage.Code != http.StatusOK || !bytes.Contains(usage.Body.Bytes(), []byte(`"file_count":0`)) || !bytes.Contains(usage.Body.Bytes(), []byte(`"bytes_used":0`)) {
+		t.Fatalf("usage after delete = %d: %s", usage.Code, usage.Body.String())
+	}
+}
+
 func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
 	ctx := context.Background()
 	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

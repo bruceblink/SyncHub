@@ -149,6 +149,7 @@ func (s *Server) routes() {
 	protected.GET("/files/by-path", s.getFileByPath)
 	protected.GET("/files", s.listFiles)
 	protected.GET("/files/search", s.searchFiles)
+	protected.GET("/account/usage", s.usage)
 	protected.GET("/trash", s.listTrash)
 	protected.POST("/trash/:id/restore", s.restoreTrash)
 	protected.POST("/files/directories", s.createDirectory)
@@ -288,6 +289,15 @@ func (s *Server) searchFiles(c *gin.Context) {
 		items = append(items, fileDTO(node))
 	}
 	ok(c, gin.H{"items": items, "next_cursor": result.NextCursor})
+}
+
+func (s *Server) usage(c *gin.Context) {
+	usage, err := s.files.Usage(c.Request.Context(), userID(c))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, gin.H{"file_count": usage.FileCount, "bytes_used": usage.BytesUsed})
 }
 
 func (s *Server) listTrash(c *gin.Context) {

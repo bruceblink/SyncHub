@@ -210,6 +210,12 @@ func (r *Repository) SearchFiles(ctx context.Context, userID, query, cursor stri
 	return result, nil
 }
 
+func (r *Repository) Usage(ctx context.Context, userID string) (domain.StorageUsage, error) {
+	var usage domain.StorageUsage
+	err := r.pool.QueryRow(ctx, `select count(*), coalesce(sum(size), 0) from file_nodes where user_id = $1 and node_type = $2 and deleted_at is null`, userID, domain.NodeTypeFile).Scan(&usage.FileCount, &usage.BytesUsed)
+	return usage, wrapDBErr(err)
+}
+
 func (r *Repository) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100

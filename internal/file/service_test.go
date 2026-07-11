@@ -97,6 +97,11 @@ func (r *fakeRepo) SearchFiles(ctx context.Context, userID, query, cursor string
 	return domain.FileList{}, nil
 }
 
+func (r *fakeRepo) Usage(ctx context.Context, userID string) (domain.StorageUsage, error) {
+	_, _ = ctx, userID
+	return domain.StorageUsage{}, nil
+}
+
 func (r *fakeRepo) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
 	_, _, _, _ = ctx, userID, cursor, limit
 	return domain.FileList{}, nil
