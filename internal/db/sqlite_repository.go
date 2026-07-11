@@ -288,7 +288,8 @@ func (r *SQLiteRepository) ListDeletedFiles(ctx context.Context, userID, cursor 
 		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
 		from file_nodes n where user_id = ? and deleted_at is not null
 			and (parent_id is null or not exists (select 1 from file_nodes p where p.id = n.parent_id and p.user_id = n.user_id and p.deleted_at is not null))
-		order by deleted_at desc, id desc limit ?`, userID, limit+1)
+			and (? = '' or (deleted_at, id) < (select deleted_at, id from file_nodes where user_id = ? and id = ? and deleted_at is not null))
+		order by deleted_at desc, id desc limit ?`, userID, cursor, userID, cursor, limit+1)
 	if err != nil {
 		return domain.FileList{}, wrapSQLiteDBErr(err)
 	}

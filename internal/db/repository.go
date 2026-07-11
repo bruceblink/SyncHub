@@ -221,7 +221,14 @@ func (r *Repository) ListDeletedFiles(ctx context.Context, userID, cursor string
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	rows, err := r.pool.Query(ctx, `select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at from file_nodes n where user_id = $1 and deleted_at is not null and (parent_id is null or not exists (select 1 from file_nodes p where p.id = n.parent_id and p.user_id = n.user_id and p.deleted_at is not null)) order by deleted_at desc, id desc limit $2`, userID, limit+1)
+	rows, err := r.pool.Query(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes n
+		where user_id = $1 and deleted_at is not null
+		  and (parent_id is null or not exists (select 1 from file_nodes p where p.id = n.parent_id and p.user_id = n.user_id and p.deleted_at is not null))
+		  and ($2 = '' or (deleted_at, id) < (select deleted_at, id from file_nodes where user_id = $1 and id::text = $2 and deleted_at is not null))
+		order by deleted_at desc, id desc limit $3
+	`, userID, cursor, limit+1)
 	if err != nil {
 		return domain.FileList{}, wrapDBErr(err)
 	}

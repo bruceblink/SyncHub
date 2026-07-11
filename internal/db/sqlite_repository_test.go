@@ -48,6 +48,42 @@ func TestSQLitePurgeExpiredDeletedFilesRemovesExpiredRootsAndTrees(t *testing.T)
 	}
 }
 
+func TestSQLiteListDeletedFilesPaginatesByDeletedTimeAndID(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	user, err := repo.CreateUser(ctx, "trash-pages@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	newer := time.Now().UTC().Add(-time.Hour)
+	older := newer.Add(-time.Hour)
+	if _, err = repo.db.ExecContext(ctx, `
+		insert into file_nodes (id, user_id, name, path, node_type, deleted_at) values
+		('a-new', ?, 'a-new', '/a-new', 'directory', ?),
+		('z-new', ?, 'z-new', '/z-new', 'directory', ?),
+		('z-old', ?, 'z-old', '/z-old', 'directory', ?)
+	`, user.ID, newer, user.ID, newer, user.ID, older); err != nil {
+		t.Fatalf("insert deleted nodes: %v", err)
+	}
+
+	first, err := repo.ListDeletedFiles(ctx, user.ID, "", 1)
+	if err != nil || len(first.Items) != 1 || first.Items[0].ID != "z-new" || first.NextCursor != "z-new" {
+		t.Fatalf("first page = %#v, error %v", first, err)
+	}
+	second, err := repo.ListDeletedFiles(ctx, user.ID, first.NextCursor, 1)
+	if err != nil || len(second.Items) != 1 || second.Items[0].ID != "a-new" || second.NextCursor != "a-new" {
+		t.Fatalf("second page = %#v, error %v", second, err)
+	}
+	third, err := repo.ListDeletedFiles(ctx, user.ID, second.NextCursor, 1)
+	if err != nil || len(third.Items) != 1 || third.Items[0].ID != "z-old" || third.NextCursor != "" {
+		t.Fatalf("third page = %#v, error %v", third, err)
+	}
+}
+
 func TestSQLiteExpireUploadSessions(t *testing.T) {
 	ctx := context.Background()
 	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

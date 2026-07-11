@@ -181,6 +181,7 @@ paths:
             type: string
         - name: cursor
           in: query
+          description: ID of the last item from the previous page.
           schema:
             type: string
         - name: page_size
@@ -203,6 +204,7 @@ paths:
       parameters:
         - name: cursor
           in: query
+          description: ID of the last deleted item from the previous page.
           schema:
             type: string
         - name: page_size
