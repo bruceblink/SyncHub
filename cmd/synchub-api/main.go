@@ -116,6 +116,12 @@ type storageBackend interface {
 func openRepository(ctx context.Context, cfg config.Config) (repository, func(), error) {
 	switch cfg.DatabaseDriver {
 	case "sqlite":
+		if !config.AllowsSQLite(cfg.AppEnv) {
+			return nil, nil, errors.New("sqlite is only allowed when APP_ENV is development, local, or test")
+		}
+		if cfg.DatabaseURL == "" {
+			return nil, nil, errors.New("DATABASE_URL is required for sqlite")
+		}
 		repo, err := db.OpenSQLite(ctx, cfg.DatabaseURL)
 		if err != nil {
 			return nil, nil, err

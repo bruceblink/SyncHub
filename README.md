@@ -50,21 +50,23 @@ See [docs/user-guide.md](docs/user-guide.md) for local usage and manual testing 
 
 ## MVP Quick Start
 
-Run the API server with the default SQLite database and local file storage:
+Run the API server with PostgreSQL. Production is the default environment, so `DATABASE_URL` is required:
 
 ```bash
+$env:DATABASE_URL = "postgresql://user:password@host:5432/synchub?sslmode=require"
+go run ./cmd/synchub-api
+```
+
+PostgreSQL migrations are applied automatically at startup. SQLite is only available for explicitly selected local/test environments:
+
+```powershell
+$env:APP_ENV = "local"
+$env:DATABASE_DRIVER = "sqlite"
+$env:DATABASE_URL = ".\.data\synchub.db"
 go run ./cmd/synchub-api
 ```
 
 The server listens on `http://localhost:8765` by default.
-
-To run the server against PostgreSQL, set `DATABASE_URL` before starting the API.
-PostgreSQL migrations are applied automatically at startup:
-
-```powershell
-$env:DATABASE_URL = "postgresql://user:password@host:5432/synchub?sslmode=require"
-go run ./cmd/synchub-api
-```
 
 Check local binary versions:
 

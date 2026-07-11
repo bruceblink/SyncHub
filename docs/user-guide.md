@@ -723,6 +723,7 @@ curl -fsS http://127.0.0.1:8765/readyz
 
 ```powershell
 $env:HTTP_ADDR = ":8765"
+$env:APP_ENV = "local"
 $env:DATABASE_DRIVER = "sqlite"
 $env:DATABASE_URL = ".\.data\synchub.db"
 $env:STORAGE_BACKEND = "local"

@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
-func TestLoadDefaultsToSQLite(t *testing.T) {
+func TestLoadDefaultsToProductionPostgres(t *testing.T) {
 	t.Setenv("DATABASE_DRIVER", "")
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("APP_ENV", "")
 	t.Setenv("UPLOAD_CLEANUP_INTERVAL_SECONDS", "")
 	t.Setenv("VERSION_CLEANUP_INTERVAL_SECONDS", "")
 	t.Setenv("CLEANUP_BATCH_LIMIT", "")
@@ -15,11 +16,14 @@ func TestLoadDefaultsToSQLite(t *testing.T) {
 	t.Setenv("VERSION_RETENTION_MAX_AGE_DAYS", "")
 
 	cfg := Load()
-	if cfg.DatabaseDriver != "sqlite" {
-		t.Fatalf("database driver = %q, want sqlite", cfg.DatabaseDriver)
+	if cfg.AppEnv != "production" {
+		t.Fatalf("app env = %q, want production", cfg.AppEnv)
 	}
-	if cfg.DatabaseURL != "./.data/synchub.db" {
-		t.Fatalf("database url = %q, want default sqlite path", cfg.DatabaseURL)
+	if cfg.DatabaseDriver != "postgres" {
+		t.Fatalf("database driver = %q, want postgres", cfg.DatabaseDriver)
+	}
+	if cfg.DatabaseURL != "" {
+		t.Fatalf("database url = %q, want empty", cfg.DatabaseURL)
 	}
 	if cfg.HTTPAddr != ":8765" {
 		t.Fatalf("http addr = %q, want :8765", cfg.HTTPAddr)
@@ -38,6 +42,16 @@ func TestLoadDefaultsToSQLite(t *testing.T) {
 	}
 	if cfg.VersionRetention.MaxAge != 30*24*time.Hour {
 		t.Fatalf("version retention max age = %s, want 720h", cfg.VersionRetention.MaxAge)
+	}
+}
+
+func TestLoadAllowsDefaultSQLiteOnlyInLocalEnvironment(t *testing.T) {
+	t.Setenv("APP_ENV", "local")
+	t.Setenv("DATABASE_DRIVER", "sqlite")
+	t.Setenv("DATABASE_URL", "")
+	cfg := Load()
+	if cfg.DatabaseURL != "./.data/synchub.db" || !AllowsSQLite(cfg.AppEnv) {
+		t.Fatalf("local sqlite config = %#v", cfg)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	HTTPAddr               string
+	AppEnv                 string
 	DatabaseDriver         string
 	DatabaseURL            string
 	DatabaseSchema         string
@@ -34,10 +35,15 @@ type VersionRetentionPolicy struct {
 func Load() Config {
 	databaseURL := os.Getenv("DATABASE_URL")
 	databaseDriver := strings.ToLower(strings.TrimSpace(os.Getenv("DATABASE_DRIVER")))
+	appEnv := normalizeAppEnv(os.Getenv("APP_ENV"))
 	if databaseDriver == "" {
-		databaseDriver = inferDatabaseDriver(databaseURL)
+		if databaseURL != "" {
+			databaseDriver = inferDatabaseDriver(databaseURL)
+		} else {
+			databaseDriver = "postgres"
+		}
 	}
-	if databaseURL == "" && databaseDriver == "sqlite" {
+	if databaseURL == "" && databaseDriver == "sqlite" && AllowsSQLite(appEnv) {
 		databaseURL = "./.data/synchub.db"
 	}
 
@@ -45,6 +51,7 @@ func Load() Config {
 
 	return Config{
 		HTTPAddr:               getEnv("HTTP_ADDR", ":8765"),
+		AppEnv:                 appEnv,
 		DatabaseDriver:         databaseDriver,
 		DatabaseURL:            databaseURL,
 		DatabaseSchema:         strings.TrimSpace(os.Getenv("DATABASE_SCHEMA")),
@@ -64,6 +71,23 @@ func Load() Config {
 		RefreshTokenTTL: time.Duration(getEnvInt64("REFRESH_TOKEN_TTL_SECONDS", 30*24*60*60)) * time.Second,
 		LogLevel:        getEnv("LOG_LEVEL", "info"),
 	}
+}
+
+func AllowsSQLite(appEnv string) bool {
+	switch normalizeAppEnv(appEnv) {
+	case "development", "local", "test":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeAppEnv(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "production"
+	}
+	return value
 }
 
 func inferDatabaseDriver(databaseURL string) string {

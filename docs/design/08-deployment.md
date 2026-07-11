@@ -36,6 +36,7 @@ Later 按明确需求再评估：
 
 - `DATABASE_DRIVER`，部署文件默认 `postgres`，也可省略并从 `DATABASE_URL` 推断
 - `DATABASE_URL`，PostgreSQL 连接串；部署时必须通过环境变量或 secret 提供
+- `APP_ENV`，默认 `production`；仅 `development`、`local`、`test` 环境允许 `DATABASE_DRIVER=sqlite`
 - `DATABASE_SCHEMA`，可选 PostgreSQL schema，测试隔离或多环境共用数据库时使用
 - `STORAGE_BACKEND`，镜像内默认 `local`
 - `LOCAL_STORAGE_ROOT`，镜像内默认 `/data/storage`
