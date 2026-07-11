@@ -998,7 +998,7 @@ func (r *Repository) ListActivity(ctx context.Context, userID, fileID string, be
 		select id, user_id, file_id, event_type, version, path, old_path, source_device_id, created_at
 		from change_events
 		where user_id = $1
-		  and ($2 = '' or file_id = $2)
+		  and (nullif($2::text, '') is null or file_id = nullif($2::text, '')::uuid)
 		  and ($3 = 0 or id < $3)
 		order by id desc
 		limit $4

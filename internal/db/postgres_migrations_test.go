@@ -64,6 +64,26 @@ func TestApplyPostgresMigrationsCreatesConflictSchema(t *testing.T) {
 	}
 }
 
+func TestPostgresListActivityAllowsEmptyFileFilter(t *testing.T) {
+	repo, _ := newPostgresMigrationTestRepository(t)
+	ctx := context.Background()
+	user, err := repo.CreateUser(ctx, "postgres-activity-"+uuid.NewString()+"@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := repo.CreateDirectory(ctx, user.ID, "/docs", "docs", nil, nil); err != nil {
+		t.Fatalf("create activity event: %v", err)
+	}
+
+	events, err := repo.ListActivity(ctx, user.ID, "", 0, 50)
+	if err != nil {
+		t.Fatalf("list activity without file filter: %v", err)
+	}
+	if len(events) != 1 || events[0].Path != "/docs" {
+		t.Fatalf("activity events = %#v, want /docs create event", events)
+	}
+}
+
 func newPostgresMigrationTestRepository(t *testing.T) (*Repository, *pgxpool.Pool) {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
