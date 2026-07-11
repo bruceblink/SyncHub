@@ -279,6 +279,11 @@ function App() {
   const filesRequestID = useRef(0);
   const searchRequestID = useRef(0);
   const currentPath = trail.length ? trail[trail.length - 1].path : "我的文件";
+  function navigateToPage(nextPage: typeof page) {
+    setError("");
+    setMenuID(null);
+    setPage(nextPage);
+  }
   function logout() {
     uploadControllers.current.forEach((controller) => controller.abort());
     uploadControllers.current.clear();
@@ -641,28 +646,28 @@ function App() {
         <nav>
           <button
             className={`nav-item ${page === "files" ? "active" : ""}`}
-            onClick={() => setPage("files")}
+            onClick={() => navigateToPage("files")}
           >
             <Folder size={18} />
             文件
           </button>
           <button
             className={`nav-item ${page === "trash" ? "active" : ""}`}
-            onClick={() => setPage("trash")}
+            onClick={() => navigateToPage("trash")}
           >
             <Trash2 size={18} />
             回收站
           </button>
           <button
             className={`nav-item ${page === "activity" ? "active" : ""}`}
-            onClick={() => setPage("activity")}
+            onClick={() => navigateToPage("activity")}
           >
             <Clock3 size={18} />
             活动记录
           </button>
           <button
             className={`nav-item ${page === "sync" ? "active" : ""}`}
-            onClick={() => setPage("sync")}
+            onClick={() => navigateToPage("sync")}
           >
             <MonitorCog size={18} />
             同步状态
