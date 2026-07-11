@@ -94,23 +94,94 @@ curl.exe -fsS https://synchub-your-name.fly.dev/readyz
 
 Automatic Fly.io deployment is handled by the Fly.io GitHub integration. The repository CI workflow stays test-only, and Fly.io reports a separate deployment check on push.
 
-### Cloudflare 自定义域名
+### 重新部署后绑定 Cloudflare 自定义域名
 
-域名托管在 Cloudflare 时，先在 Fly 上添加证书并查看 DNS 记录：
+重新创建 Fly app 或迁移到新 app 后，旧 app 的域名证书、IPv4/IPv6 地址不会自动迁移。完成新 app 的部署和健康检查后，按以下步骤将域名切换到新 app。以下示例使用 `sync.example.com`，全部以 `fly certs setup` 的实际输出为准。
+
+#### 1. 确认新应用可用
 
 ```powershell
 $env:FLY_APP = "synchub-your-name"
 $env:SYNCHUB_DOMAIN = "sync.example.com"
-fly certs add $env:SYNCHUB_DOMAIN --app $env:FLY_APP
-fly certs setup $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+
+fly status --app $env:FLY_APP
+fly checks list --app $env:FLY_APP
+curl.exe -fsS "https://$env:FLY_APP.fly.dev/readyz"
 ```
 
-在 Cloudflare DNS 中添加 `fly certs setup` 输出的 `AAAA` 或 `CNAME` 记录。首次配置建议使用 `DNS only`，证书验证通过后再按需开启 Cloudflare 代理；开启代理时补充 Fly 输出的 ownership `TXT` 记录。最后检查：
+继续前必须确认 Machine 为 `started`、健康检查通过，且 `/readyz` 中 database 和 storage 都为 `ready`。
+
+#### 2. 为新应用申请域名证书和入口地址
+
+```powershell
+fly certs add $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+fly certs setup $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+fly ips list --app $env:FLY_APP
+```
+
+`fly certs setup` 会给出新 app 专属的 DNS 记录。不要复用旧 app 的 Fly IPv4、IPv6、CNAME target 或 `_fly-ownership` 值。
+
+如果 `fly ips list` 只有 IPv6，额外分配共享 IPv4。这能让没有 IPv6 网络的客户端直接访问，也便于 Cloudflare 连接源站：
+
+```powershell
+fly ips allocate-v4 --shared --app $env:FLY_APP
+fly ips list --app $env:FLY_APP
+```
+
+#### 3. 在 Cloudflare 更新 DNS
+
+进入 Cloudflare DNS，删除或替换指向旧 Fly app 的 `sync` 记录。首次切换使用 `DNS only`，添加以下记录：
+
+```text
+Type: A
+Name: sync
+Content: <fly ips list 输出的 IPv4>
+Proxy status: DNS only
+
+Type: AAAA
+Name: sync
+Content: <fly certs setup 或 fly ips list 输出的 IPv6>
+Proxy status: DNS only
+```
+
+也可以使用 `fly certs setup` 给出的 CNAME target，但不要同时保留冲突的 A、AAAA 或 CNAME 记录。等待 DNS 生效后检查证书：
+
+```powershell
+Resolve-DnsName $env:SYNCHUB_DOMAIN -Type A
+Resolve-DnsName $env:SYNCHUB_DOMAIN -Type AAAA
+fly certs check $env:SYNCHUB_DOMAIN --app $env:FLY_APP
+```
+
+当状态为 `Issued` 后，Fly 的 Let's Encrypt 证书已签发并可提供 HTTPS。
+
+#### 4. 可选：重新开启 Cloudflare 代理
+
+只有在证书状态为 `Issued` 后，才将 Cloudflare 记录切换为 `Proxied`。同时添加 `fly certs setup` 输出的 ownership 记录：
+
+```text
+Type: TXT
+Name: _fly-ownership.sync
+Content: <fly certs setup 输出的 ownership value>
+```
+
+在 Cloudflare 的 SSL/TLS 设置中选择 `Full (strict)`；不要使用 `Flexible`。`Full (strict)` 要求 Cloudflare 验证 Fly 已签发的源站证书，能避免降级到 HTTP。
+
+#### 5. 验收和 525 排查
 
 ```powershell
 fly certs check $env:SYNCHUB_DOMAIN --app $env:FLY_APP
 curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
+curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/version"
 ```
+
+若 Cloudflare 返回 `525 SSL handshake failed`，表示 Cloudflare 无法与源站完成 TLS 握手。依次检查：
+
+1. `fly certs check` 是否为 `Issued`；若为 `Not verified`，先将 Cloudflare 代理关闭为 `DNS only`，并确认 A/AAAA/CNAME 已指向新 app。
+2. Cloudflare DNS 中是否仍有指向旧 Fly app 的记录，或同时存在冲突的 A、AAAA、CNAME 记录。
+3. 已开启代理时，是否添加了新 app 的 `_fly-ownership` TXT 记录，且 Cloudflare SSL/TLS 模式为 `Full (strict)`。
+4. `fly status` 和 `fly checks list` 是否显示新 app 正常；用 `https://<app>.fly.dev/readyz` 排除应用自身故障。
+
+验证成功后再删除旧 app 的证书和 IP，避免在 DNS 传播期间中断服务。
 
 ## 数据卷
 
