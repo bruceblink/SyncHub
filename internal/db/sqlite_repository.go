@@ -242,6 +242,98 @@ func (r *SQLiteRepository) ListFiles(ctx context.Context, userID string, parentI
 	return result, nil
 }
 
+func (r *SQLiteRepository) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes n where user_id = ? and deleted_at is not null
+			and (parent_id is null or not exists (select 1 from file_nodes p where p.id = n.parent_id and p.user_id = n.user_id and p.deleted_at is not null))
+		order by deleted_at desc, id desc limit ?`, userID, limit+1)
+	if err != nil {
+		return domain.FileList{}, wrapSQLiteDBErr(err)
+	}
+	defer rows.Close()
+	items := []domain.FileNode{}
+	for rows.Next() {
+		var node domain.FileNode
+		if err := rows.Scan(fileNodeScan(&node)...); err != nil {
+			return domain.FileList{}, wrapSQLiteDBErr(err)
+		}
+		items = append(items, node)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.FileList{}, wrapSQLiteDBErr(err)
+	}
+	result := domain.FileList{Items: items}
+	if len(items) > int(limit) {
+		result.Items = items[:limit]
+		result.NextCursor = result.Items[len(result.Items)-1].ID
+	}
+	return result, nil
+}
+
+func (r *SQLiteRepository) RestoreDeletedFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) (domain.FileNode, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return domain.FileNode{}, wrapSQLiteDBErr(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var node domain.FileNode
+	err = tx.QueryRowContext(ctx, `select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at from file_nodes where user_id = ? and id = ? and deleted_at is not null`, userID, fileID).Scan(fileNodeScan(&node)...)
+	if err != nil {
+		return domain.FileNode{}, wrapSQLiteNotFound(err, "deleted file not found")
+	}
+	var existing string
+	err = tx.QueryRowContext(ctx, `select id from file_nodes where user_id = ? and path = ? and deleted_at is null`, userID, node.Path).Scan(&existing)
+	if err == nil {
+		return domain.FileNode{}, domain.E(domain.CodeAlreadyExists, "an active file already uses this path", nil)
+	}
+	if err != sql.ErrNoRows {
+		return domain.FileNode{}, wrapSQLiteDBErr(err)
+	}
+	now := time.Now().UTC()
+	if _, err = tx.ExecContext(ctx, `update file_nodes set deleted_at = null, version = version + 1, updated_at = ? where user_id = ? and id = ?`, now, userID, fileID); err != nil {
+		return domain.FileNode{}, wrapSQLiteDBErr(err)
+	}
+	if node.NodeType == domain.NodeTypeDirectory {
+		if _, err = tx.ExecContext(ctx, `update file_nodes set deleted_at = null, version = version + 1, updated_at = ? where user_id = ? and deleted_at is not null and path like ? escape '\'`, now, userID, escapeSQLiteLikePrefix(node.Path)+"/%"); err != nil {
+			return domain.FileNode{}, wrapSQLiteDBErr(err)
+		}
+	}
+	rows, err := tx.QueryContext(ctx, `select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at from file_nodes where user_id = ? and deleted_at is null and (id = ? or path like ? escape '\')`, userID, fileID, escapeSQLiteLikePrefix(node.Path)+"/%")
+	if err != nil {
+		return domain.FileNode{}, wrapSQLiteDBErr(err)
+	}
+	restoredNodes := []domain.FileNode{}
+	for rows.Next() {
+		var restored domain.FileNode
+		if err := rows.Scan(fileNodeScan(&restored)...); err != nil {
+			rows.Close()
+			return domain.FileNode{}, wrapSQLiteDBErr(err)
+		}
+		restoredNodes = append(restoredNodes, restored)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return domain.FileNode{}, wrapSQLiteDBErr(err)
+	}
+	rows.Close()
+	for _, restored := range restoredNodes {
+		if _, err = r.createChangeEvent(ctx, tx, userID, restored.ID, domain.EventRestore, &restored.Version, restored.Path, nil, sourceDeviceID); err != nil {
+			return domain.FileNode{}, err
+		}
+		if restored.ID == node.ID {
+			node = restored
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.FileNode{}, wrapSQLiteDBErr(err)
+	}
+	return node, nil
+}
+
 func (r *SQLiteRepository) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100

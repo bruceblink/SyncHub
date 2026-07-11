@@ -185,6 +185,11 @@ func (r *downloadFileRepo) ListFiles(ctx context.Context, userID string, parentI
 	return domain.FileList{}, errNotImplemented()
 }
 
+func (r *downloadFileRepo) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
+	_, _, _, _ = ctx, userID, cursor, limit
+	return domain.FileList{}, errNotImplemented()
+}
+
 func (r *downloadFileRepo) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
 	_, _, _, _ = ctx, userID, fileID, limit
 	return nil, errNotImplemented()
@@ -216,6 +221,11 @@ func (r *downloadFileRepo) DeleteFile(ctx context.Context, userID, fileID string
 	_, _, _, _ = ctx, userID, fileID, sourceDeviceID
 	_ = baseVersion
 	return errNotImplemented()
+}
+
+func (r *downloadFileRepo) RestoreDeletedFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) (domain.FileNode, error) {
+	_, _, _ = ctx, userID, sourceDeviceID
+	return domain.FileNode{}, errNotImplemented()
 }
 
 func (r *downloadFileRepo) CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error) {

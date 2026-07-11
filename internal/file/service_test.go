@@ -92,6 +92,11 @@ func (r *fakeRepo) ListFiles(ctx context.Context, userID string, parentID *strin
 	return domain.FileList{}, nil
 }
 
+func (r *fakeRepo) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
+	_, _, _, _ = ctx, userID, cursor, limit
+	return domain.FileList{}, nil
+}
+
 func (r *fakeRepo) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
 	_, _, _, _ = ctx, userID, fileID, limit
 	return nil, nil
@@ -123,6 +128,11 @@ func (r *fakeRepo) DeleteFile(ctx context.Context, userID, fileID string, baseVe
 	_, _, _, _ = ctx, userID, fileID, sourceDeviceID
 	_ = baseVersion
 	return nil
+}
+
+func (r *fakeRepo) RestoreDeletedFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) (domain.FileNode, error) {
+	_, _, _ = ctx, userID, sourceDeviceID
+	return domain.FileNode{ID: fileID}, nil
 }
 
 func (r *fakeRepo) CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error) {

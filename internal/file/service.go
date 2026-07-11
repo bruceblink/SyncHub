@@ -20,12 +20,14 @@ type Repository interface {
 	GetFileByID(ctx context.Context, userID, fileID string) (domain.FileNode, error)
 	GetFileByPath(ctx context.Context, userID, path string) (domain.FileNode, error)
 	ListFiles(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error)
+	ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error)
 	ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error)
 	PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
 	UnpinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
 	RestoreFileVersion(ctx context.Context, userID, fileID string, version int64, sourceDeviceID *string) (domain.FileNode, int64, error)
 	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string, baseVersion *int64, sourceDeviceID *string) (domain.FileNode, error)
 	DeleteFile(ctx context.Context, userID, fileID string, baseVersion *int64, sourceDeviceID *string) error
+	RestoreDeletedFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) (domain.FileNode, error)
 	CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error)
 	GetUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error)
 	PutUploadChunk(ctx context.Context, uploadID string, chunkIndex, size int32, sha256sum, storageKey string) (domain.UploadChunk, error)
@@ -74,6 +76,10 @@ func (s *Service) GetByPath(ctx context.Context, userID, p string) (domain.FileN
 
 func (s *Service) List(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error) {
 	return s.repo.ListFiles(ctx, userID, parentID, strings.TrimSpace(cursor), limit)
+}
+
+func (s *Service) ListDeleted(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
+	return s.repo.ListDeletedFiles(ctx, userID, strings.TrimSpace(cursor), limit)
 }
 
 func (s *Service) Versions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
@@ -148,6 +154,13 @@ func (s *Service) Delete(ctx context.Context, userID, fileID string, baseVersion
 		return domain.E(domain.CodeInvalidArgument, "base version must be non-negative", nil)
 	}
 	return s.repo.DeleteFile(ctx, userID, fileID, baseVersion, cleanOptionalString(sourceDeviceID))
+}
+
+func (s *Service) RestoreDeleted(ctx context.Context, userID, fileID string, sourceDeviceID *string) (domain.FileNode, error) {
+	if strings.TrimSpace(fileID) == "" {
+		return domain.FileNode{}, domain.E(domain.CodeInvalidArgument, "file id is required", nil)
+	}
+	return s.repo.RestoreDeletedFile(ctx, userID, fileID, cleanOptionalString(sourceDeviceID))
 }
 
 func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, size int64, sha256sum string, requestedChunkSize int64, baseVersion *int64, idempotencyKey, sourceDeviceID string) (domain.UploadSession, error) {

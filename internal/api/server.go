@@ -148,6 +148,8 @@ func (s *Server) routes() {
 	protected.DELETE("/files/:id/versions/:version/pin", s.unpinFileVersion)
 	protected.GET("/files/by-path", s.getFileByPath)
 	protected.GET("/files", s.listFiles)
+	protected.GET("/trash", s.listTrash)
+	protected.POST("/trash/:id/restore", s.restoreTrash)
 	protected.POST("/files/directories", s.createDirectory)
 	protected.PATCH("/files/:id", s.moveFile)
 	protected.DELETE("/files/:id", s.deleteFile)
@@ -266,6 +268,43 @@ func (s *Server) listFiles(c *gin.Context) {
 		data = append(data, fileDTO(node))
 	}
 	ok(c, gin.H{"items": data, "next_cursor": result.NextCursor})
+}
+
+func (s *Server) listTrash(c *gin.Context) {
+	limit := int32(100)
+	if raw := c.Query("page_size"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = int32(parsed)
+		}
+	}
+	result, err := s.files.ListDeleted(c.Request.Context(), userID(c), c.Query("cursor"), limit)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	items := make([]any, 0, len(result.Items))
+	for _, node := range result.Items {
+		items = append(items, fileDTO(node))
+	}
+	ok(c, gin.H{"items": items, "next_cursor": result.NextCursor})
+}
+
+func (s *Server) restoreTrash(c *gin.Context) {
+	var req struct {
+		DeviceID string `json:"device_id"`
+	}
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+			return
+		}
+	}
+	node, err := s.files.RestoreDeleted(c.Request.Context(), userID(c), c.Param("id"), optionalString(req.DeviceID))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, fileDTO(node))
 }
 
 func (s *Server) listFileVersions(c *gin.Context) {

@@ -118,6 +118,61 @@ func TestSQLiteRepositoryUploadDownloadFlow(t *testing.T) {
 	}
 }
 
+func TestSQLiteTrashListsAndRestoresDeletedDirectory(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	server := New(authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour), filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour), repo)
+	register := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "trash@example.com", "password": "password123"})
+	var auth struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, register, &auth)
+	token := auth.Data.Tokens.AccessToken
+	created := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/deleted"})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create = %d: %s", created.Code, created.Body.String())
+	}
+	var node struct {
+		Data struct {
+			ID      string `json:"id"`
+			Version int64  `json:"version"`
+		} `json:"data"`
+	}
+	decodeBody(t, created, &node)
+	child := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/deleted/nested"})
+	if child.Code != http.StatusCreated {
+		t.Fatalf("create child = %d: %s", child.Code, child.Body.String())
+	}
+	deleted := doJSON(t, server, http.MethodDelete, "/api/v1/files/"+node.Data.ID, token, map[string]any{"base_version": node.Data.Version})
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	trash := doJSON(t, server, http.MethodGet, "/api/v1/trash", token, nil)
+	if trash.Code != http.StatusOK || !bytes.Contains(trash.Body.Bytes(), []byte(`"path":"/deleted"`)) || bytes.Contains(trash.Body.Bytes(), []byte(`"path":"/deleted/nested"`)) {
+		t.Fatalf("trash = %d: %s", trash.Code, trash.Body.String())
+	}
+	restored := doJSON(t, server, http.MethodPost, "/api/v1/trash/"+node.Data.ID+"/restore", token, map[string]any{})
+	if restored.Code != http.StatusOK {
+		t.Fatalf("restore = %d: %s", restored.Code, restored.Body.String())
+	}
+	active := doJSON(t, server, http.MethodGet, "/api/v1/files", token, nil)
+	if active.Code != http.StatusOK || !bytes.Contains(active.Body.Bytes(), []byte(`"path":"/deleted"`)) {
+		t.Fatalf("active = %d: %s", active.Code, active.Body.String())
+	}
+	nested := doJSON(t, server, http.MethodGet, "/api/v1/files/by-path?path=/deleted/nested", token, nil)
+	if nested.Code != http.StatusOK {
+		t.Fatalf("nested = %d: %s", nested.Code, nested.Body.String())
+	}
+}
+
 func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
 	ctx := context.Background()
 	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

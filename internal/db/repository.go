@@ -179,6 +179,94 @@ func (r *Repository) ListFiles(ctx context.Context, userID string, parentID *str
 	return result, nil
 }
 
+func (r *Repository) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, `select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at from file_nodes n where user_id = $1 and deleted_at is not null and (parent_id is null or not exists (select 1 from file_nodes p where p.id = n.parent_id and p.user_id = n.user_id and p.deleted_at is not null)) order by deleted_at desc, id desc limit $2`, userID, limit+1)
+	if err != nil {
+		return domain.FileList{}, wrapDBErr(err)
+	}
+	defer rows.Close()
+	items := []domain.FileNode{}
+	for rows.Next() {
+		var node domain.FileNode
+		if err := rows.Scan(fileNodeScan(&node)...); err != nil {
+			return domain.FileList{}, wrapDBErr(err)
+		}
+		items = append(items, node)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.FileList{}, wrapDBErr(err)
+	}
+	result := domain.FileList{Items: items}
+	if len(items) > int(limit) {
+		result.Items = items[:limit]
+		result.NextCursor = result.Items[len(result.Items)-1].ID
+	}
+	return result, nil
+}
+
+func (r *Repository) RestoreDeletedFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) (domain.FileNode, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.FileNode{}, wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var node domain.FileNode
+	err = tx.QueryRow(ctx, `select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at from file_nodes where user_id = $1 and id = $2 and deleted_at is not null for update`, userID, fileID).Scan(fileNodeScan(&node)...)
+	if err != nil {
+		return domain.FileNode{}, wrapNotFound(err, "deleted file not found")
+	}
+	var existing string
+	err = tx.QueryRow(ctx, `select id from file_nodes where user_id = $1 and path = $2 and deleted_at is null`, userID, node.Path).Scan(&existing)
+	if err == nil {
+		return domain.FileNode{}, domain.E(domain.CodeAlreadyExists, "an active file already uses this path", nil)
+	}
+	if err != pgx.ErrNoRows {
+		return domain.FileNode{}, wrapDBErr(err)
+	}
+	err = tx.QueryRow(ctx, `update file_nodes set deleted_at = null, version = version + 1, updated_at = now() where user_id = $1 and id = $2 returning id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at`, userID, fileID).Scan(fileNodeScan(&node)...)
+	if err != nil {
+		return domain.FileNode{}, wrapDBErr(err)
+	}
+	if node.NodeType == domain.NodeTypeDirectory {
+		if _, err = tx.Exec(ctx, `update file_nodes set deleted_at = null, version = version + 1, updated_at = now() where user_id = $1 and deleted_at is not null and path like replace(replace(replace($2, '\', '\\'), '%', '\%'), '_', '\_') || '/%' escape '\'`, userID, node.Path); err != nil {
+			return domain.FileNode{}, wrapDBErr(err)
+		}
+	}
+	rows, err := tx.Query(ctx, `select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at from file_nodes where user_id = $1 and deleted_at is null and (id = $2 or path like replace(replace(replace($3, '\', '\\'), '%', '\%'), '_', '\_') || '/%' escape '\')`, userID, fileID, node.Path)
+	if err != nil {
+		return domain.FileNode{}, wrapDBErr(err)
+	}
+	restoredNodes := []domain.FileNode{}
+	for rows.Next() {
+		var restored domain.FileNode
+		if err := rows.Scan(fileNodeScan(&restored)...); err != nil {
+			rows.Close()
+			return domain.FileNode{}, wrapDBErr(err)
+		}
+		restoredNodes = append(restoredNodes, restored)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return domain.FileNode{}, wrapDBErr(err)
+	}
+	rows.Close()
+	for _, restored := range restoredNodes {
+		if _, err = r.createChangeEvent(ctx, tx, userID, restored.ID, domain.EventRestore, &restored.Version, restored.Path, nil, sourceDeviceID); err != nil {
+			return domain.FileNode{}, err
+		}
+		if restored.ID == node.ID {
+			node = restored
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return domain.FileNode{}, wrapDBErr(err)
+	}
+	return node, nil
+}
+
 func (r *Repository) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
