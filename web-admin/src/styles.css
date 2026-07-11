@@ -372,6 +372,125 @@ button {
 .upload-button input {
   display: none;
 }
+.upload-queue {
+  position: fixed;
+  z-index: 4;
+  right: 24px;
+  bottom: 24px;
+  width: min(390px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid #cddbd5;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 14px 36px rgba(23, 61, 55, 0.18);
+}
+.upload-queue header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 0 14px;
+  border-bottom: 1px solid #dfe7e3;
+  background: #f7faf8;
+}
+.upload-queue header span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #28463e;
+  font-size: 13px;
+  font-weight: 700;
+}
+.upload-queue header button {
+  border: 0;
+  color: #0f766e;
+  background: transparent;
+  font-size: 12px;
+}
+.upload-task-list {
+  max-height: min(390px, 55vh);
+  overflow-y: auto;
+}
+.upload-task {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 30px;
+  gap: 9px;
+  align-items: center;
+  min-height: 70px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf1ef;
+}
+.upload-task:last-child {
+  border-bottom: 0;
+}
+.upload-task-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+  color: #0f766e;
+  background: #e5f0ec;
+}
+.upload-task:not(.queued):not(.complete):not(.failed) .upload-task-icon svg {
+  animation: preview-spin 1s linear infinite;
+}
+.upload-task.complete .upload-task-icon {
+  color: #24714b;
+  background: #e7f4eb;
+}
+.upload-task.failed .upload-task-icon {
+  color: #a53b3b;
+  background: #fff0ee;
+}
+.upload-task-detail {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.upload-task-detail strong,
+.upload-task-detail span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upload-task-detail strong {
+  color: #273830;
+  font-size: 13px;
+}
+.upload-task-detail span {
+  color: #70817a;
+  font-size: 11px;
+}
+.upload-progress {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #e4ebe8;
+}
+.upload-progress span {
+  display: block;
+  height: 100%;
+  background: #0f766e;
+  transition: width 150ms ease;
+}
+.upload-task.failed .upload-progress span {
+  background: #bd5151;
+}
+.upload-task-action {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 5px;
+  color: #687a73;
+  background: transparent;
+}
+.upload-task-action:hover {
+  color: #0f766e;
+  background: #edf5f2;
+}
 .search-box {
   display: flex;
   align-items: center;

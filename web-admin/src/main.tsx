@@ -25,6 +25,7 @@ import { VersionHistory } from "./version-history";
 import { Trash } from "./trash";
 import { Activity } from "./activity";
 import { canPreview, FilePreview } from "./file-preview";
+import { UploadQueue, type UploadTask } from "./upload-queue";
 
 const api = "/api/v1";
 const tokenKey = "synchub.accessToken";
@@ -40,7 +41,7 @@ type FileNode = {
   version: number;
   updated_at: string;
 };
-type FileList = { items: FileNode[]; next_cursor: string };
+type FileListResponse = { items: FileNode[]; next_cursor: string };
 type AuthResponse = {
   user: User;
   tokens: { access_token: string; refresh_token: string; expires_in: number };
@@ -54,6 +55,36 @@ type RequestOptions = {
   body?: unknown;
   headers?: Record<string, string>;
 };
+
+function uploadChunk(
+  path: string,
+  token: string,
+  file: File,
+  checksum: string,
+  onProgress: (progress: number) => void,
+) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", `${api}${path}`);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.setRequestHeader("X-Chunk-Sha256", checksum);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded / event.total);
+    };
+    xhr.onerror = () => reject(new Error("网络连接中断"));
+    xhr.onload = () => {
+      let payload: { code?: number; message?: string } = {};
+      try {
+        payload = JSON.parse(xhr.responseText) as typeof payload;
+      } catch {
+        // The status code below still provides a useful fallback error.
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && payload.code === 0) resolve();
+      else reject(new Error(payload.message || "上传失败"));
+    };
+    xhr.send(file);
+  });
+}
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "请求失败";
@@ -205,6 +236,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<FileNode[] | null>(null);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const currentPath = trail.length ? trail[trail.length - 1].path : "我的文件";
   function logout() {
     localStorage.removeItem(tokenKey);
@@ -220,7 +252,7 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const data = await request<FileList>(
+      const data = await request<FileListResponse>(
         `/files${parentID ? `?parent_id=${encodeURIComponent(parentID)}&page_size=100` : "?page_size=100"}`,
         { token },
       );
@@ -256,7 +288,7 @@ function App() {
       return;
     }
     try {
-      const data = await request<FileList>(
+      const data = await request<FileListResponse>(
         `/files/search?q=${encodeURIComponent(trimmed)}&page_size=100`,
         { token },
       );
@@ -301,34 +333,67 @@ function App() {
     });
     await load();
   }
-  async function upload(file: File) {
+  function updateUploadTask(id: string, update: Partial<UploadTask>) {
+    setUploadTasks((tasks) =>
+      tasks.map((task) => (task.id === id ? { ...task, ...update } : task)),
+    );
+  }
+  async function upload(task: UploadTask) {
+    updateUploadTask(task.id, { state: "hashing", progress: 3, error: undefined });
+    try {
+      const file = task.file;
     const bytes = new Uint8Array(await file.arrayBuffer());
     const digest = await crypto.subtle.digest("SHA-256", bytes);
     const checksum = [...new Uint8Array(digest)]
       .map((value) => value.toString(16).padStart(2, "0"))
       .join("");
-    const parentPath = trail.length ? trail[trail.length - 1].path : "";
+      updateUploadTask(task.id, { progress: 10 });
     const session = await request<UploadSession>("/uploads", {
       token,
       method: "POST",
       body: {
-        path: `${parentPath}/${file.name}`,
+          path: task.targetPath,
         size: file.size,
         sha256: checksum,
         chunk_size: Math.max(file.size, 1),
       },
     });
-    await request(`/uploads/${session.upload_id}/chunks/0`, {
-      token,
-      method: "PUT",
-      body: file,
-      headers: { "X-Chunk-Sha256": checksum },
-    });
+      updateUploadTask(task.id, { state: "uploading", progress: 12 });
+      await uploadChunk(
+        `/uploads/${session.upload_id}/chunks/0`,
+        token,
+        file,
+        checksum,
+        (progress) => updateUploadTask(task.id, { progress: 12 + Math.round(progress * 80) }),
+      );
+      updateUploadTask(task.id, { state: "committing", progress: 94 });
     await request(`/uploads/${session.upload_id}/commit`, {
       token,
       method: "POST",
     });
-    await load();
+      updateUploadTask(task.id, { state: "complete", progress: 100 });
+    } catch (error) {
+      updateUploadTask(task.id, { state: "failed", error: errorMessage(error) });
+    }
+  }
+  useEffect(() => {
+    const next = uploadTasks.find((task) => task.state === "queued");
+    const busy = uploadTasks.some((task) =>
+      ["hashing", "uploading", "committing"].includes(task.state),
+    );
+    if (!next || busy) return;
+    void upload(next).then(() => load());
+  }, [uploadTasks]);
+  function queueUploads(files: FileList) {
+    const parentPath = trail.length ? trail[trail.length - 1].path : "";
+    const tasks = Array.from(files).map<UploadTask>((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      targetPath: `${parentPath}/${file.name}`,
+      state: "queued",
+      progress: 0,
+    }));
+    setUploadTasks((current) => [...current, ...tasks]);
   }
   async function download(item: FileNode) {
     const response = await fetch(`${api}/files/${item.id}/content`, {
@@ -459,16 +524,10 @@ function App() {
                   上传文件
                   <input
                     type="file"
-                    onChange={async (event) => {
-                      const file = event.target.files?.[0];
-                      if (!file) return;
-                      try {
-                        await upload(file);
-                      } catch (error) {
-                        setError(errorMessage(error));
-                      } finally {
-                        event.target.value = "";
-                      }
+                    multiple
+                    onChange={(event) => {
+                      if (event.target.files?.length) queueUploads(event.target.files);
+                      event.target.value = "";
                     }}
                   />
                 </label>
@@ -648,6 +707,13 @@ function App() {
             onError={setError}
           />
         )}
+        <UploadQueue
+          tasks={uploadTasks}
+          formatSize={formatSize}
+          onRetry={(id) => updateUploadTask(id, { state: "queued", progress: 0, error: undefined })}
+          onDismiss={(id) => setUploadTasks((tasks) => tasks.filter((task) => task.id !== id))}
+          onClearCompleted={() => setUploadTasks((tasks) => tasks.filter((task) => task.state !== "complete"))}
+        />
       </section>
     </main>
   );
