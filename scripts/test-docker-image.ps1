@@ -121,14 +121,9 @@ try {
     Invoke-DockerBestEffort -Arguments @("rm", "-f", $ContainerName)
     Invoke-DockerBestEffort -Arguments @("volume", "rm", "-f", $VolumeName)
 
-    $containerDatabaseDriver = $env:DATABASE_DRIVER
     $containerDatabaseURL = $env:DATABASE_URL
     if ([string]::IsNullOrWhiteSpace($containerDatabaseURL)) {
-        $containerDatabaseDriver = "sqlite"
-        $containerDatabaseURL = "/data/synchub.db"
-    }
-    elseif ([string]::IsNullOrWhiteSpace($containerDatabaseDriver)) {
-        $containerDatabaseDriver = "postgres"
+        throw "DATABASE_URL is required for the PostgreSQL image smoke test"
     }
 
     Invoke-Docker -Arguments @(
@@ -138,7 +133,7 @@ try {
         "-p", "${Port}:8765",
         "-e", "APP_ENV=test",
         "-e", "JWT_SECRET=image-smoke-secret",
-        "-e", "DATABASE_DRIVER=$containerDatabaseDriver",
+        "-e", "DATABASE_DRIVER=postgres",
         "-e", "DATABASE_URL=$containerDatabaseURL",
         "-v", "${VolumeName}:/data",
         $Image

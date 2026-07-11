@@ -105,22 +105,7 @@ func TestLoadStorageQuotaOverride(t *testing.T) {
 	}
 }
 
-func TestLoadDefaultsToSQLiteWithoutDatabaseURLInLocalOrTestEnvironment(t *testing.T) {
-	for _, appEnv := range []string{"local", "test"} {
-		t.Run(appEnv, func(t *testing.T) {
-			t.Setenv("APP_ENV", appEnv)
-			t.Setenv("DATABASE_DRIVER", "")
-			t.Setenv("DATABASE_URL", "")
-
-			cfg := Load()
-			if cfg.DatabaseDriver != "sqlite" || cfg.DatabaseURL != "./.data/synchub.db" || !AllowsSQLite(cfg.AppEnv) {
-				t.Fatalf("%s sqlite config = %#v", appEnv, cfg)
-			}
-		})
-	}
-}
-
-func TestLoadKeepsExplicitPostgresWithoutDatabaseURLInLocalEnvironment(t *testing.T) {
+func TestLoadRequiresExplicitDatabaseURLInLocalEnvironment(t *testing.T) {
 	t.Setenv("APP_ENV", "local")
 	t.Setenv("DATABASE_DRIVER", "postgres")
 	t.Setenv("DATABASE_URL", "")
@@ -131,7 +116,17 @@ func TestLoadKeepsExplicitPostgresWithoutDatabaseURLInLocalEnvironment(t *testin
 	}
 }
 
-func TestLoadInfersPostgresFromURL(t *testing.T) {
+func TestLoadIgnoresLegacyDatabaseDriverOverride(t *testing.T) {
+	t.Setenv("DATABASE_DRIVER", "sqlite")
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/synchub")
+
+	cfg := Load()
+	if cfg.DatabaseDriver != "postgres" {
+		t.Fatalf("database driver = %q, want postgres", cfg.DatabaseDriver)
+	}
+}
+
+func TestLoadUsesPostgresWithURL(t *testing.T) {
 	t.Setenv("DATABASE_DRIVER", "")
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/synchub")
 	t.Setenv("DATABASE_SCHEMA", " smoke_schema ")

@@ -37,7 +37,6 @@ synchub-cli -> REST API -> SyncHub Server -> Storage
 - Go
 - Gin
 - PostgreSQL for server metadata
-- SQLite remains available for local development and smoke tests
 - Local FS / S3-compatible storage
 
 ## Roadmap
@@ -65,14 +64,7 @@ $env:DATABASE_URL = "postgresql://user:password@host:5432/synchub?sslmode=requir
 go run ./cmd/synchub-api
 ```
 
-PostgreSQL migrations are applied automatically at startup. SQLite is only available for explicitly selected local/test environments:
-
-```powershell
-$env:APP_ENV = "local"
-go run ./cmd/synchub-api
-```
-
-When `APP_ENV` is `local`, `development`, or `test`, an unset `DATABASE_URL` defaults to `./.data/synchub.db`. Production always requires a PostgreSQL `DATABASE_URL`.
+PostgreSQL migrations are applied automatically at startup. `DATABASE_URL` is required in every environment, including local development and tests.
 
 The server listens on `http://localhost:8765` by default.
 

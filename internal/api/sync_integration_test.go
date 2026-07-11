@@ -2,30 +2,22 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	authsvc "github.com/bruceblink/SyncHub/internal/auth"
-	"github.com/bruceblink/SyncHub/internal/db"
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
 	"github.com/bruceblink/SyncHub/internal/storage"
 	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
 )
 
-func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresSyncDeviceAndChangeFeed(t *testing.T) {
+	repo := newTestRepository(t)
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	store := storage.NewLocal(t.TempDir())

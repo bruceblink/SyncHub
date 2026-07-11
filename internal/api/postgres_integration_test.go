@@ -14,27 +14,21 @@ import (
 	"time"
 
 	authsvc "github.com/bruceblink/SyncHub/internal/auth"
-	"github.com/bruceblink/SyncHub/internal/db"
 	"github.com/bruceblink/SyncHub/internal/domain"
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
 	"github.com/bruceblink/SyncHub/internal/storage"
 	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
 )
 
-func TestSQLiteRepositoryUploadDownloadFlow(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresRepositoryUploadDownloadFlow(t *testing.T) {
+	repo := newTestRepository(t)
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
 	server := New(authService, fileService, repo)
 
 	registerResp := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
-		"email":    "sqlite@example.com",
+		"email":    "postgres@example.com",
 		"password": "password123",
 	})
 	if registerResp.Code != http.StatusCreated {
@@ -60,7 +54,7 @@ func TestSQLiteRepositoryUploadDownloadFlow(t *testing.T) {
 		t.Fatalf("create directory status = %d body = %s", createDirResp.Code, createDirResp.Body.String())
 	}
 
-	content := []byte("hello sqlite")
+	content := []byte("hello postgres")
 	sum := sha256.Sum256(content)
 	sha := hex.EncodeToString(sum[:])
 
@@ -119,13 +113,8 @@ func TestSQLiteRepositoryUploadDownloadFlow(t *testing.T) {
 	}
 }
 
-func TestSQLiteTrashListsAndRestoresDeletedDirectory(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresTrashListsAndRestoresDeletedDirectory(t *testing.T) {
+	repo := newTestRepository(t)
 	server := New(authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour), filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour), repo)
 	register := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "trash@example.com", "password": "password123"})
 	var auth struct {
@@ -174,13 +163,8 @@ func TestSQLiteTrashListsAndRestoresDeletedDirectory(t *testing.T) {
 	}
 }
 
-func TestSQLiteTrashPurgeDeletesOnlySelectedDirectoryTree(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresTrashPurgeDeletesOnlySelectedDirectoryTree(t *testing.T) {
+	repo := newTestRepository(t)
 	server := New(authsvc.NewService(repo, "test-secret", time.Minute, time.Hour), filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour), repo)
 	register := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "purge@example.com", "password": "password123"})
 	var auth struct {
@@ -227,13 +211,8 @@ func TestSQLiteTrashPurgeDeletesOnlySelectedDirectoryTree(t *testing.T) {
 	}
 }
 
-func TestSQLiteSearchFilesMatchesNameAndPathWithoutDeletedItems(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresSearchFilesMatchesNameAndPathWithoutDeletedItems(t *testing.T) {
+	repo := newTestRepository(t)
 	server := New(authsvc.NewService(repo, "test-secret", time.Minute, time.Hour), filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour), repo)
 	registered := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "search@example.com", "password": "password123"})
 	var auth struct {
@@ -279,13 +258,8 @@ func TestSQLiteSearchFilesMatchesNameAndPathWithoutDeletedItems(t *testing.T) {
 	}
 }
 
-func TestSQLiteUsageCountsActiveFilesOnly(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresUsageCountsActiveFilesOnly(t *testing.T) {
+	repo := newTestRepository(t)
 	server := New(authsvc.NewService(repo, "test-secret", time.Minute, time.Hour), filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour), repo)
 	registered := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "usage@example.com", "password": "password123"})
 	var auth struct {
@@ -336,13 +310,8 @@ func TestSQLiteUsageCountsActiveFilesOnly(t *testing.T) {
 	}
 }
 
-func TestSQLiteUploadEnforcesConfiguredStorageQuota(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresUploadEnforcesConfiguredStorageQuota(t *testing.T) {
+	repo := newTestRepository(t)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour).WithStorageQuota(10)
 	server := New(authsvc.NewService(repo, "test-secret", time.Minute, time.Hour), fileService, repo)
 	registered := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "quota@example.com", "password": "password123"})
@@ -369,13 +338,9 @@ func TestSQLiteUploadEnforcesConfiguredStorageQuota(t *testing.T) {
 	}
 }
 
-func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
+func TestPostgresUploadConflictRecordsSyncConflict(t *testing.T) {
 	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+	repo := newTestRepository(t)
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
@@ -521,13 +486,9 @@ func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
 	}
 }
 
-func TestSQLiteMoveAndDeleteConflictRecordsSyncConflict(t *testing.T) {
+func TestPostgresMoveAndDeleteConflictRecordsSyncConflict(t *testing.T) {
 	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+	repo := newTestRepository(t)
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
@@ -670,13 +631,8 @@ func TestSQLiteMoveAndDeleteConflictRecordsSyncConflict(t *testing.T) {
 	}
 }
 
-func TestSQLiteFileVersionHistory(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresFileVersionHistory(t *testing.T) {
+	repo := newTestRepository(t)
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
@@ -791,13 +747,8 @@ func TestSQLiteFileVersionHistory(t *testing.T) {
 	}
 }
 
-func TestSQLiteListFilesPagination(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresListFilesPagination(t *testing.T) {
+	repo := newTestRepository(t)
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
@@ -897,13 +848,8 @@ func TestSQLiteListFilesPagination(t *testing.T) {
 	}
 }
 
-func TestSQLitePinFileVersion(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresPinFileVersion(t *testing.T) {
+	repo := newTestRepository(t)
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
@@ -1020,13 +966,8 @@ func TestSQLitePinFileVersion(t *testing.T) {
 	}
 }
 
-func TestSQLiteRestoreFileVersion(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresRestoreFileVersion(t *testing.T) {
+	repo := newTestRepository(t)
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
@@ -1209,13 +1150,8 @@ func TestSQLiteRestoreFileVersion(t *testing.T) {
 	}
 }
 
-func TestSQLiteUploadInitIdempotencyKey(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresUploadInitIdempotencyKey(t *testing.T) {
+	repo := newTestRepository(t)
 
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 4*1024*1024, 24*time.Hour)
@@ -1274,13 +1210,8 @@ func TestSQLiteUploadInitIdempotencyKey(t *testing.T) {
 	}
 }
 
-func TestSQLiteAbortUploadIsIdempotentAndCleansStagingChunks(t *testing.T) {
-	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Close() })
+func TestPostgresAbortUploadIsIdempotentAndCleansStagingChunks(t *testing.T) {
+	repo := newTestRepository(t)
 	storageRoot := t.TempDir()
 	server := New(
 		authsvc.NewService(repo, "test-secret", time.Minute, time.Hour),

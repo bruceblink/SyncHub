@@ -36,7 +36,7 @@ Later 按明确需求再评估：
 
 - `DATABASE_DRIVER`，部署文件默认 `postgres`，也可省略并从 `DATABASE_URL` 推断
 - `DATABASE_URL`，PostgreSQL 连接串；部署时必须通过环境变量或 secret 提供
-- `APP_ENV`，默认 `production`；仅 `development`、`local`、`test` 环境允许 `DATABASE_DRIVER=sqlite`
+- `APP_ENV`，默认 `production`，用于区分运行环境；所有环境都要求 PostgreSQL
 - `DATABASE_SCHEMA`，可选 PostgreSQL schema，测试隔离或多环境共用数据库时使用
 - `STORAGE_BACKEND`，镜像内默认 `local`
 - `LOCAL_STORAGE_ROOT`，镜像内默认 `/data/storage`
@@ -238,6 +238,6 @@ curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/version"
 
 ## 备份
 
-- PostgreSQL 需要定期备份；SQLite 开发数据库可随本地数据目录备份。
+- PostgreSQL 需要通过数据库提供方的备份、快照或 PITR 能力定期保护。
 - Local FS storage 按对象目录备份。
 - 数据库和 storage 备份需要时间点接近，否则恢复后可能出现孤儿对象；孤儿对象由修复任务处理。

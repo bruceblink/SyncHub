@@ -71,26 +71,8 @@ curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
 
 不要把当前 MVP 扩成多 Machine。Fly Volume 不会自动复制，多个实例会让 `/data/storage` 产生分叉。需要高可用时，先设计对象存储复制方案。
 
-## 本地备份
+## 备份与恢复
 
-开发环境使用 SQLite fallback 时默认使用 `.data/synchub.db` 和 `.data/storage`。在停止写入或停止 API 后执行：
+所有环境的元数据都位于 PostgreSQL，应使用数据库提供方的 dump、快照或 PITR 能力。文件对象位于 `LOCAL_STORAGE_ROOT` 或 Fly Volume，需要单独备份或保留可恢复快照。
 
-```powershell
-.\scripts\backup-local.ps1 -DataDir .data -OutputDir .backups
-```
-
-脚本会输出生成的 zip 路径。恢复时先停止 API，将 zip 中的 `synchub.db` 和 `storage` 放回同一个数据目录，再启动服务。
-
-也可以使用恢复脚本。默认不会覆盖已有数据目录：
-
-```powershell
-.\scripts\restore-local.ps1 -BackupPath .backups\synchub-local-YYYYMMDD-HHMMSS.zip -DataDir .data
-```
-
-如果确认要替换现有 `.data`，添加 `-Force`。
-
-备份 / 恢复脚本可以用临时数据目录做本地自检：
-
-```powershell
-.\scripts\test-local-backup-restore.ps1
-```
+恢复前停止 API 写入，并选择时间点尽量一致的 PostgreSQL 与对象存储备份。先恢复数据库和对象，再启动单个 API 实例并检查 `/readyz`、文件下载和同步游标。

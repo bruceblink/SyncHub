@@ -57,10 +57,6 @@ try {
             & (Join-Path $ProjectRoot "scripts/test-local-api-smoke.ps1") -ProjectRoot $ProjectRoot -Port $Port
         }
     }
-    Invoke-ScriptStep -Name "local backup restore smoke" -Script {
-        & (Join-Path $ProjectRoot "scripts/test-local-backup-restore.ps1") -ProjectRoot $ProjectRoot
-    }
-
     Write-Output "MVP checks passed"
 }
 finally {

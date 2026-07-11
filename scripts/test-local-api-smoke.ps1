@@ -205,27 +205,9 @@ try {
     Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $cliBinary, "./cmd/synchub-cli") | Out-Null
 
     $effectiveDatabaseURL = $DatabaseURL.Trim()
-    $effectiveDatabaseDriver = $DatabaseDriver.Trim().ToLowerInvariant()
-    if ([string]::IsNullOrWhiteSpace($effectiveDatabaseDriver)) {
-        $lowerURL = $effectiveDatabaseURL.ToLowerInvariant()
-        if ($lowerURL.StartsWith("postgres://") -or $lowerURL.StartsWith("postgresql://")) {
-            $effectiveDatabaseDriver = "postgres"
-        }
-        else {
-            $effectiveDatabaseDriver = "sqlite"
-        }
-    }
-    if ($effectiveDatabaseDriver -eq "postgresql") {
-        $effectiveDatabaseDriver = "postgres"
-    }
-    if ($effectiveDatabaseDriver -eq "sqlite" -and [string]::IsNullOrWhiteSpace($effectiveDatabaseURL)) {
-        $effectiveDatabaseURL = Join-Path $tempRoot "synchub.db"
-    }
-    if ($effectiveDatabaseDriver -eq "postgres" -and [string]::IsNullOrWhiteSpace($effectiveDatabaseURL)) {
-        throw "DatabaseURL is required when DatabaseDriver is postgres"
-    }
-    if ($effectiveDatabaseDriver -ne "sqlite" -and $effectiveDatabaseDriver -ne "postgres") {
-        throw "unsupported smoke database driver: $effectiveDatabaseDriver"
+    $effectiveDatabaseDriver = "postgres"
+    if ([string]::IsNullOrWhiteSpace($effectiveDatabaseURL)) {
+        throw "DatabaseURL is required for the PostgreSQL smoke test"
     }
 
     $env:APP_ENV = "test"

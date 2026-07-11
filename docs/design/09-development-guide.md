@@ -4,7 +4,6 @@
 
 - Go stable
 - PostgreSQL metadata database
-- SQLite local database fallback
 - Docker / Docker Compose for Linux image smoke tests and deployment packaging
 - Windows PowerShell for local development scripts
 
@@ -46,7 +45,7 @@ go run ./cmd/synchub-cli sync status --path .
 
 ## Migration
 
-PostgreSQL migration 和开发默认 SQLite schema 都由 API 启动时自动 bootstrap。
+PostgreSQL migration 由 API 启动时自动执行。
 
 示例使用 golang-migrate：
 
@@ -55,7 +54,7 @@ migrate create -ext sql -dir migrations <name>
 migrate -path migrations -database "$DATABASE_URL" up
 ```
 
-如后续改用 goose 或 golang-migrate，需要在项目 README、CI 和镜像入口中统一命令。当前 MVP 使用内置 PostgreSQL migration runner，并继续维护 SQLite bootstrap。
+如后续改用 goose 或 golang-migrate，需要在项目 README、CI 和镜像入口中统一命令。当前使用内置 PostgreSQL migration runner。
 
 ## SQL 生成
 
@@ -94,7 +93,7 @@ internal/db/queries/
 ## Definition of Done
 
 - 功能代码合并。
-- SQLite bootstrap 或 PostgreSQL migration 可在空数据库执行。
+- PostgreSQL migration 可在空数据库执行。
 - 单元测试和关键集成测试通过。
 - `go fmt ./...`、`go vet ./...`、`go test ./...` 通过。
 - 文档或 API spec 已同步更新。

@@ -58,7 +58,7 @@
 职责：
 
 - PostgreSQL migration runner。
-- SQLite 开发库初始化和 schema bootstrap。
+- PostgreSQL migration 执行和 repository 初始化。
 - repository 实现。
 - transaction helper。
 

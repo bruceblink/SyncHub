@@ -61,9 +61,7 @@ $previousDatabaseDriver = $env:DATABASE_DRIVER
 $previousDatabaseURL = $env:DATABASE_URL
 $previousAppEnv = $env:APP_ENV
 if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
-    $env:APP_ENV = "test"
-    $env:DATABASE_DRIVER = "sqlite"
-    $env:DATABASE_URL = "/data/synchub.db"
+    throw "DATABASE_URL is required for the PostgreSQL compose smoke test"
 }
 
 Push-Location $ProjectRoot

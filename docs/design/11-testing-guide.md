@@ -3,11 +3,11 @@
 ## 测试分层
 
 - Unit tests: 领域逻辑、path normalization、冲突命名、hash diff、权限判断。
-- Repository tests: SQLite repository、PostgreSQL migration/repository，以及后续 sqlc query wrapper，使用测试数据库。
+- Repository tests: PostgreSQL migration/repository，以及后续 sqlc query wrapper，使用隔离测试 schema。
 - API integration tests: Gin router + test database + mock/local storage。
 - Storage tests: Local FS backend 的 put/read/delete/compose/range。
 - Sync tests: change cursor、manifest diff、冲突检测。
-- CLI E2E tests: 使用 SQLite API test server 和临时 workspace 验证双设备同步闭环。
+- CLI E2E tests: 使用 PostgreSQL API test server 和临时 workspace 验证双设备同步闭环。
 
 ## 首期必须覆盖
 
@@ -27,7 +27,6 @@
 - `testing` 标准库作为默认测试框架。
 - `net/http/httptest` 测试 Gin router。
 - `t.TempDir()` 测试 Local FS storage。
-- SQLite 使用 `t.TempDir()` 创建临时数据库文件。
 - PostgreSQL integration tests 使用 `TEST_DATABASE_URL` 和独立临时 schema，避免破坏目标数据库中的已有表。
 - `testcontainers-go` 或 Docker Compose 测试后续 MySQL adapter。
 - 手写 fake storage / fake repository 测试 service。

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,10 +16,14 @@ import (
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
 	"github.com/bruceblink/SyncHub/internal/storage"
 	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
+	"github.com/bruceblink/SyncHub/migrations"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestSQLiteTwoDeviceSyncFlow(t *testing.T) {
-	server := newSQLiteCLITestServer(t)
+func TestPostgresTwoDeviceSyncFlow(t *testing.T) {
+	server := newPostgresCLITestServer(t)
 	defer server.Close()
 
 	deviceOneRoot := t.TempDir()
@@ -119,14 +124,34 @@ func TestSQLiteTwoDeviceSyncFlow(t *testing.T) {
 	assertFileMissing(t, filepath.Join(deviceOneRoot, "renamed.txt"))
 }
 
-func newSQLiteCLITestServer(t *testing.T) *httptest.Server {
+func newPostgresCLITestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	ctx := context.Background()
-	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
 	}
-	t.Cleanup(func() { _ = repo.Close() })
+	adminPool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(adminPool.Close)
+	schema := "synchub_cli_test_" + strings.ReplaceAll(uuid.NewString(), "-", "_")
+	if _, err := adminPool.Exec(ctx, "create schema "+pgx.Identifier{schema}.Sanitize()); err != nil {
+		t.Fatalf("create test schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = adminPool.Exec(context.Background(), "drop schema if exists "+pgx.Identifier{schema}.Sanitize()+" cascade")
+	})
+	pool, err := db.Connect(ctx, dsn, schema)
+	if err != nil {
+		t.Fatalf("connect test schema: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := db.ApplyPostgresMigrations(ctx, pool, migrations.FS); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	repo := db.NewRepository(pool)
 
 	store := storage.NewLocal(t.TempDir())
 	authService := authsvc.NewService(repo, "test-secret", 15*time.Minute, 24*time.Hour)

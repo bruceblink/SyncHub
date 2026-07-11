@@ -2,13 +2,13 @@
 
 ## 数据库选择
 
-部署主路径使用 PostgreSQL 保存元数据。开发和 smoke test 仍可使用 SQLite fallback，让本地运行不强依赖外部数据库服务。数据库访问必须经过 repository 边界，业务层不直接绑定具体 SQL 方言。
+服务端只使用 PostgreSQL 保存元数据。开发、测试和生产环境使用同一数据库能力集合，数据库访问必须经过 repository 边界。
 
 MySQL adapter 暂不进入当前开发队列。只有 PostgreSQL + Local FS 闭环稳定且出现明确部署瓶颈时，再评估 sqlc、database/sql 或独立 migration 工具。
 
 ## sqlc 与 GORM 取舍
 
-当前 PostgreSQL 和 SQLite repository 使用手写 SQL 保持启动成本低。后续如果查询复杂度继续上升，再评估 sqlc；不把 GORM 作为核心数据访问层。
+当前 PostgreSQL repository 使用手写 SQL 保持启动成本低。后续如果查询复杂度继续上升，再评估 sqlc；不把 GORM 作为核心数据访问层。
 
 原因：
 
@@ -21,7 +21,7 @@ GORM 可作为可选工具用于后台管理、低风险 CRUD 或原型验证，
 
 ## ID 与时间
 
-- 主键建议使用 UUID 或 ULID。PostgreSQL 使用 uuid 类型；SQLite fallback 使用 text 保存 UUID，MySQL 后续可映射为 char(36) 或 binary(16)。
+- 主键使用 UUID；对外暴露时保持字符串格式。
 - 所有业务表包含 `created_at`、`updated_at`。
 - 软删除资源包含 `deleted_at`。
 - 对外暴露 ID 时保持字符串格式，不暴露自增序列。

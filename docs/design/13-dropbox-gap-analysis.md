@@ -72,4 +72,4 @@
 3. 用户或组织套餐级配额。
 4. 通知。
 
-每一项在开始前都要确认 PostgreSQL 与 SQLite 实现、同步 change event、OpenAPI、CLI 和 React 管理端是否需要同时更新。
+每一项在开始前都要确认 PostgreSQL migration/repository、同步 change event、OpenAPI、CLI 和 React 管理端是否需要同时更新。

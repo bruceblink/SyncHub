@@ -1227,6 +1227,10 @@ func escapePostgresLikePrefix(value string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }
 
+func isDescendantPath(path, parent string) bool {
+	return path == parent || strings.HasPrefix(path, parent+"/")
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

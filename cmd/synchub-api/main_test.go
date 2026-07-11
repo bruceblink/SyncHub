@@ -3,35 +3,11 @@ package main
 import (
 	"context"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/bruceblink/SyncHub/internal/config"
 )
-
-func TestOpenRepositoryUsesSQLite(t *testing.T) {
-	repo, closeRepo, err := openRepository(context.Background(), config.Config{
-		AppEnv:         "test",
-		DatabaseDriver: "sqlite",
-		DatabaseURL:    filepath.Join(t.TempDir(), "synchub.db"),
-	})
-	if err != nil {
-		t.Fatalf("open sqlite repository: %v", err)
-	}
-	defer closeRepo()
-
-	if err := repo.Ping(context.Background()); err != nil {
-		t.Fatalf("ping sqlite repository: %v", err)
-	}
-}
-
-func TestOpenRepositoryRejectsSQLiteOutsideLocalEnvironments(t *testing.T) {
-	_, _, err := openRepository(context.Background(), config.Config{AppEnv: "production", DatabaseDriver: "sqlite", DatabaseURL: "./synchub.db"})
-	if err == nil || !strings.Contains(err.Error(), "sqlite is only allowed") {
-		t.Fatalf("error = %v, want sqlite environment guard", err)
-	}
-}
 
 func TestOpenRepositoryRequiresPostgresURL(t *testing.T) {
 	_, _, err := openRepository(context.Background(), config.Config{DatabaseDriver: "postgres"})

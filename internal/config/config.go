@@ -39,20 +39,8 @@ type VersionRetentionPolicy struct {
 func Load() Config {
 	_ = godotenv.Load()
 	databaseURL := os.Getenv("DATABASE_URL")
-	databaseDriver := strings.ToLower(strings.TrimSpace(os.Getenv("DATABASE_DRIVER")))
+	databaseDriver := "postgres"
 	appEnv := normalizeAppEnv(os.Getenv("APP_ENV"))
-	if databaseDriver == "" {
-		if databaseURL != "" {
-			databaseDriver = inferDatabaseDriver(databaseURL)
-		} else if AllowsSQLite(appEnv) {
-			databaseDriver = "sqlite"
-		} else {
-			databaseDriver = "postgres"
-		}
-	}
-	if databaseURL == "" && databaseDriver == "sqlite" && AllowsSQLite(appEnv) {
-		databaseURL = "./.data/synchub.db"
-	}
 
 	uploadCleanupInterval := time.Duration(getEnvInt64("UPLOAD_CLEANUP_INTERVAL_SECONDS", 60*60)) * time.Second
 
@@ -82,29 +70,12 @@ func Load() Config {
 	}
 }
 
-func AllowsSQLite(appEnv string) bool {
-	switch normalizeAppEnv(appEnv) {
-	case "development", "local", "test":
-		return true
-	default:
-		return false
-	}
-}
-
 func normalizeAppEnv(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
 		return "production"
 	}
 	return value
-}
-
-func inferDatabaseDriver(databaseURL string) string {
-	lower := strings.ToLower(strings.TrimSpace(databaseURL))
-	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
-		return "postgres"
-	}
-	return "sqlite"
 }
 
 func getEnv(key, fallback string) string {
