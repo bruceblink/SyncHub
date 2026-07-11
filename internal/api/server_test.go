@@ -241,6 +241,33 @@ func TestSwaggerDocs(t *testing.T) {
 	}
 }
 
+func TestAdminUI(t *testing.T) {
+	server := New(nil, nil, nil)
+
+	redirectReq := httptest.NewRequest(http.MethodGet, "/app", nil)
+	redirectRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(redirectRec, redirectReq)
+	if redirectRec.Code != http.StatusMovedPermanently {
+		t.Fatalf("admin redirect status = %d", redirectRec.Code)
+	}
+	if got := redirectRec.Header().Get("Location"); got != "/app/" {
+		t.Fatalf("admin redirect location = %q", got)
+	}
+
+	uiReq := httptest.NewRequest(http.MethodGet, "/app/", nil)
+	uiRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(uiRec, uiReq)
+	if uiRec.Code != http.StatusOK {
+		t.Fatalf("admin ui status = %d body = %s", uiRec.Code, uiRec.Body.String())
+	}
+	if got := uiRec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+		t.Fatalf("admin ui content type = %q", got)
+	}
+	if !strings.Contains(uiRec.Body.String(), `<div id="root"></div>`) {
+		t.Fatalf("admin ui did not include React root: %s", uiRec.Body.String())
+	}
+}
+
 type fakePinger struct {
 	calls int
 	err   error

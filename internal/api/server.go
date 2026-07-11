@@ -130,6 +130,8 @@ func (s *Server) routes() {
 	s.router.GET("/swagger", swaggerRedirect)
 	s.router.GET("/swagger/", swaggerUI)
 	s.router.GET("/swagger/openapi.yaml", swaggerSpec)
+	s.router.GET("/app", func(c *gin.Context) { c.Redirect(http.StatusMovedPermanently, "/app/") })
+	s.router.GET("/app/*path", s.adminUI)
 
 	v1 := s.router.Group("/api/v1")
 	v1.POST("/auth/register", s.register)

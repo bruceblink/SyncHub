@@ -1,6 +1,16 @@
 ARG GO_IMAGE=golang:1.26-alpine
 ARG RUNTIME_IMAGE=alpine:3.22
 
+FROM node:24-alpine AS admin-build
+
+WORKDIR /src/web-admin
+
+COPY web-admin/package.json web-admin/pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+
+COPY web-admin/ ./
+RUN pnpm build
+
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 
 ARG GOPROXY=https://goproxy.cn,direct
@@ -15,6 +25,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+COPY --from=admin-build /src/internal/api/admin_dist ./internal/api/admin_dist
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X github.com/bruceblink/SyncHub/internal/version.Version=${VERSION}" -o /out/synchub-api ./cmd/synchub-api
 
