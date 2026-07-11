@@ -58,6 +58,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-web-admin.ps
 
 Run the API server with PostgreSQL. Production is the default environment, so `DATABASE_URL` is required:
 
+The API loads missing values from `.env` in the current working directory. Existing process environment variables and deployment secrets take precedence.
+
 ```bash
 $env:DATABASE_URL = "postgresql://user:password@host:5432/synchub?sslmode=require"
 go run ./cmd/synchub-api

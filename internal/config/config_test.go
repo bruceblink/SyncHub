@@ -1,9 +1,41 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestLoadReadsDotEnvWithoutOverridingProcessEnvironment(t *testing.T) {
+	t.Chdir(t.TempDir())
+	dotEnv := "APP_ENV=local\nDATABASE_DRIVER=postgres\nDATABASE_URL=postgres://dotenv/synchub\nHTTP_ADDR=:9999\n"
+	if err := os.WriteFile(filepath.Join(".env"), []byte(dotEnv), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	for _, key := range []string{"APP_ENV", "DATABASE_DRIVER", "DATABASE_URL"} {
+		oldValue, existed := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+		t.Cleanup(func() {
+			if existed {
+				_ = os.Setenv(key, oldValue)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		})
+	}
+	t.Setenv("HTTP_ADDR", ":8766")
+
+	cfg := Load()
+	if cfg.DatabaseURL != "postgres://dotenv/synchub" || cfg.DatabaseDriver != "postgres" || cfg.AppEnv != "local" {
+		t.Fatalf("dotenv database config = %#v", cfg)
+	}
+	if cfg.HTTPAddr != ":8766" {
+		t.Fatalf("http addr = %q, want process environment value", cfg.HTTPAddr)
+	}
+}
 
 func TestLoadDefaultsToProductionPostgres(t *testing.T) {
 	t.Setenv("DATABASE_DRIVER", "")

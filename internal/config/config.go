@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -33,6 +35,7 @@ type VersionRetentionPolicy struct {
 }
 
 func Load() Config {
+	_ = godotenv.Load()
 	databaseURL := os.Getenv("DATABASE_URL")
 	databaseDriver := strings.ToLower(strings.TrimSpace(os.Getenv("DATABASE_DRIVER")))
 	appEnv := normalizeAppEnv(os.Getenv("APP_ENV"))
