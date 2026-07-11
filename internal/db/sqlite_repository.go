@@ -996,6 +996,35 @@ func (r *SQLiteRepository) ListChanges(ctx context.Context, userID, deviceID str
 	return events, wrapSQLiteDBErr(rows.Err())
 }
 
+func (r *SQLiteRepository) ListActivity(ctx context.Context, userID, fileID string, beforeEventID int64, limit int32) ([]domain.ChangeEvent, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		select id, user_id, file_id, event_type, version, path, old_path, source_device_id, created_at
+		from change_events
+		where user_id = ?
+		  and (? = '' or file_id = ?)
+		  and (? = 0 or id < ?)
+		order by id desc
+		limit ?
+	`, userID, fileID, fileID, beforeEventID, beforeEventID, limit)
+	if err != nil {
+		return nil, wrapSQLiteDBErr(err)
+	}
+	defer rows.Close()
+
+	events := make([]domain.ChangeEvent, 0)
+	for rows.Next() {
+		var event domain.ChangeEvent
+		if err := rows.Scan(changeEventScan(&event)...); err != nil {
+			return nil, wrapSQLiteDBErr(err)
+		}
+		events = append(events, event)
+	}
+	return events, wrapSQLiteDBErr(rows.Err())
+}
+
 func (r *SQLiteRepository) validateChangeCursor(ctx context.Context, userID string, afterChangeID int64) error {
 	if afterChangeID == 0 {
 		return nil

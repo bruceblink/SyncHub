@@ -266,6 +266,42 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 		t.Fatalf("source next cursor = %d, want > %d", sourceBody.Data.NextCursor, changesBody.Data.NextCursor)
 	}
 
+	activityResp := doJSON(t, server, http.MethodGet, "/api/v1/activity?limit=2", token, nil)
+	if activityResp.Code != http.StatusOK {
+		t.Fatalf("activity status = %d body = %s", activityResp.Code, activityResp.Body.String())
+	}
+	var activityBody struct {
+		Data struct {
+			Items []struct {
+				ID        int64  `json:"id"`
+				FileID    string `json:"file_id"`
+				EventType string `json:"event_type"`
+				Path      string `json:"path"`
+			} `json:"items"`
+			NextCursor int64 `json:"next_cursor"`
+		} `json:"data"`
+	}
+	decodeBody(t, activityResp, &activityBody)
+	if len(activityBody.Data.Items) != 2 || activityBody.Data.Items[0].EventType != "delete" || activityBody.Data.Items[1].EventType != "move" {
+		t.Fatalf("activity = %#v", activityBody.Data.Items)
+	}
+	if activityBody.Data.NextCursor != activityBody.Data.Items[1].ID {
+		t.Fatalf("activity next cursor = %d, want %d", activityBody.Data.NextCursor, activityBody.Data.Items[1].ID)
+	}
+	filteredActivity := doJSON(t, server, http.MethodGet, "/api/v1/activity?file_id="+changesBody.Data.Items[1].FileID+"&limit=10", token, nil)
+	if filteredActivity.Code != http.StatusOK {
+		t.Fatalf("filtered activity status = %d body = %s", filteredActivity.Code, filteredActivity.Body.String())
+	}
+	decodeBody(t, filteredActivity, &activityBody)
+	if len(activityBody.Data.Items) != 3 {
+		t.Fatalf("filtered activity = %#v, want three file events", activityBody.Data.Items)
+	}
+	for _, event := range activityBody.Data.Items {
+		if event.FileID != changesBody.Data.Items[1].FileID {
+			t.Fatalf("filtered activity contains another file: %#v", event)
+		}
+	}
+
 	ackResp := doJSON(t, server, http.MethodPost, "/api/v1/sync/ack", token, map[string]any{
 		"device_id":              deviceBody.Data.ID,
 		"last_applied_change_id": sourceBody.Data.NextCursor,

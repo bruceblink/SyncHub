@@ -13,6 +13,7 @@ type Repository interface {
 	DeleteDevice(ctx context.Context, userID, deviceID string) error
 	HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error)
 	ListChanges(ctx context.Context, userID, deviceID string, afterChangeID int64, limit int32) ([]domain.ChangeEvent, error)
+	ListActivity(ctx context.Context, userID, fileID string, beforeEventID int64, limit int32) ([]domain.ChangeEvent, error)
 	AckDevice(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error)
 	ListSyncConflicts(ctx context.Context, userID, resolution string, limit int32) ([]domain.SyncConflict, error)
 	UpdateSyncConflictResolution(ctx context.Context, userID, conflictID, resolution string) (domain.SyncConflict, error)
@@ -68,6 +69,16 @@ func (s *Service) Changes(ctx context.Context, userID, deviceID string, afterCha
 		limit = 500
 	}
 	return s.repo.ListChanges(ctx, userID, deviceID, afterChangeID, limit)
+}
+
+func (s *Service) Activity(ctx context.Context, userID, fileID string, beforeEventID int64, limit int32) ([]domain.ChangeEvent, error) {
+	if beforeEventID < 0 {
+		return nil, domain.E(domain.CodeInvalidArgument, "before_event_id must be non-negative", nil)
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	return s.repo.ListActivity(ctx, userID, strings.TrimSpace(fileID), beforeEventID, limit)
 }
 
 func (s *Service) Ack(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error) {

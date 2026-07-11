@@ -164,6 +164,7 @@ func (s *Server) routes() {
 	protected.POST("/devices", s.registerDevice)
 	protected.DELETE("/devices/:id", s.revokeDevice)
 	protected.POST("/devices/:id/heartbeat", s.heartbeatDevice)
+	protected.GET("/activity", s.listActivity)
 	protected.GET("/sync/changes", s.listChanges)
 	protected.POST("/sync/ack", s.ackChanges)
 	protected.GET("/sync/conflicts", s.listSyncConflicts)
@@ -620,6 +621,35 @@ func (s *Server) heartbeatDevice(c *gin.Context) {
 		return
 	}
 	ok(c, deviceDTO(device))
+}
+
+func (s *Server) listActivity(c *gin.Context) {
+	if s.sync == nil {
+		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
+		return
+	}
+	beforeEventID, err := parseInt64Query(c, "before_event_id", 0)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	limit, err := parseInt64Query(c, "limit", 50)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	events, err := s.sync.Activity(c.Request.Context(), userID(c), c.Query("file_id"), beforeEventID, int32(limit))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	items := make([]any, 0, len(events))
+	var nextCursor int64
+	for _, event := range events {
+		items = append(items, changeEventDTO(event))
+		nextCursor = event.ID
+	}
+	ok(c, gin.H{"items": items, "next_cursor": nextCursor})
 }
 
 func (s *Server) listChanges(c *gin.Context) {

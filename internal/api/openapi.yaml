@@ -568,6 +568,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeviceResponse"
+  /api/v1/activity:
+    get:
+      tags: [Activity]
+      summary: List the current user's file activity
+      parameters:
+        - name: file_id
+          in: query
+          schema:
+            type: string
+          description: Limit activity to one file.
+        - name: before_event_id
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+          description: Return events older than this event id.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        "200":
+          description: Activity page ordered from newest to oldest.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeListResponse"
   /api/v1/sync/changes:
     get:
       tags: [Sync]

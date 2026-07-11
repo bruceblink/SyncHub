@@ -881,6 +881,35 @@ func (r *Repository) ListChanges(ctx context.Context, userID, deviceID string, a
 	return events, wrapDBErr(rows.Err())
 }
 
+func (r *Repository) ListActivity(ctx context.Context, userID, fileID string, beforeEventID int64, limit int32) ([]domain.ChangeEvent, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.pool.Query(ctx, `
+		select id, user_id, file_id, event_type, version, path, old_path, source_device_id, created_at
+		from change_events
+		where user_id = $1
+		  and ($2 = '' or file_id = $2)
+		  and ($3 = 0 or id < $3)
+		order by id desc
+		limit $4
+	`, userID, fileID, beforeEventID, limit)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer rows.Close()
+
+	events := make([]domain.ChangeEvent, 0)
+	for rows.Next() {
+		var event domain.ChangeEvent
+		if err := rows.Scan(changeEventScan(&event)...); err != nil {
+			return nil, wrapDBErr(err)
+		}
+		events = append(events, event)
+	}
+	return events, wrapDBErr(rows.Err())
+}
+
 func (r *Repository) validateChangeCursor(ctx context.Context, userID string, afterChangeID int64) error {
 	if afterChangeID == 0 {
 		return nil
