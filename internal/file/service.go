@@ -38,6 +38,7 @@ type Repository interface {
 	ListUploadChunks(ctx context.Context, uploadID string) ([]domain.UploadChunk, error)
 	DeleteUploadChunk(ctx context.Context, chunkID string) error
 	CommitUpload(ctx context.Context, userID, uploadID, storageKey string) (domain.FileNode, int64, error)
+	ReserveStorageObject(ctx context.Context, storageKey string) error
 }
 
 func (s *Service) Usage(ctx context.Context, userID string) (domain.StorageUsage, error) {
@@ -387,6 +388,9 @@ func (s *Service) CommitUpload(ctx context.Context, userID, uploadID string) (do
 		chunkKeys = append(chunkKeys, chunk.StorageKey)
 	}
 	targetKey := objectKey(userID, session.SHA256)
+	if err := s.repo.ReserveStorageObject(ctx, targetKey); err != nil {
+		return domain.FileNode{}, 0, err
+	}
 	if err := s.store.Compose(ctx, targetKey, chunkKeys); err != nil {
 		return domain.FileNode{}, 0, err
 	}

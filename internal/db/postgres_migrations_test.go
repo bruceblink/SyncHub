@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bruceblink/SyncHub/internal/domain"
 	"github.com/bruceblink/SyncHub/migrations"
@@ -82,6 +83,89 @@ func TestPostgresListActivityAllowsEmptyFileFilter(t *testing.T) {
 	if len(events) != 1 || events[0].Path != "/docs" {
 		t.Fatalf("activity events = %#v, want /docs create event", events)
 	}
+}
+
+func TestPostgresObjectGCQueueProtectsReferencedAndReusedObjects(t *testing.T) {
+	repo, pool := newPostgresMigrationTestRepository(t)
+	ctx := context.Background()
+	user, err := repo.CreateUser(ctx, "postgres-gc-"+uuid.NewString()+"@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	storageKey := "objects/" + user.ID + "/aa/hash"
+	node := commitPostgresTestFile(t, repo, user.ID, "/gc.txt", storageKey)
+	if err := repo.DeleteFile(ctx, user.ID, node.ID, nil, nil); err != nil {
+		t.Fatalf("soft delete file: %v", err)
+	}
+	if err := repo.PurgeDeletedFile(ctx, user.ID, node.ID); err != nil {
+		t.Fatalf("purge file: %v", err)
+	}
+	var status string
+	if err := pool.QueryRow(ctx, `select status from object_gc_queue where storage_key = $1`, storageKey).Scan(&status); err != nil {
+		t.Fatalf("read gc queue: %v", err)
+	}
+	if status != "pending" {
+		t.Fatalf("gc status = %q, want pending", status)
+	}
+	if _, err := pool.Exec(ctx, `update object_gc_queue set available_at = now() - interval '1 minute' where storage_key = $1`, storageKey); err != nil {
+		t.Fatalf("make gc item available: %v", err)
+	}
+	items, err := repo.ClaimObjectGCItems(ctx, time.Now().UTC(), 10)
+	if err != nil || len(items) != 1 || items[0].StorageKey != storageKey {
+		t.Fatalf("claimed items = %#v err = %v", items, err)
+	}
+	if err := repo.ReserveStorageObject(ctx, storageKey); domain.ErrorCodeOf(err) != domain.CodeFileConflict {
+		t.Fatalf("reserve processing object error = %v", err)
+	}
+	if err := repo.RetryObjectGC(ctx, storageKey, "temporary", time.Now().UTC()); err != nil {
+		t.Fatalf("retry gc: %v", err)
+	}
+	if err := repo.ReserveStorageObject(ctx, storageKey); err != nil {
+		t.Fatalf("reserve pending object: %v", err)
+	}
+	var queued bool
+	if err := pool.QueryRow(ctx, `select exists(select 1 from object_gc_queue where storage_key = $1)`, storageKey).Scan(&queued); err != nil || queued {
+		t.Fatalf("queue remains = %v err = %v", queued, err)
+	}
+}
+
+func TestPostgresObjectGCDoesNotClaimReferencedObject(t *testing.T) {
+	repo, pool := newPostgresMigrationTestRepository(t)
+	ctx := context.Background()
+	user, err := repo.CreateUser(ctx, "postgres-gc-ref-"+uuid.NewString()+"@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	storageKey := "objects/" + user.ID + "/bb/hash"
+	commitPostgresTestFile(t, repo, user.ID, "/referenced.txt", storageKey)
+	if _, err := pool.Exec(ctx, `insert into object_gc_queue (storage_key, available_at) values ($1, now() - interval '1 minute')`, storageKey); err != nil {
+		t.Fatalf("enqueue referenced object: %v", err)
+	}
+	items, err := repo.ClaimObjectGCItems(ctx, time.Now().UTC(), 10)
+	if err != nil {
+		t.Fatalf("claim gc items: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("claimed referenced items = %#v", items)
+	}
+}
+
+func commitPostgresTestFile(t *testing.T, repo *Repository, userID, targetPath, storageKey string) domain.FileNode {
+	t.Helper()
+	now := time.Now().UTC()
+	session, err := repo.CreateUploadSession(context.Background(), domain.UploadSession{
+		ID: uuid.NewString(), UserID: userID, TargetPath: targetPath, TotalSize: 1,
+		ChunkSize: 1, SHA256: "hash", Status: domain.UploadStatusPending,
+		StagingKey: "staging/" + uuid.NewString(), ExpiresAt: now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("create upload session: %v", err)
+	}
+	node, _, err := repo.CommitUpload(context.Background(), userID, session.ID, storageKey)
+	if err != nil {
+		t.Fatalf("commit test file: %v", err)
+	}
+	return node
 }
 
 func newPostgresMigrationTestRepository(t *testing.T) (*Repository, *pgxpool.Pool) {

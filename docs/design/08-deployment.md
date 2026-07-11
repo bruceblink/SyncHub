@@ -49,6 +49,7 @@ Later 按明确需求再评估：
 - `VERSION_CLEANUP_INTERVAL_SECONDS`，默认跟随 `UPLOAD_CLEANUP_INTERVAL_SECONDS`
 - `VERSION_RETENTION_MIN_VERSIONS`，默认 `20`
 - `VERSION_RETENTION_MAX_AGE_DAYS`，默认 `30`，设为 `0` 可禁用版本历史自动清理
+- `OBJECT_GC_INTERVAL_SECONDS`，默认 `3600`；延迟复查并删除已无引用的不可变对象
 
 Later adapter 配置：
 

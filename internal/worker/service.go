@@ -14,6 +14,9 @@ type Repository interface {
 	ListExpiredUploadChunks(ctx context.Context, limit int32) ([]domain.ExpiredUploadChunk, error)
 	DeleteUploadChunk(ctx context.Context, chunkID string) error
 	PurgeExpiredDeletedFiles(ctx context.Context, cutoff time.Time, limit int32) (int64, error)
+	ClaimObjectGCItems(ctx context.Context, now time.Time, limit int32) ([]domain.ObjectGCItem, error)
+	CompleteObjectGC(ctx context.Context, storageKey string) error
+	RetryObjectGC(ctx context.Context, storageKey, lastError string, availableAt time.Time) error
 }
 
 type Service struct {
@@ -73,6 +76,34 @@ func (s *Service) CleanupExpiredUploadChunks(ctx context.Context, limit int32) (
 			return deleted, err
 		}
 		if err := s.repo.DeleteUploadChunk(ctx, chunk.ID); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
+func (s *Service) CleanupUnreferencedObjects(ctx context.Context, limit int32) (int64, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	if s.store == nil {
+		return 0, nil
+	}
+	items, err := s.repo.ClaimObjectGCItems(ctx, time.Now().UTC(), limit)
+	if err != nil {
+		return 0, err
+	}
+	var deleted int64
+	for _, item := range items {
+		if err := s.store.Delete(ctx, item.StorageKey); err != nil {
+			delay := time.Minute * time.Duration(1<<min(item.Attempts, 10))
+			if retryErr := s.repo.RetryObjectGC(ctx, item.StorageKey, err.Error(), time.Now().UTC().Add(delay)); retryErr != nil {
+				return deleted, retryErr
+			}
+			continue
+		}
+		if err := s.repo.CompleteObjectGC(ctx, item.StorageKey); err != nil {
 			return deleted, err
 		}
 		deleted++
@@ -148,6 +179,23 @@ func (s *Service) RunTrashCleanupLoop(ctx context.Context, interval, retention t
 	}
 }
 
+func (s *Service) RunObjectGCLoop(ctx context.Context, interval time.Duration, limit int32, onError func(error)) {
+	if interval <= 0 || s.store == nil {
+		return
+	}
+	s.cleanupObjects(ctx, limit, onError)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.cleanupObjects(ctx, limit, onError)
+		}
+	}
+}
+
 func (s *Service) cleanup(ctx context.Context, limit int32, onError func(error)) {
 	if _, err := s.CleanupExpiredUploadSessions(ctx, limit); err != nil && onError != nil {
 		onError(err)
@@ -168,6 +216,12 @@ func (s *Service) cleanupFileVersions(ctx context.Context, minVersions int64, ma
 
 func (s *Service) cleanupTrash(ctx context.Context, retention time.Duration, limit int32, onError func(error)) {
 	if _, err := s.CleanupExpiredTrash(ctx, retention, limit); err != nil && onError != nil {
+		onError(err)
+	}
+}
+
+func (s *Service) cleanupObjects(ctx context.Context, limit int32, onError func(error)) {
+	if _, err := s.CleanupUnreferencedObjects(ctx, limit); err != nil && onError != nil {
 		onError(err)
 	}
 }

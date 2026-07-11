@@ -216,3 +216,8 @@ func (r *fakeRepo) CommitUpload(ctx context.Context, userID, uploadID, storageKe
 	_, _, _, _ = ctx, userID, uploadID, storageKey
 	return domain.FileNode{}, 0, nil
 }
+
+func (r *fakeRepo) ReserveStorageObject(ctx context.Context, storageKey string) error {
+	_, _ = ctx, storageKey
+	return nil
+}

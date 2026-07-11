@@ -43,6 +43,7 @@ func TestLoadDefaultsToProductionPostgres(t *testing.T) {
 	t.Setenv("APP_ENV", "")
 	t.Setenv("UPLOAD_CLEANUP_INTERVAL_SECONDS", "")
 	t.Setenv("VERSION_CLEANUP_INTERVAL_SECONDS", "")
+	t.Setenv("OBJECT_GC_INTERVAL_SECONDS", "")
 	t.Setenv("CLEANUP_BATCH_LIMIT", "")
 	t.Setenv("VERSION_RETENTION_MIN_VERSIONS", "")
 	t.Setenv("VERSION_RETENTION_MAX_AGE_DAYS", "")
@@ -67,6 +68,9 @@ func TestLoadDefaultsToProductionPostgres(t *testing.T) {
 	}
 	if cfg.VersionCleanupInterval != cfg.UploadCleanupInterval {
 		t.Fatalf("version cleanup interval = %s, want upload cleanup interval %s", cfg.VersionCleanupInterval, cfg.UploadCleanupInterval)
+	}
+	if cfg.ObjectGCInterval != time.Hour {
+		t.Fatalf("object gc interval = %s, want 1h", cfg.ObjectGCInterval)
 	}
 	if cfg.CleanupBatchLimit != 1000 {
 		t.Fatalf("cleanup batch limit = %d, want 1000", cfg.CleanupBatchLimit)

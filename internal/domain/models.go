@@ -120,6 +120,11 @@ type Device struct {
 	UpdatedAt           time.Time
 }
 
+type ObjectGCItem struct {
+	StorageKey string
+	Attempts   int
+}
+
 type SyncConflict struct {
 	ID            string
 	UserID        string

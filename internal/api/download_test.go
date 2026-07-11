@@ -278,6 +278,11 @@ func (r *downloadFileRepo) CommitUpload(ctx context.Context, userID, uploadID, s
 	return domain.FileNode{}, 0, errNotImplemented()
 }
 
+func (r *downloadFileRepo) ReserveStorageObject(ctx context.Context, storageKey string) error {
+	_, _ = ctx, storageKey
+	return nil
+}
+
 func errNotImplemented() error {
 	return domain.E(domain.CodeInternal, "not implemented", io.ErrUnexpectedEOF)
 }

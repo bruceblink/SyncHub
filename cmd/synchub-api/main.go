@@ -59,6 +59,9 @@ func main() {
 	go workerService.RunTrashCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.TrashRetention, cfg.CleanupBatchLimit, func(err error) {
 		slog.Error("trash cleanup failed", "error", err)
 	})
+	go workerService.RunObjectGCLoop(workerCtx, cfg.ObjectGCInterval, cfg.CleanupBatchLimit, func(err error) {
+		slog.Error("object garbage collection failed", "error", err)
+	})
 
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: apiServer.Handler()}
 	go func() {

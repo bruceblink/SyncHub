@@ -389,6 +389,98 @@ func (r *Repository) PurgeExpiredDeletedFiles(ctx context.Context, cutoff time.T
 	return purged, nil
 }
 
+func (r *Repository) ReserveStorageObject(ctx context.Context, storageKey string) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var status string
+	err = tx.QueryRow(ctx, `select status from object_gc_queue where storage_key = $1 for update`, storageKey).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return wrapDBErr(tx.Commit(ctx))
+	}
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	if status == "processing" {
+		return domain.E(domain.CodeFileConflict, "storage object is being reclaimed; retry upload", nil)
+	}
+	if _, err := tx.Exec(ctx, `delete from object_gc_queue where storage_key = $1`, storageKey); err != nil {
+		return wrapDBErr(err)
+	}
+	return wrapDBErr(tx.Commit(ctx))
+}
+
+func (r *Repository) ClaimObjectGCItems(ctx context.Context, now time.Time, limit int32) ([]domain.ObjectGCItem, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		update object_gc_queue
+		set status = 'pending', updated_at = $1
+		where status = 'processing' and updated_at < $2
+	`, now, now.Add(-15*time.Minute)); err != nil {
+		return nil, wrapDBErr(err)
+	}
+	rows, err := tx.Query(ctx, `
+		select q.storage_key, q.attempts
+		from object_gc_queue q
+		where q.status = 'pending' and q.available_at <= $1
+		  and not exists (select 1 from file_versions v where v.storage_key = q.storage_key)
+		  and not exists (select 1 from file_nodes n where n.storage_key = q.storage_key)
+		order by q.available_at, q.storage_key
+		for update of q skip locked
+		limit $2
+	`, now, limit)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	items := make([]domain.ObjectGCItem, 0)
+	for rows.Next() {
+		var item domain.ObjectGCItem
+		if err := rows.Scan(&item.StorageKey, &item.Attempts); err != nil {
+			rows.Close()
+			return nil, wrapDBErr(err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, wrapDBErr(err)
+	}
+	rows.Close()
+	for _, item := range items {
+		if _, err := tx.Exec(ctx, `
+			update object_gc_queue
+			set status = 'processing', attempts = attempts + 1, updated_at = $2
+			where storage_key = $1
+		`, item.StorageKey, now); err != nil {
+			return nil, wrapDBErr(err)
+		}
+	}
+	return items, wrapDBErr(tx.Commit(ctx))
+}
+
+func (r *Repository) CompleteObjectGC(ctx context.Context, storageKey string) error {
+	_, err := r.pool.Exec(ctx, `delete from object_gc_queue where storage_key = $1 and status = 'processing'`, storageKey)
+	return wrapDBErr(err)
+}
+
+func (r *Repository) RetryObjectGC(ctx context.Context, storageKey, lastError string, availableAt time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		update object_gc_queue
+		set status = 'pending', available_at = $2, last_error = $3, updated_at = now()
+		where storage_key = $1
+	`, storageKey, availableAt, lastError)
+	return wrapDBErr(err)
+}
+
 func (r *Repository) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100

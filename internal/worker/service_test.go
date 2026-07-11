@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -127,6 +128,48 @@ func TestCleanupExpiredUploadChunksDeletesObjectsBeforeMetadata(t *testing.T) {
 	}
 }
 
+func TestCleanupUnreferencedObjectsCompletesSuccessfulDeletes(t *testing.T) {
+	repo := &fakeCleanupRepo{gcItems: []domain.ObjectGCItem{{StorageKey: "objects/user/a", Attempts: 0}}}
+	store := &fakeStorage{}
+
+	count, err := NewService(repo, store).CleanupUnreferencedObjects(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("cleanup objects: %v", err)
+	}
+	if count != 1 || len(store.deletedKeys) != 1 || store.deletedKeys[0] != "objects/user/a" {
+		t.Fatalf("deleted = %d keys = %v", count, store.deletedKeys)
+	}
+	if len(repo.completedGCKeys) != 1 || repo.completedGCKeys[0] != "objects/user/a" || len(repo.retriedGCKeys) != 0 {
+		t.Fatalf("completed = %v retried = %v", repo.completedGCKeys, repo.retriedGCKeys)
+	}
+	if repo.limit != 1000 {
+		t.Fatalf("limit = %d, want 1000", repo.limit)
+	}
+}
+
+func TestCleanupUnreferencedObjectsRetriesFailureAndContinues(t *testing.T) {
+	repo := &fakeCleanupRepo{gcItems: []domain.ObjectGCItem{
+		{StorageKey: "objects/user/fail", Attempts: 2},
+		{StorageKey: "objects/user/ok", Attempts: 0},
+	}}
+	store := &fakeStorage{deleteErrors: map[string]error{"objects/user/fail": errors.New("storage unavailable")}}
+	started := time.Now().UTC()
+
+	count, err := NewService(repo, store).CleanupUnreferencedObjects(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("cleanup objects: %v", err)
+	}
+	if count != 1 || len(repo.completedGCKeys) != 1 || repo.completedGCKeys[0] != "objects/user/ok" {
+		t.Fatalf("count = %d completed = %v", count, repo.completedGCKeys)
+	}
+	if len(repo.retriedGCKeys) != 1 || repo.retriedGCKeys[0] != "objects/user/fail" || repo.retryError != "storage unavailable" {
+		t.Fatalf("retried = %v error = %q", repo.retriedGCKeys, repo.retryError)
+	}
+	if repo.retryAt.Before(started.Add(3*time.Minute)) || repo.retryAt.After(started.Add(5*time.Minute)) {
+		t.Fatalf("retry at = %s, want about four minutes later", repo.retryAt)
+	}
+}
+
 type fakeCleanupRepo struct {
 	now          time.Time
 	limit        int32
@@ -139,6 +182,11 @@ type fakeCleanupRepo struct {
 	chunkLimit      int32
 	expiredChunks   []domain.ExpiredUploadChunk
 	deletedChunkIDs []string
+	gcItems         []domain.ObjectGCItem
+	completedGCKeys []string
+	retriedGCKeys   []string
+	retryError      string
+	retryAt         time.Time
 }
 
 func (r *fakeCleanupRepo) ExpireUploadSessions(ctx context.Context, now time.Time, limit int32) (int64, error) {
@@ -175,8 +223,29 @@ func (r *fakeCleanupRepo) DeleteUploadChunk(ctx context.Context, chunkID string)
 	return nil
 }
 
+func (r *fakeCleanupRepo) ClaimObjectGCItems(ctx context.Context, now time.Time, limit int32) ([]domain.ObjectGCItem, error) {
+	_, _ = ctx, now
+	r.limit = limit
+	return r.gcItems, nil
+}
+
+func (r *fakeCleanupRepo) CompleteObjectGC(ctx context.Context, storageKey string) error {
+	_ = ctx
+	r.completedGCKeys = append(r.completedGCKeys, storageKey)
+	return nil
+}
+
+func (r *fakeCleanupRepo) RetryObjectGC(ctx context.Context, storageKey, lastError string, availableAt time.Time) error {
+	_ = ctx
+	r.retriedGCKeys = append(r.retriedGCKeys, storageKey)
+	r.retryError = lastError
+	r.retryAt = availableAt
+	return nil
+}
+
 type fakeStorage struct {
-	deletedKeys []string
+	deletedKeys  []string
+	deleteErrors map[string]error
 }
 
 func (s *fakeStorage) PutChunk(ctx context.Context, key string, r io.Reader, checksum string) error {
@@ -197,5 +266,8 @@ func (s *fakeStorage) Read(ctx context.Context, key string, br *storage.ByteRang
 func (s *fakeStorage) Delete(ctx context.Context, key string) error {
 	_ = ctx
 	s.deletedKeys = append(s.deletedKeys, key)
+	if err := s.deleteErrors[key]; err != nil {
+		return err
+	}
 	return nil
 }
