@@ -528,6 +528,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeviceResponse"
+  /api/v1/devices/{id}:
+    delete:
+      tags: [Sync]
+      summary: Revoke a registered device
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Device revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Device not found for the current user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
   /api/v1/devices/{id}/heartbeat:
     post:
       tags: [Sync]

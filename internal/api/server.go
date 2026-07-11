@@ -162,6 +162,7 @@ func (s *Server) routes() {
 	protected.POST("/uploads/:id/commit", s.commitUpload)
 	protected.GET("/devices", s.listDevices)
 	protected.POST("/devices", s.registerDevice)
+	protected.DELETE("/devices/:id", s.revokeDevice)
 	protected.POST("/devices/:id/heartbeat", s.heartbeatDevice)
 	protected.GET("/sync/changes", s.listChanges)
 	protected.POST("/sync/ack", s.ackChanges)
@@ -594,6 +595,18 @@ func (s *Server) listDevices(c *gin.Context) {
 		items = append(items, deviceDTO(device))
 	}
 	ok(c, gin.H{"items": items})
+}
+
+func (s *Server) revokeDevice(c *gin.Context) {
+	if s.sync == nil {
+		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
+		return
+	}
+	if err := s.sync.RevokeDevice(c.Request.Context(), userID(c), c.Param("id")); err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, gin.H{})
 }
 
 func (s *Server) heartbeatDevice(c *gin.Context) {

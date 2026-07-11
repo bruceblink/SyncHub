@@ -73,6 +73,47 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 	if secondDeviceResp.Code != http.StatusCreated {
 		t.Fatalf("register second device status = %d body = %s", secondDeviceResp.Code, secondDeviceResp.Body.String())
 	}
+	var secondDeviceBody struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	decodeBody(t, secondDeviceResp, &secondDeviceBody)
+	if secondDeviceBody.Data.ID == "" {
+		t.Fatal("second device response missing id")
+	}
+	otherRegisterResp := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"email":    "other-device@example.com",
+		"password": "password123",
+	})
+	if otherRegisterResp.Code != http.StatusCreated {
+		t.Fatalf("register other user status = %d body = %s", otherRegisterResp.Code, otherRegisterResp.Body.String())
+	}
+	var otherRegisterBody struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, otherRegisterResp, &otherRegisterBody)
+	otherDeviceResp := doJSON(t, server, http.MethodPost, "/api/v1/devices", otherRegisterBody.Data.Tokens.AccessToken, map[string]any{
+		"name":     "other-laptop",
+		"platform": "macos",
+	})
+	if otherDeviceResp.Code != http.StatusCreated {
+		t.Fatalf("register other device status = %d body = %s", otherDeviceResp.Code, otherDeviceResp.Body.String())
+	}
+	var otherDeviceBody struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	decodeBody(t, otherDeviceResp, &otherDeviceBody)
+	forbiddenRevoke := doJSON(t, server, http.MethodDelete, "/api/v1/devices/"+otherDeviceBody.Data.ID, token, nil)
+	if forbiddenRevoke.Code != http.StatusNotFound {
+		t.Fatalf("revoke other user device status = %d body = %s", forbiddenRevoke.Code, forbiddenRevoke.Body.String())
+	}
 
 	devicesReq := httptest.NewRequest(http.MethodGet, "/api/v1/devices?limit=10", nil)
 	devicesReq.Header.Set("Authorization", "Bearer "+token)
@@ -245,6 +286,26 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 	heartbeatResp := doJSON(t, server, http.MethodPost, "/api/v1/devices/"+deviceBody.Data.ID+"/heartbeat", token, map[string]any{})
 	if heartbeatResp.Code != http.StatusOK {
 		t.Fatalf("heartbeat status = %d body = %s", heartbeatResp.Code, heartbeatResp.Body.String())
+	}
+
+	revokeResp := doJSON(t, server, http.MethodDelete, "/api/v1/devices/"+secondDeviceBody.Data.ID, token, nil)
+	if revokeResp.Code != http.StatusOK {
+		t.Fatalf("revoke device status = %d body = %s", revokeResp.Code, revokeResp.Body.String())
+	}
+	revokedHeartbeat := doJSON(t, server, http.MethodPost, "/api/v1/devices/"+secondDeviceBody.Data.ID+"/heartbeat", token, map[string]any{})
+	if revokedHeartbeat.Code != http.StatusNotFound {
+		t.Fatalf("revoked device heartbeat status = %d body = %s", revokedHeartbeat.Code, revokedHeartbeat.Body.String())
+	}
+	devicesReq = httptest.NewRequest(http.MethodGet, "/api/v1/devices?limit=10", nil)
+	devicesReq.Header.Set("Authorization", "Bearer "+token)
+	devicesRec = httptest.NewRecorder()
+	server.Handler().ServeHTTP(devicesRec, devicesReq)
+	if devicesRec.Code != http.StatusOK {
+		t.Fatalf("devices after revoke status = %d body = %s", devicesRec.Code, devicesRec.Body.String())
+	}
+	decodeBody(t, devicesRec, &devicesBody)
+	if len(devicesBody.Data.Items) != 1 || devicesBody.Data.Items[0].ID != deviceBody.Data.ID {
+		t.Fatalf("devices after revoke = %#v", devicesBody.Data.Items)
 	}
 
 	expiredCursorReq := httptest.NewRequest(http.MethodGet, "/api/v1/sync/changes?device_id="+deviceBody.Data.ID+"&after_change_id=999999&limit=10", nil)

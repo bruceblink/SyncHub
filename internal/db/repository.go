@@ -826,6 +826,17 @@ func (r *Repository) ListDevices(ctx context.Context, userID string, limit int32
 	return devices, wrapDBErr(rows.Err())
 }
 
+func (r *Repository) DeleteDevice(ctx context.Context, userID, deviceID string) error {
+	result, err := r.pool.Exec(ctx, `delete from devices where user_id = $1 and id = $2`, userID, deviceID)
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	if result.RowsAffected() == 0 {
+		return domain.E(domain.CodeNotFound, "device not found", nil)
+	}
+	return nil
+}
+
 func (r *Repository) HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
 	var device domain.Device
 	err := r.pool.QueryRow(ctx, `

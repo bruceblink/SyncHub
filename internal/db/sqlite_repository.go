@@ -936,6 +936,17 @@ func (r *SQLiteRepository) ListDevices(ctx context.Context, userID string, limit
 	return devices, wrapSQLiteDBErr(rows.Err())
 }
 
+func (r *SQLiteRepository) DeleteDevice(ctx context.Context, userID, deviceID string) error {
+	result, err := r.db.ExecContext(ctx, `delete from devices where user_id = ? and id = ?`, userID, deviceID)
+	if err != nil {
+		return wrapSQLiteDBErr(err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return domain.E(domain.CodeNotFound, "device not found", nil)
+	}
+	return nil
+}
+
 func (r *SQLiteRepository) HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `

@@ -10,6 +10,7 @@ import (
 type Repository interface {
 	CreateDevice(ctx context.Context, userID, name, platform string) (domain.Device, error)
 	ListDevices(ctx context.Context, userID string, limit int32) ([]domain.Device, error)
+	DeleteDevice(ctx context.Context, userID, deviceID string) error
 	HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error)
 	ListChanges(ctx context.Context, userID, deviceID string, afterChangeID int64, limit int32) ([]domain.ChangeEvent, error)
 	AckDevice(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error)
@@ -39,6 +40,14 @@ func (s *Service) Devices(ctx context.Context, userID string, limit int32) ([]do
 		limit = 100
 	}
 	return s.repo.ListDevices(ctx, userID, limit)
+}
+
+func (s *Service) RevokeDevice(ctx context.Context, userID, deviceID string) error {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return domain.E(domain.CodeInvalidArgument, "device id is required", nil)
+	}
+	return s.repo.DeleteDevice(ctx, userID, deviceID)
 }
 
 func (s *Service) Heartbeat(ctx context.Context, userID, deviceID string) (domain.Device, error) {

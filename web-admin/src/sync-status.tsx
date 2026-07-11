@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Laptop, MonitorCog, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Laptop, MonitorCog, RefreshCw, Trash2 } from 'lucide-react'
 
 type Device = {
   id: string
@@ -27,6 +27,7 @@ export function SyncStatus({ request, onError }: { request: APIRequest; onError:
   const [devices, setDevices] = useState<Device[]>([])
   const [conflicts, setConflicts] = useState<Conflict[]>([])
   const [loading, setLoading] = useState(true)
+  const [revokingID, setRevokingID] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -55,6 +56,19 @@ export function SyncStatus({ request, onError }: { request: APIRequest; onError:
     }
   }
 
+  async function revoke(device: Device) {
+    if (!window.confirm(`撤销“${device.name}”后，该设备需要重新登录并注册才能继续同步。`)) return
+    setRevokingID(device.id)
+    try {
+      await request(`/devices/${device.id}`, { method: 'DELETE' })
+      await load()
+    } catch (error) {
+      onError(error instanceof Error ? error.message : '撤销设备失败')
+    } finally {
+      setRevokingID(null)
+    }
+  }
+
   return <section className="status-page">
     <header className="toolbar">
       <div><p className="eyebrow">同步状态</p><h1>设备与冲突</h1></div>
@@ -63,7 +77,7 @@ export function SyncStatus({ request, onError }: { request: APIRequest; onError:
     <div className="status-grid">
       <section className="status-section">
         <div className="section-title"><Laptop size={19} /><h2>已连接设备</h2><span>{devices.length}</span></div>
-        {loading ? <div className="empty compact-empty">正在读取设备...</div> : devices.length === 0 ? <div className="empty compact-empty"><MonitorCog size={30} /><strong>尚未注册设备</strong><span>桌面客户端开始同步后会显示在这里。</span></div> : <div>{devices.map((device) => <div className="device-row" key={device.id}><span className="device-icon"><Laptop size={19} /></span><div><strong>{device.name}</strong><small>{device.platform || '未知平台'}</small></div><div className="device-meta"><small>最近在线</small><span>{formatDate(device.last_seen_at)}</span><small>同步游标 {device.last_applied_change_id}</small></div></div>)}</div>}
+        {loading ? <div className="empty compact-empty">正在读取设备...</div> : devices.length === 0 ? <div className="empty compact-empty"><MonitorCog size={30} /><strong>尚未注册设备</strong><span>桌面客户端开始同步后会显示在这里。</span></div> : <div>{devices.map((device) => <div className="device-row" key={device.id}><span className="device-icon"><Laptop size={19} /></span><div><strong>{device.name}</strong><small>{device.platform || '未知平台'}</small></div><div className="device-meta"><small>最近在线</small><span>{formatDate(device.last_seen_at)}</span><small>同步游标 {device.last_applied_change_id}</small></div><button className="icon-button device-revoke" title={`撤销 ${device.name}`} disabled={revokingID === device.id} onClick={() => void revoke(device)}><Trash2 size={17} /></button></div>)}</div>}
       </section>
       <section className="status-section">
         <div className="section-title"><AlertTriangle size={19} /><h2>待处理冲突</h2><span className={conflicts.length ? 'warning-count' : ''}>{conflicts.length}</span></div>

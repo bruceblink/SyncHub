@@ -256,6 +256,12 @@ Request:
 
 `POST /api/v1/devices/{device_id}/heartbeat`
 
+### 撤销设备
+
+`DELETE /api/v1/devices/{device_id}`
+
+仅可撤销当前用户自己的设备。撤销后该设备无法继续发送心跳、拉取变更或确认同步游标，客户端需要重新注册设备后才能恢复同步。
+
 ### 拉取变更
 
 `GET /api/v1/sync/changes?device_id={id}&after_change_id={id}&limit=500`
