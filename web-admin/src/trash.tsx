@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react'
 import { File, Folder, RefreshCw, RotateCcw, Trash2, X } from 'lucide-react'
+import { formatDate, formatSize } from './api'
 
 type TrashItem = { id: string; name: string; path: string; node_type: 'file' | 'directory'; size: number; deleted_at: string }
 type Request = <T>(path: string, options?: { method?: string; body?: unknown }) => Promise<T>
-
-function formatDate(value: string) { return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
-function formatSize(size: number) { if (!size) return '--'; const units = ['B', 'KB', 'MB', 'GB']; const p = Math.min(Math.floor(Math.log(size) / Math.log(1024)), 3); return `${(size / 1024 ** p).toFixed(p ? 1 : 0)} ${units[p]}` }
 
 export function Trash({ request, onError }: { request: Request; onError: (message: string) => void }) {
   const [items, setItems] = useState<TrashItem[]>([])

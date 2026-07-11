@@ -67,11 +67,12 @@ export function formatSize(size: number) {
   return `${(size / 1024 ** power).toFixed(power ? 1 : 0)} ${units[power]}`;
 }
 
-export function formatDate(value: string) {
-  return value
-    ? new Intl.DateTimeFormat("zh-CN", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(new Date(value))
-    : "--";
+export function formatDate(value: string | null | undefined, fallback = "--") {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Clock3, FilePlus2, FolderInput, Pencil, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { formatDate } from './api'
 
 type ActivityEvent = {
   id: number
@@ -17,7 +18,6 @@ const labels: Record<ActivityEvent['event_type'], string> = {
   create: '已创建', update: '已更新', move: '已移动', delete: '已删除', restore: '已恢复',
 }
 
-function formatDate(value: string) { return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
 function icon(type: ActivityEvent['event_type']) {
   switch (type) {
     case 'create': return <FilePlus2 size={18} />

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { History, Pin, RotateCcw, X } from 'lucide-react'
+import { formatDate } from './api'
 
 type FileVersion = {
   id: string
@@ -10,10 +11,6 @@ type FileVersion = {
 }
 
 type APIRequest = <T>(path: string, options?: { method?: string; body?: unknown }) => Promise<T>
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
-}
 
 function formatSize(size: number) {
   if (!size) return '0 B'
