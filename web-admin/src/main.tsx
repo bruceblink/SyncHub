@@ -8,6 +8,7 @@ import {
   File,
   Folder,
   FolderPlus,
+  FolderUp,
   History,
   LogIn,
   LogOut,
@@ -60,6 +61,25 @@ type RequestOptions = {
   body?: unknown;
   headers?: Record<string, string>;
 };
+
+function relativeUploadPath(file: File) {
+  const raw = file.webkitRelativePath.replaceAll("\\", "/");
+  const parts = raw
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (
+    parts.length < 2 ||
+    parts.some((part) => part === "." || part === ".." || part.includes("\0"))
+  ) {
+    throw new Error(`无法识别 ${file.name} 的目录路径`);
+  }
+  return parts.join("/");
+}
+
+function joinCloudPath(base: string, relative: string) {
+  return `${base.replace(/\/$/, "")}/${relative.replace(/^\//, "")}`;
+}
 
 function uploadChunk(
   path: string,
@@ -246,6 +266,7 @@ function App() {
   const [searchResults, setSearchResults] = useState<FileNode[] | null>(null);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
+  const [preparingDirectory, setPreparingDirectory] = useState(false);
   const uploadControllers = useRef(new Map<string, AbortController>());
   const currentPath = trail.length ? trail[trail.length - 1].path : "我的文件";
   function logout() {
@@ -442,6 +463,32 @@ function App() {
       }
     }
   }
+  async function ensureDirectory(path: string) {
+    try {
+      return await request<FileNode>("/files/directories", {
+        token,
+        method: "POST",
+        body: { path },
+      });
+    } catch (createError) {
+      try {
+        const existing = await request<FileNode>(
+          `/files/by-path?path=${encodeURIComponent(path)}`,
+          { token },
+        );
+        if (existing.node_type !== "directory")
+          throw new Error(`${path} 已被同名文件占用`);
+        return existing;
+      } catch (lookupError) {
+        if (
+          lookupError instanceof Error &&
+          lookupError.message.includes("已被同名文件占用")
+        )
+          throw lookupError;
+        throw createError;
+      }
+    }
+  }
   async function retryUpload(id: string) {
     const task = uploadTasks.find((item) => item.id === id);
     if (!task || task.state !== "failed") return;
@@ -468,16 +515,68 @@ function App() {
     if (!next || busy) return;
     void upload(next).then(() => load());
   }, [uploadTasks]);
-  function queueUploads(files: FileList) {
-    const parentPath = trail.length ? trail[trail.length - 1].path : "";
-    const tasks = Array.from(files).map<UploadTask>((file) => ({
+  function appendUploadTasks(entries: Array<{ file: File; targetPath: string }>) {
+    const existingPaths = new Set(
+      uploadTasks
+        .filter((task) => task.state !== "cancelled")
+        .map((task) => task.targetPath),
+    );
+    const unique = entries.filter((entry) => {
+      if (existingPaths.has(entry.targetPath)) return false;
+      existingPaths.add(entry.targetPath);
+      return true;
+    });
+    if (unique.length !== entries.length)
+      setError("已跳过上传队列中的重复路径");
+    const tasks = unique.map<UploadTask>(({ file, targetPath }) => ({
       id: crypto.randomUUID(),
       file,
-      targetPath: `${parentPath}/${file.name}`,
+      targetPath,
       state: "queued",
       progress: 0,
     }));
     setUploadTasks((current) => [...current, ...tasks]);
+  }
+  function queueUploads(files: FileList) {
+    const parentPath = trail.length ? trail[trail.length - 1].path : "";
+    appendUploadTasks(
+      Array.from(files).map((file) => ({
+        file,
+        targetPath: joinCloudPath(parentPath, file.name),
+      })),
+    );
+  }
+  async function queueDirectory(files: FileList) {
+    setPreparingDirectory(true);
+    try {
+      const parentPath = trail.length ? trail[trail.length - 1].path : "";
+      const entries = Array.from(files).map((file) => ({
+        file,
+        relativePath: relativeUploadPath(file),
+      }));
+      const directories = new Set<string>();
+      for (const entry of entries) {
+        const parts = entry.relativePath.split("/");
+        for (let depth = 1; depth < parts.length; depth += 1)
+          directories.add(parts.slice(0, depth).join("/"));
+      }
+      const ordered = [...directories].sort(
+        (left, right) =>
+          left.split("/").length - right.split("/").length ||
+          left.localeCompare(right),
+      );
+      for (const directory of ordered)
+        await ensureDirectory(joinCloudPath(parentPath, directory));
+      appendUploadTasks(
+        entries.map(({ file, relativePath }) => ({
+          file,
+          targetPath: joinCloudPath(parentPath, relativePath),
+        })),
+      );
+      await load();
+    } finally {
+      setPreparingDirectory(false);
+    }
   }
   async function download(item: FileNode) {
     const response = await fetch(`${api}/files/${item.id}/content`, {
@@ -603,15 +702,38 @@ function App() {
                 >
                   <FolderPlus size={19} />
                 </button>
-                <label className="primary upload-button">
+                <label
+                  className={`primary upload-button ${preparingDirectory ? "disabled" : ""}`}
+                >
                   <Upload size={18} />
                   上传文件
                   <input
                     type="file"
                     multiple
+                    disabled={preparingDirectory}
                     onChange={(event) => {
                       if (event.target.files?.length)
                         queueUploads(event.target.files);
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+                <label
+                  className={`secondary upload-button ${preparingDirectory ? "disabled" : ""}`}
+                >
+                  <FolderUp size={18} />
+                  {preparingDirectory ? "正在准备..." : "上传文件夹"}
+                  <input
+                    type="file"
+                    multiple
+                    disabled={preparingDirectory}
+                    ref={(input) => input?.setAttribute("webkitdirectory", "")}
+                    onChange={(event) => {
+                      const files = event.target.files;
+                      if (files?.length)
+                        void queueDirectory(files).catch((error: unknown) =>
+                          setError(errorMessage(error)),
+                        );
                       event.target.value = "";
                     }}
                   />
