@@ -26,6 +26,11 @@ import { Trash } from "./trash";
 import { Activity } from "./activity";
 import { canPreview, FilePreview } from "./file-preview";
 import { UploadQueue, type UploadTask } from "./upload-queue";
+import {
+  prepareFile,
+  transferredProgress,
+  uploadChunkSize,
+} from "./chunked-upload";
 
 const api = "/api/v1";
 const tokenKey = "synchub.accessToken";
@@ -59,7 +64,7 @@ type RequestOptions = {
 function uploadChunk(
   path: string,
   token: string,
-  file: File,
+  blob: Blob,
   checksum: string,
   onProgress: (progress: number) => void,
 ) {
@@ -82,7 +87,7 @@ function uploadChunk(
       if (xhr.status >= 200 && xhr.status < 300 && payload.code === 0) resolve();
       else reject(new Error(payload.message || "上传失败"));
     };
-    xhr.send(file);
+    xhr.send(blob);
   });
 }
 
@@ -339,38 +344,52 @@ function App() {
     );
   }
   async function upload(task: UploadTask) {
-    updateUploadTask(task.id, { state: "hashing", progress: 3, error: undefined });
+    updateUploadTask(task.id, {
+      state: "hashing",
+      progress: 3,
+      error: undefined,
+    });
     try {
       const file = task.file;
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
-    const checksum = [...new Uint8Array(digest)]
-      .map((value) => value.toString(16).padStart(2, "0"))
-      .join("");
-      updateUploadTask(task.id, { progress: 10 });
-    const session = await request<UploadSession>("/uploads", {
-      token,
-      method: "POST",
-      body: {
-          path: task.targetPath,
-        size: file.size,
-        sha256: checksum,
-        chunk_size: Math.max(file.size, 1),
-      },
-    });
-      updateUploadTask(task.id, { state: "uploading", progress: 12 });
-      await uploadChunk(
-        `/uploads/${session.upload_id}/chunks/0`,
-        token,
-        file,
-        checksum,
-        (progress) => updateUploadTask(task.id, { progress: 12 + Math.round(progress * 80) }),
+      const prepared = await prepareFile(file, (progress) =>
+        updateUploadTask(task.id, { progress: 3 + Math.round(progress * 9) }),
       );
+      const session = await request<UploadSession>("/uploads", {
+        token,
+        method: "POST",
+        body: {
+          path: task.targetPath,
+          size: file.size,
+          sha256: prepared.checksum,
+          chunk_size: uploadChunkSize,
+        },
+      });
+      updateUploadTask(task.id, { state: "uploading", progress: 12 });
+      let completedBytes = 0;
+      for (const chunk of prepared.chunks) {
+        await uploadChunk(
+          `/uploads/${session.upload_id}/chunks/${chunk.index}`,
+          token,
+          chunk.blob,
+          chunk.checksum,
+          (progress) => {
+            const transferred = transferredProgress(
+              completedBytes,
+              progress * chunk.blob.size,
+              file.size,
+            );
+            updateUploadTask(task.id, {
+              progress: 12 + Math.round(transferred * 80),
+            });
+          },
+        );
+        completedBytes += chunk.blob.size;
+      }
       updateUploadTask(task.id, { state: "committing", progress: 94 });
-    await request(`/uploads/${session.upload_id}/commit`, {
-      token,
-      method: "POST",
-    });
+      await request(`/uploads/${session.upload_id}/commit`, {
+        token,
+        method: "POST",
+      });
       updateUploadTask(task.id, { state: "complete", progress: 100 });
     } catch (error) {
       updateUploadTask(task.id, { state: "failed", error: errorMessage(error) });
@@ -526,7 +545,8 @@ function App() {
                     type="file"
                     multiple
                     onChange={(event) => {
-                      if (event.target.files?.length) queueUploads(event.target.files);
+                      if (event.target.files?.length)
+                        queueUploads(event.target.files);
                       event.target.value = "";
                     }}
                   />
@@ -710,9 +730,23 @@ function App() {
         <UploadQueue
           tasks={uploadTasks}
           formatSize={formatSize}
-          onRetry={(id) => updateUploadTask(id, { state: "queued", progress: 0, error: undefined })}
-          onDismiss={(id) => setUploadTasks((tasks) => tasks.filter((task) => task.id !== id))}
-          onClearCompleted={() => setUploadTasks((tasks) => tasks.filter((task) => task.state !== "complete"))}
+          onRetry={(id) =>
+            updateUploadTask(id, {
+              state: "queued",
+              progress: 0,
+              error: undefined,
+            })
+          }
+          onDismiss={(id) =>
+            setUploadTasks((tasks) =>
+              tasks.filter((task) => task.id !== id),
+            )
+          }
+          onClearCompleted={() =>
+            setUploadTasks((tasks) =>
+              tasks.filter((task) => task.state !== "complete"),
+            )
+          }
         />
       </section>
     </main>
