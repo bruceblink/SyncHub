@@ -127,6 +127,7 @@ func (s *Server) routes() {
 		ok(c, gin.H{"name": version.Name, "version": version.Version})
 	})
 	s.router.GET("/metrics", s.metricsHandler)
+	s.router.GET("/", func(c *gin.Context) { c.Redirect(http.StatusMovedPermanently, "/app/") })
 	s.router.GET("/swagger", swaggerRedirect)
 	s.router.GET("/swagger/", swaggerUI)
 	s.router.GET("/swagger/openapi.yaml", swaggerSpec)

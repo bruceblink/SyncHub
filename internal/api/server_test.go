@@ -244,6 +244,16 @@ func TestSwaggerDocs(t *testing.T) {
 func TestAdminUI(t *testing.T) {
 	server := New(nil, nil, nil)
 
+	rootReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	rootRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rootRec, rootReq)
+	if rootRec.Code != http.StatusMovedPermanently {
+		t.Fatalf("root redirect status = %d", rootRec.Code)
+	}
+	if got := rootRec.Header().Get("Location"); got != "/app/" {
+		t.Fatalf("root redirect location = %q", got)
+	}
+
 	redirectReq := httptest.NewRequest(http.MethodGet, "/app", nil)
 	redirectRec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(redirectRec, redirectReq)
