@@ -17,6 +17,7 @@ const (
 	CodeRangeNotSatisfiable    ErrorCode = "RANGE_NOT_SATISFIABLE"
 	CodeUploadSessionExpired   ErrorCode = "UPLOAD_SESSION_EXPIRED"
 	CodeUploadChecksumMismatch ErrorCode = "UPLOAD_CHECKSUM_MISMATCH"
+	CodeStorageQuotaExceeded   ErrorCode = "STORAGE_QUOTA_EXCEEDED"
 	CodeSyncCursorExpired      ErrorCode = "SYNC_CURSOR_EXPIRED"
 	CodeInternal               ErrorCode = "INTERNAL_ERROR"
 )

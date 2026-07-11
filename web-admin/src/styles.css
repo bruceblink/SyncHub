@@ -306,6 +306,19 @@ button {
 .usage small {
   color: #91aea4;
 }
+.usage-meter {
+  height: 5px;
+  overflow: hidden;
+  margin: 4px 0 2px;
+  background: #53776f;
+  border-radius: 3px;
+}
+.usage-meter span {
+  display: block;
+  height: 100%;
+  background: #8fd5ba;
+  border-radius: inherit;
+}
 .workspace {
   min-width: 0;
   padding: 34px 44px;

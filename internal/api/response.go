@@ -59,6 +59,8 @@ func statusFor(code domain.ErrorCode) int {
 		return http.StatusGone
 	case domain.CodeUploadChecksumMismatch:
 		return http.StatusBadRequest
+	case domain.CodeStorageQuotaExceeded:
+		return http.StatusRequestEntityTooLarge
 	case domain.CodeSyncCursorExpired:
 		return http.StatusGone
 	default:

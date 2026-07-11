@@ -43,6 +43,36 @@ func TestInitUploadRequiresDirectoryParent(t *testing.T) {
 	}
 }
 
+func TestInitUploadRejectsStorageQuotaExceeded(t *testing.T) {
+	repo := &fakeRepo{usage: domain.StorageUsage{BytesUsed: 90}}
+	service := NewService(repo, nil, 4*1024*1024, time.Hour).WithStorageQuota(100)
+
+	_, err := service.InitUpload(context.Background(), "user-1", "/new.txt", 11, strings.Repeat("a", 64), 0, nil, "", "")
+	if domain.ErrorCodeOf(err) != domain.CodeStorageQuotaExceeded {
+		t.Fatalf("error = %v, want storage quota exceeded", err)
+	}
+	if repo.createdUpload {
+		t.Fatal("upload session was created over quota")
+	}
+}
+
+func TestInitUploadQuotaUsesReplacementSizeDelta(t *testing.T) {
+	repo := &fakeRepo{
+		filesByPath: map[string]domain.FileNode{
+			"/existing.txt": {ID: "file-1", Path: "/existing.txt", NodeType: domain.NodeTypeFile, Size: 40},
+		},
+		usage: domain.StorageUsage{BytesUsed: 90},
+	}
+	service := NewService(repo, nil, 4*1024*1024, time.Hour).WithStorageQuota(100)
+
+	if _, err := service.InitUpload(context.Background(), "user-1", "/existing.txt", 50, strings.Repeat("a", 64), 0, nil, "", ""); err != nil {
+		t.Fatalf("replace within quota: %v", err)
+	}
+	if !repo.createdUpload {
+		t.Fatal("replacement upload session was not created")
+	}
+}
+
 func TestMoveRequiresDirectoryParent(t *testing.T) {
 	repo := &fakeRepo{
 		filesByPath: map[string]domain.FileNode{
@@ -66,6 +96,7 @@ type fakeRepo struct {
 	createdDirectory bool
 	createdUpload    bool
 	movedFile        bool
+	usage            domain.StorageUsage
 }
 
 func (r *fakeRepo) CreateDirectory(ctx context.Context, userID, path, name string, parentID, sourceDeviceID *string) (domain.FileNode, error) {
@@ -99,7 +130,7 @@ func (r *fakeRepo) SearchFiles(ctx context.Context, userID, query, cursor string
 
 func (r *fakeRepo) Usage(ctx context.Context, userID string) (domain.StorageUsage, error) {
 	_, _ = ctx, userID
-	return domain.StorageUsage{}, nil
+	return r.usage, nil
 }
 
 func (r *fakeRepo) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {

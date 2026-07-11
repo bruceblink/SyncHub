@@ -46,6 +46,7 @@ func TestLoadDefaultsToProductionPostgres(t *testing.T) {
 	t.Setenv("CLEANUP_BATCH_LIMIT", "")
 	t.Setenv("VERSION_RETENTION_MIN_VERSIONS", "")
 	t.Setenv("VERSION_RETENTION_MAX_AGE_DAYS", "")
+	t.Setenv("STORAGE_QUOTA_BYTES", "")
 
 	cfg := Load()
 	if cfg.AppEnv != "production" {
@@ -74,6 +75,18 @@ func TestLoadDefaultsToProductionPostgres(t *testing.T) {
 	}
 	if cfg.VersionRetention.MaxAge != 30*24*time.Hour {
 		t.Fatalf("version retention max age = %s, want 720h", cfg.VersionRetention.MaxAge)
+	}
+	if cfg.StorageQuotaBytes != 0 {
+		t.Fatalf("storage quota = %d, want unlimited", cfg.StorageQuotaBytes)
+	}
+}
+
+func TestLoadStorageQuotaOverride(t *testing.T) {
+	t.Setenv("STORAGE_QUOTA_BYTES", "1073741824")
+
+	cfg := Load()
+	if cfg.StorageQuotaBytes != 1073741824 {
+		t.Fatalf("storage quota = %d, want 1073741824", cfg.StorageQuotaBytes)
 	}
 }
 

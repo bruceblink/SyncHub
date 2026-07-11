@@ -283,6 +283,39 @@ func TestSQLiteUsageCountsActiveFilesOnly(t *testing.T) {
 	}
 }
 
+func TestSQLiteUploadEnforcesConfiguredStorageQuota(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	fileService := filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour).WithStorageQuota(10)
+	server := New(authsvc.NewService(repo, "test-secret", time.Minute, time.Hour), fileService, repo)
+	registered := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "quota@example.com", "password": "password123"})
+	var auth struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, registered, &auth)
+	token := auth.Data.Tokens.AccessToken
+
+	usage := doJSON(t, server, http.MethodGet, "/api/v1/account/usage", token, nil)
+	if usage.Code != http.StatusOK || !bytes.Contains(usage.Body.Bytes(), []byte(`"quota_bytes":10`)) {
+		t.Fatalf("usage = %d: %s", usage.Code, usage.Body.String())
+	}
+	checksum := sha256.Sum256([]byte("eleven bytes"))
+	init := doJSON(t, server, http.MethodPost, "/api/v1/uploads", token, map[string]any{
+		"path": "/too-large.txt", "size": 11, "sha256": hex.EncodeToString(checksum[:]), "chunk_size": 11,
+	})
+	if init.Code != http.StatusRequestEntityTooLarge || !bytes.Contains(init.Body.Bytes(), []byte(`"code":"STORAGE_QUOTA_EXCEEDED"`)) {
+		t.Fatalf("over quota upload = %d: %s", init.Code, init.Body.String())
+	}
+}
+
 func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
 	ctx := context.Background()
 	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

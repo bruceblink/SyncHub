@@ -40,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 	authService := authsvc.NewService(repo, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
-	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL)
+	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL).WithStorageQuota(cfg.StorageQuotaBytes)
 	syncService := syncsvc.NewService(repo)
 	workerService := workersvc.NewService(repo, store)
 	apiServer := api.NewWithSyncAndStorage(authService, fileService, syncService, repo, store)

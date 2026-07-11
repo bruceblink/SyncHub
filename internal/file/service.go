@@ -40,18 +40,28 @@ type Repository interface {
 }
 
 func (s *Service) Usage(ctx context.Context, userID string) (domain.StorageUsage, error) {
-	return s.repo.Usage(ctx, userID)
+	usage, err := s.repo.Usage(ctx, userID)
+	usage.QuotaBytes = s.storageQuotaBytes
+	return usage, err
 }
 
 type Service struct {
-	repo             Repository
-	store            storage.Storage
-	chunkSize        int64
-	uploadSessionTTL time.Duration
+	repo              Repository
+	store             storage.Storage
+	chunkSize         int64
+	uploadSessionTTL  time.Duration
+	storageQuotaBytes int64
 }
 
 func NewService(repo Repository, store storage.Storage, chunkSize int64, ttl time.Duration) *Service {
 	return &Service{repo: repo, store: store, chunkSize: chunkSize, uploadSessionTTL: ttl}
+}
+
+func (s *Service) WithStorageQuota(quotaBytes int64) *Service {
+	if quotaBytes > 0 {
+		s.storageQuotaBytes = quotaBytes
+	}
+	return s
 }
 
 func (s *Service) CreateDirectory(ctx context.Context, userID, targetPath string, sourceDeviceID *string) (domain.FileNode, error) {
@@ -210,6 +220,19 @@ func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, siz
 		targetFileID = &existing.ID
 	} else if domain.ErrorCodeOf(err) != domain.CodeNotFound {
 		return domain.UploadSession{}, err
+	}
+	if s.storageQuotaBytes > 0 {
+		usage, err := s.repo.Usage(ctx, userID)
+		if err != nil {
+			return domain.UploadSession{}, err
+		}
+		existingSize := int64(0)
+		if targetFileID != nil {
+			existingSize = existing.Size
+		}
+		if size > existingSize && usage.BytesUsed > s.storageQuotaBytes-(size-existingSize) {
+			return domain.UploadSession{}, domain.E(domain.CodeStorageQuotaExceeded, "storage quota exceeded", nil)
+		}
 	}
 	var key *string
 	if trimmed := strings.TrimSpace(idempotencyKey); trimmed != "" {

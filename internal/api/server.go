@@ -301,7 +301,7 @@ func (s *Server) usage(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	ok(c, gin.H{"file_count": usage.FileCount, "bytes_used": usage.BytesUsed})
+	ok(c, gin.H{"file_count": usage.FileCount, "bytes_used": usage.BytesUsed, "quota_bytes": usage.QuotaBytes})
 }
 
 func (s *Server) listTrash(c *gin.Context) {

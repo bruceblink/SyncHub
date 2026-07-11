@@ -18,6 +18,7 @@ type Config struct {
 	JWTSecret              string
 	StorageBackend         string
 	LocalStorageRoot       string
+	StorageQuotaBytes      int64
 	UploadChunkSize        int64
 	UploadSessionTTL       time.Duration
 	UploadCleanupInterval  time.Duration
@@ -63,6 +64,7 @@ func Load() Config {
 		JWTSecret:              getEnv("JWT_SECRET", "dev-secret-change-me"),
 		StorageBackend:         getEnv("STORAGE_BACKEND", "local"),
 		LocalStorageRoot:       getEnv("LOCAL_STORAGE_ROOT", "./.data/storage"),
+		StorageQuotaBytes:      getEnvNonNegativeInt64("STORAGE_QUOTA_BYTES", 0),
 		UploadChunkSize:        getEnvInt64("UPLOAD_CHUNK_SIZE", 4*1024*1024),
 		UploadSessionTTL:       time.Duration(getEnvInt64("UPLOAD_SESSION_TTL_SECONDS", 24*60*60)) * time.Second,
 		UploadCleanupInterval:  uploadCleanupInterval,

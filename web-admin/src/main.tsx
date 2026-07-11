@@ -53,7 +53,11 @@ type AuthResponse = {
   tokens: { access_token: string; refresh_token: string; expires_in: number };
 };
 type UploadSession = { upload_id: string };
-type StorageUsage = { file_count: number; bytes_used: number };
+type StorageUsage = {
+  file_count: number;
+  bytes_used: number;
+  quota_bytes: number;
+};
 type Modal = { type: "folder" } | { type: "rename" | "delete"; item: FileNode };
 type RequestOptions = {
   token?: string;
@@ -640,8 +644,31 @@ function App() {
         {usage && (
           <div className="usage">
             <span>云端空间</span>
-            <strong>{formatSize(usage.bytes_used)}</strong>
-            <small>{usage.file_count} 个文件</small>
+            <strong>
+              {formatSize(usage.bytes_used)}
+              {usage.quota_bytes > 0 && ` / ${formatSize(usage.quota_bytes)}`}
+            </strong>
+            {usage.quota_bytes > 0 && (
+              <div
+                className="usage-meter"
+                role="progressbar"
+                aria-label="云端空间使用率"
+                aria-valuemin={0}
+                aria-valuemax={usage.quota_bytes}
+                aria-valuenow={Math.min(usage.bytes_used, usage.quota_bytes)}
+              >
+                <span
+                  style={{
+                    width: `${Math.min(100, (usage.bytes_used / usage.quota_bytes) * 100)}%`,
+                  }}
+                />
+              </div>
+            )}
+            <small>
+              {usage.file_count} 个文件
+              {usage.quota_bytes > 0 &&
+                `，剩余 ${formatSize(Math.max(0, usage.quota_bytes - usage.bytes_used))}`}
+            </small>
           </div>
         )}
         <div className="account">

@@ -43,8 +43,9 @@ type FileList struct {
 }
 
 type StorageUsage struct {
-	FileCount int64
-	BytesUsed int64
+	FileCount  int64
+	BytesUsed  int64
+	QuotaBytes int64
 }
 
 type FileVersion struct {
