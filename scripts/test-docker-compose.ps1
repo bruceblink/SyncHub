@@ -59,7 +59,9 @@ $env:SYNCHUB_PORT = [string]$Port
 $env:SYNCHUB_CONTAINER_NAME = "$ProjectName-api"
 $previousDatabaseDriver = $env:DATABASE_DRIVER
 $previousDatabaseURL = $env:DATABASE_URL
+$previousAppEnv = $env:APP_ENV
 if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
+    $env:APP_ENV = "test"
     $env:DATABASE_DRIVER = "sqlite"
     $env:DATABASE_URL = "/data/synchub.db"
 }
@@ -100,6 +102,7 @@ finally {
     finally {
         $env:DATABASE_DRIVER = $previousDatabaseDriver
         $env:DATABASE_URL = $previousDatabaseURL
+        $env:APP_ENV = $previousAppEnv
         Pop-Location
     }
 }

@@ -61,10 +61,10 @@ PostgreSQL migrations are applied automatically at startup. SQLite is only avail
 
 ```powershell
 $env:APP_ENV = "local"
-$env:DATABASE_DRIVER = "sqlite"
-$env:DATABASE_URL = ".\.data\synchub.db"
 go run ./cmd/synchub-api
 ```
+
+When `APP_ENV` is `local`, `development`, or `test`, an unset `DATABASE_URL` defaults to `./.data/synchub.db`. Production always requires a PostgreSQL `DATABASE_URL`.
 
 The server listens on `http://localhost:8765` by default.
 

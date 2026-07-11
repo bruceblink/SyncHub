@@ -196,7 +196,7 @@ $apiBinaryName = if ($isWindows) { "synchub-api.exe" } else { "synchub-api" }
 $cliBinaryName = if ($isWindows) { "synchub-cli.exe" } else { "synchub-cli" }
 $apiBinary = Join-Path $tempRoot $apiBinaryName
 $cliBinary = Join-Path $tempRoot $cliBinaryName
-$envSnapshot = Get-EnvSnapshot -Names @("HTTP_ADDR", "DATABASE_DRIVER", "DATABASE_URL", "DATABASE_SCHEMA", "LOCAL_STORAGE_ROOT", "JWT_SECRET")
+$envSnapshot = Get-EnvSnapshot -Names @("APP_ENV", "HTTP_ADDR", "DATABASE_DRIVER", "DATABASE_URL", "DATABASE_SCHEMA", "LOCAL_STORAGE_ROOT", "JWT_SECRET")
 
 try {
     New-Item -ItemType Directory -Path $tempRoot | Out-Null
@@ -228,6 +228,7 @@ try {
         throw "unsupported smoke database driver: $effectiveDatabaseDriver"
     }
 
+    $env:APP_ENV = "test"
     $env:HTTP_ADDR = "127.0.0.1:$Port"
     $env:DATABASE_DRIVER = $effectiveDatabaseDriver
     $env:DATABASE_URL = $effectiveDatabaseURL

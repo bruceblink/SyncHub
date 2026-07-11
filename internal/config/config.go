@@ -39,6 +39,8 @@ func Load() Config {
 	if databaseDriver == "" {
 		if databaseURL != "" {
 			databaseDriver = inferDatabaseDriver(databaseURL)
+		} else if AllowsSQLite(appEnv) {
+			databaseDriver = "sqlite"
 		} else {
 			databaseDriver = "postgres"
 		}

@@ -45,13 +45,29 @@ func TestLoadDefaultsToProductionPostgres(t *testing.T) {
 	}
 }
 
-func TestLoadAllowsDefaultSQLiteOnlyInLocalEnvironment(t *testing.T) {
+func TestLoadDefaultsToSQLiteWithoutDatabaseURLInLocalOrTestEnvironment(t *testing.T) {
+	for _, appEnv := range []string{"local", "test"} {
+		t.Run(appEnv, func(t *testing.T) {
+			t.Setenv("APP_ENV", appEnv)
+			t.Setenv("DATABASE_DRIVER", "")
+			t.Setenv("DATABASE_URL", "")
+
+			cfg := Load()
+			if cfg.DatabaseDriver != "sqlite" || cfg.DatabaseURL != "./.data/synchub.db" || !AllowsSQLite(cfg.AppEnv) {
+				t.Fatalf("%s sqlite config = %#v", appEnv, cfg)
+			}
+		})
+	}
+}
+
+func TestLoadKeepsExplicitPostgresWithoutDatabaseURLInLocalEnvironment(t *testing.T) {
 	t.Setenv("APP_ENV", "local")
-	t.Setenv("DATABASE_DRIVER", "sqlite")
+	t.Setenv("DATABASE_DRIVER", "postgres")
 	t.Setenv("DATABASE_URL", "")
+
 	cfg := Load()
-	if cfg.DatabaseURL != "./.data/synchub.db" || !AllowsSQLite(cfg.AppEnv) {
-		t.Fatalf("local sqlite config = %#v", cfg)
+	if cfg.DatabaseDriver != "postgres" || cfg.DatabaseURL != "" {
+		t.Fatalf("explicit postgres config = %#v", cfg)
 	}
 }
 

@@ -136,6 +136,7 @@ try {
         "-d",
         "--name", $ContainerName,
         "-p", "${Port}:8765",
+        "-e", "APP_ENV=test",
         "-e", "JWT_SECRET=image-smoke-secret",
         "-e", "DATABASE_DRIVER=$containerDatabaseDriver",
         "-e", "DATABASE_URL=$containerDatabaseURL",
