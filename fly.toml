@@ -1,48 +1,50 @@
-# Fly.io deployment config for SyncHub.
-# Replace the app name before deploying. Fly app names are globally unique.
+# fly.toml app configuration file generated for synchub-tidy-fog-817 on 2026-07-11T12:14:12+08:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "synchub"
-primary_region = "sin"
-kill_signal = "SIGINT"
-kill_timeout = "5s"
+app = 'synchub-tidy-fog-817'
+primary_region = 'sin'
+kill_signal = 'SIGINT'
+kill_timeout = '5s'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
-[build.args]
-  GOPROXY = "https://proxy.golang.org,direct"
+  [build.args]
+    GOPROXY = 'https://proxy.golang.org,direct'
 
 [env]
-  HTTP_ADDR = ":8765"
-  DATABASE_DRIVER = "postgres"
-  STORAGE_BACKEND = "local"
-  LOCAL_STORAGE_ROOT = "/data/storage"
-  CLEANUP_BATCH_LIMIT = "1000"
-  VERSION_CLEANUP_INTERVAL_SECONDS = "3600"
-  VERSION_RETENTION_MIN_VERSIONS = "20"
-  VERSION_RETENTION_MAX_AGE_DAYS = "30"
+  CLEANUP_BATCH_LIMIT = '1000'
+  DATABASE_DRIVER = 'postgres'
+  HTTP_ADDR = ':8765'
+  LOCAL_STORAGE_ROOT = '/data/storage'
+  STORAGE_BACKEND = 'local'
+  VERSION_CLEANUP_INTERVAL_SECONDS = '3600'
+  VERSION_RETENTION_MAX_AGE_DAYS = '30'
+  VERSION_RETENTION_MIN_VERSIONS = '20'
 
-[mounts]
-  source = "synchub_data"
-  destination = "/data"
+[[mounts]]
+  source = 'synchub_data'
+  destination = '/data'
   snapshot_retention = 7
 
 [http_service]
   internal_port = 8765
   force_https = true
-  auto_stop_machines = "off"
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
-  processes = ["app"]
+  processes = ['app']
 
-[[http_service.checks]]
-  grace_period = "10s"
-  interval = "30s"
-  method = "GET"
-  timeout = "3s"
-  path = "/readyz"
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '3s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/readyz'
 
 [[vm]]
-  memory = "256mb"
-  cpu_kind = "shared"
+  memory = '256mb'
   cpus = 1
+  memory_mb = 256
