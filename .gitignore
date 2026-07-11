@@ -22,3 +22,6 @@ coverage.out
 Thumbs.db
 node_modules/
 .env
+
+# Generated web admin bundle
+internal/api/admin_dist/

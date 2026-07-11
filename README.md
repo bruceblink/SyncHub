@@ -50,6 +50,12 @@ See [docs/user-guide.md](docs/user-guide.md) for local usage and manual testing 
 
 ## MVP Quick Start
 
+Build the React admin bundle before running Go commands from a clean checkout. The generated `internal/api/admin_dist` directory is ignored by Git:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-web-admin.ps1
+```
+
 Run the API server with PostgreSQL. Production is the default environment, so `DATABASE_URL` is required:
 
 ```bash

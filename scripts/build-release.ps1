@@ -147,6 +147,10 @@ $oldGOARCH = $env:GOARCH
 $oldCGO = $env:CGO_ENABLED
 Push-Location $ProjectRoot
 try {
+    & (Join-Path $ProjectRoot "scripts/build-web-admin.ps1") -ProjectRoot $ProjectRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "web admin build failed with exit code $LASTEXITCODE"
+    }
     foreach ($target in $Targets) {
         Assert-Target -Target $target
         $goos, $goarch = $target -split "/"

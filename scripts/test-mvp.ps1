@@ -45,6 +45,9 @@ $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
 
 Push-Location $ProjectRoot
 try {
+    Invoke-ScriptStep -Name "build web admin" -Script {
+        & (Join-Path $ProjectRoot "scripts/build-web-admin.ps1") -ProjectRoot $ProjectRoot
+    }
     Invoke-ExternalStep -Name "go fmt ./..." -FilePath "go" -Arguments @("fmt", "./...")
     Invoke-ExternalStep -Name "go vet ./..." -FilePath "go" -Arguments @("vet", "./...")
     Invoke-ExternalStep -Name "go test ./..." -FilePath "go" -Arguments @("test", "./...")
