@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   Clock3,
@@ -67,6 +67,7 @@ function uploadChunk(
   blob: Blob,
   checksum: string,
   onProgress: (progress: number) => void,
+  signal?: AbortSignal,
 ) {
   return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -77,6 +78,7 @@ function uploadChunk(
       if (event.lengthComputable) onProgress(event.loaded / event.total);
     };
     xhr.onerror = () => reject(new Error("网络连接中断"));
+    xhr.onabort = () => reject(new DOMException("上传已取消", "AbortError"));
     xhr.onload = () => {
       let payload: { code?: number; message?: string } = {};
       try {
@@ -87,7 +89,9 @@ function uploadChunk(
       if (xhr.status >= 200 && xhr.status < 300 && payload.code === 0) resolve();
       else reject(new Error(payload.message || "上传失败"));
     };
-    xhr.send(blob);
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    if (signal?.aborted) xhr.abort();
+    else xhr.send(blob);
   });
 }
 
@@ -242,8 +246,11 @@ function App() {
   const [searchResults, setSearchResults] = useState<FileNode[] | null>(null);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
+  const uploadControllers = useRef(new Map<string, AbortController>());
   const currentPath = trail.length ? trail[trail.length - 1].path : "我的文件";
   function logout() {
+    uploadControllers.current.forEach((controller) => controller.abort());
+    uploadControllers.current.clear();
     localStorage.removeItem(tokenKey);
     localStorage.removeItem(userKey);
     setToken("");
@@ -251,6 +258,7 @@ function App() {
     setItems([]);
     setTrail([]);
     setParent(null);
+    setUploadTasks([]);
   }
   async function load(parentID = parent) {
     if (!token) return;
@@ -344,6 +352,9 @@ function App() {
     );
   }
   async function upload(task: UploadTask) {
+    const controller = new AbortController();
+    let uploadID = "";
+    uploadControllers.current.set(task.id, controller);
     updateUploadTask(task.id, {
       state: "hashing",
       progress: 3,
@@ -351,8 +362,11 @@ function App() {
     });
     try {
       const file = task.file;
-      const prepared = await prepareFile(file, (progress) =>
-        updateUploadTask(task.id, { progress: 3 + Math.round(progress * 9) }),
+      const prepared = await prepareFile(
+        file,
+        (progress) =>
+          updateUploadTask(task.id, { progress: 3 + Math.round(progress * 9) }),
+        controller.signal,
       );
       const session = await request<UploadSession>("/uploads", {
         token,
@@ -364,6 +378,12 @@ function App() {
           chunk_size: uploadChunkSize,
         },
       });
+      uploadID = session.upload_id;
+      updateUploadTask(task.id, { uploadID: session.upload_id });
+      if (controller.signal.aborted) {
+        await request(`/uploads/${session.upload_id}`, { token, method: "DELETE" });
+        throw new DOMException("上传已取消", "AbortError");
+      }
       updateUploadTask(task.id, { state: "uploading", progress: 12 });
       let completedBytes = 0;
       for (const chunk of prepared.chunks) {
@@ -382,6 +402,7 @@ function App() {
               progress: 12 + Math.round(transferred * 80),
             });
           },
+          controller.signal,
         );
         completedBytes += chunk.blob.size;
       }
@@ -392,8 +413,52 @@ function App() {
       });
       updateUploadTask(task.id, { state: "complete", progress: 100 });
     } catch (error) {
-      updateUploadTask(task.id, { state: "failed", error: errorMessage(error) });
+      if (error instanceof DOMException && error.name === "AbortError") {
+        if (uploadID) {
+          try {
+            await request(`/uploads/${uploadID}`, { token, method: "DELETE" });
+          } catch (abortError) {
+            setError(`取消上传失败：${errorMessage(abortError)}`);
+          }
+        }
+        updateUploadTask(task.id, { state: "cancelled", error: undefined });
+      } else {
+        updateUploadTask(task.id, { state: "failed", error: errorMessage(error) });
+      }
+    } finally {
+      uploadControllers.current.delete(task.id);
     }
+  }
+  async function cancelUpload(id: string) {
+    const task = uploadTasks.find((item) => item.id === id);
+    if (!task) return;
+    uploadControllers.current.get(id)?.abort();
+    updateUploadTask(id, { state: "cancelled", error: undefined });
+    if (task.uploadID) {
+      try {
+        await request(`/uploads/${task.uploadID}`, { token, method: "DELETE" });
+      } catch (error) {
+        setError(`取消上传失败：${errorMessage(error)}`);
+      }
+    }
+  }
+  async function retryUpload(id: string) {
+    const task = uploadTasks.find((item) => item.id === id);
+    if (!task || task.state !== "failed") return;
+    if (task.uploadID) {
+      try {
+        await request(`/uploads/${task.uploadID}`, { token, method: "DELETE" });
+      } catch (error) {
+        setError(`清理失败上传会话失败：${errorMessage(error)}`);
+        return;
+      }
+    }
+    updateUploadTask(id, {
+      state: "queued",
+      progress: 0,
+      error: undefined,
+      uploadID: undefined,
+    });
   }
   useEffect(() => {
     const next = uploadTasks.find((task) => task.state === "queued");
@@ -730,21 +795,19 @@ function App() {
         <UploadQueue
           tasks={uploadTasks}
           formatSize={formatSize}
-          onRetry={(id) =>
-            updateUploadTask(id, {
-              state: "queued",
-              progress: 0,
-              error: undefined,
-            })
-          }
+          onRetry={(id) => void retryUpload(id)}
           onDismiss={(id) =>
             setUploadTasks((tasks) =>
               tasks.filter((task) => task.id !== id),
             )
           }
+          onCancel={(id) => void cancelUpload(id)}
           onClearCompleted={() =>
             setUploadTasks((tasks) =>
-              tasks.filter((task) => task.state !== "complete"),
+              tasks.filter(
+                (task) =>
+                  task.state !== "complete" && task.state !== "cancelled",
+              ),
             )
           }
         />

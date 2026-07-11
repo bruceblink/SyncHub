@@ -439,7 +439,8 @@ button {
   color: #24714b;
   background: #e7f4eb;
 }
-.upload-task.failed .upload-task-icon {
+.upload-task.failed .upload-task-icon,
+.upload-task.cancelled .upload-task-icon {
   color: #a53b3b;
   background: #fff0ee;
 }
@@ -474,7 +475,8 @@ button {
   background: #0f766e;
   transition: width 150ms ease;
 }
-.upload-task.failed .upload-progress span {
+.upload-task.failed .upload-progress span,
+.upload-task.cancelled .upload-progress span {
   background: #bd5151;
 }
 .upload-task-action {

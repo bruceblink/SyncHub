@@ -1,6 +1,13 @@
 import { Check, LoaderCircle, RotateCcw, Upload, X } from "lucide-react";
 
-export type UploadState = "queued" | "hashing" | "uploading" | "committing" | "complete" | "failed";
+export type UploadState =
+  | "queued"
+  | "hashing"
+  | "uploading"
+  | "committing"
+  | "complete"
+  | "failed"
+  | "cancelled";
 
 export type UploadTask = {
   id: string;
@@ -9,6 +16,7 @@ export type UploadTask = {
   state: UploadState;
   progress: number;
   error?: string;
+  uploadID?: string;
 };
 
 const stateLabel: Record<UploadState, string> = {
@@ -18,6 +26,7 @@ const stateLabel: Record<UploadState, string> = {
   committing: "正在保存",
   complete: "上传完成",
   failed: "上传失败",
+  cancelled: "已取消",
 };
 
 export function UploadQueue({
@@ -25,17 +34,20 @@ export function UploadQueue({
   formatSize,
   onRetry,
   onDismiss,
+  onCancel,
   onClearCompleted,
 }: {
   tasks: UploadTask[];
   formatSize: (size: number) => string;
   onRetry: (id: string) => void;
   onDismiss: (id: string) => void;
+  onCancel: (id: string) => void;
   onClearCompleted: () => void;
 }) {
   if (tasks.length === 0) return null;
-  const active = tasks.filter((task) => task.state !== "complete").length;
-  const completed = tasks.length - active;
+  const terminal = tasks.filter(
+    (task) => task.state === "complete" || task.state === "cancelled",
+  ).length;
   return (
     <aside className="upload-queue" aria-label="上传队列">
       <header>
@@ -43,8 +55,8 @@ export function UploadQueue({
           <Upload size={17} />
           上传任务
         </span>
-        {completed > 0 && (
-          <button onClick={onClearCompleted}>清除已完成</button>
+        {terminal > 0 && (
+          <button onClick={onClearCompleted}>清除已结束</button>
         )}
       </header>
       <div className="upload-task-list">
@@ -53,7 +65,7 @@ export function UploadQueue({
             <div className="upload-task-icon">
               {task.state === "complete" ? (
                 <Check size={17} />
-              ) : task.state === "failed" ? (
+              ) : task.state === "failed" || task.state === "cancelled" ? (
                 <X size={17} />
               ) : (
                 <LoaderCircle size={17} />
@@ -76,11 +88,19 @@ export function UploadQueue({
               >
                 <RotateCcw size={16} />
               </button>
-            ) : (task.state === "complete" || task.state === "queued") ? (
+            ) : task.state === "complete" || task.state === "cancelled" ? (
               <button
                 className="upload-task-action"
                 title="移除"
                 onClick={() => onDismiss(task.id)}
+              >
+                <X size={16} />
+              </button>
+            ) : task.state !== "committing" ? (
+              <button
+                className="upload-task-action"
+                title="取消上传"
+                onClick={() => onCancel(task.id)}
               >
                 <X size={16} />
               </button>

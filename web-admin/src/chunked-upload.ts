@@ -12,14 +12,17 @@ export type FileChunk = {
 export async function prepareFile(
   file: File,
   onProgress: (progress: number) => void,
+  signal?: AbortSignal,
 ) {
   const hasher = sha256.create();
   const chunks: FileChunk[] = [];
   const count = Math.max(1, Math.ceil(file.size / uploadChunkSize));
   for (let index = 0; index < count; index += 1) {
+    signal?.throwIfAborted();
     const start = index * uploadChunkSize;
     const blob = file.slice(start, Math.min(start + uploadChunkSize, file.size));
     const bytes = new Uint8Array(await blob.arrayBuffer());
+    signal?.throwIfAborted();
     hasher.update(bytes);
     chunks.push({ index, blob, checksum: bytesToHex(sha256(bytes)) });
     onProgress((index + 1) / count);
