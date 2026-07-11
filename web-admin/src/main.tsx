@@ -2,7 +2,6 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
-  Clock3,
   Download,
   Eye,
   File,
@@ -10,9 +9,6 @@ import {
   FolderPlus,
   FolderUp,
   History,
-  LogIn,
-  LogOut,
-  MonitorCog,
   Search,
   MoreHorizontal,
   Pencil,
@@ -32,39 +28,24 @@ import {
   transferredProgress,
   uploadChunkSize,
 } from "./chunked-upload";
-
-const api = "/api/v1";
-const tokenKey = "synchub.accessToken";
-const userKey = "synchub.user";
-
-type User = { id: string; email: string; status: string };
-type FileNode = {
-  id: string;
-  name: string;
-  path: string;
-  node_type: "file" | "directory";
-  size: number;
-  version: number;
-  updated_at: string;
-};
-type FileListResponse = { items: FileNode[]; next_cursor: string };
-type AuthResponse = {
-  user: User;
-  tokens: { access_token: string; refresh_token: string; expires_in: number };
-};
-type UploadSession = { upload_id: string };
-type StorageUsage = {
-  file_count: number;
-  bytes_used: number;
-  quota_bytes: number;
-};
-type Modal = { type: "folder" } | { type: "rename" | "delete"; item: FileNode };
-type RequestOptions = {
-  token?: string;
-  method?: string;
-  body?: unknown;
-  headers?: Record<string, string>;
-};
+import {
+  api,
+  errorMessage,
+  formatDate,
+  formatSize,
+  request,
+  tokenKey,
+  userKey,
+  type FileListResponse,
+  type FileNode,
+  type RequestOptions,
+  type StorageUsage,
+  type UploadSession,
+  type User,
+} from "./api";
+import { Auth } from "./auth";
+import { Dialog, type Modal } from "./dialog";
+import { Sidebar, type Page } from "./sidebar";
 
 function relativeUploadPath(file: File) {
   const raw = file.webkitRelativePath.replaceAll("\\", "/");
@@ -119,129 +100,6 @@ function uploadChunk(
   });
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "请求失败";
-}
-
-async function request<T>(
-  path: string,
-  { token, method = "GET", body, headers = {} }: RequestOptions = {},
-): Promise<T> {
-  const isBinary = body instanceof Blob;
-  const response = await fetch(`${api}${path}`, {
-    method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...headers,
-      ...(body && !isBinary ? { "Content-Type": "application/json" } : {}),
-    },
-    body:
-      body === undefined ? undefined : isBinary ? body : JSON.stringify(body),
-  });
-  const payload: { code?: number; message?: string; data?: T } = await response
-    .json()
-    .catch(() => ({}));
-  if (!response.ok || payload.code !== 0 || payload.data === undefined)
-    throw new Error(payload.message || "请求失败");
-  return payload.data;
-}
-
-function formatSize(size: number) {
-  if (!size) return "--";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const power = Math.min(
-    Math.floor(Math.log(size) / Math.log(1024)),
-    units.length - 1,
-  );
-  return `${(size / 1024 ** power).toFixed(power ? 1 : 0)} ${units[power]}`;
-}
-function formatDate(value: string) {
-  return value
-    ? new Intl.DateTimeFormat("zh-CN", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(new Date(value))
-    : "--";
-}
-
-function Auth({
-  onAuthenticated,
-}: {
-  onAuthenticated: (token: string, user: User) => void;
-}) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const data = await request<AuthResponse>(`/auth/${mode}`, {
-        method: "POST",
-        body: { email, password },
-      });
-      localStorage.setItem(tokenKey, data.tokens.access_token);
-      localStorage.setItem(userKey, JSON.stringify(data.user));
-      onAuthenticated(data.tokens.access_token, data.user);
-    } catch (error) {
-      setError(errorMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <main className="auth-page">
-      <section className="auth-panel">
-        <div className="brand-mark">S</div>
-        <p className="eyebrow">SYNCHUB</p>
-        <h1>{mode === "login" ? "访问你的云端文件" : "创建 SyncHub 账户"}</h1>
-        <form onSubmit={submit}>
-          <label>
-            邮箱
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              autoComplete="email"
-            />
-          </label>
-          <label>
-            密码
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              minLength={8}
-              autoComplete={
-                mode === "login" ? "current-password" : "new-password"
-              }
-            />
-          </label>
-          {error && <p className="form-error">{error}</p>}
-          <button className="primary wide" disabled={busy}>
-            <LogIn size={18} />
-            {busy ? "正在处理..." : mode === "login" ? "登录" : "注册并登录"}
-          </button>
-        </form>
-        <button
-          className="text-button"
-          onClick={() => {
-            setMode(mode === "login" ? "register" : "login");
-            setError("");
-          }}
-        >
-          {mode === "login" ? "没有账户？创建一个" : "已有账户？登录"}
-        </button>
-      </section>
-    </main>
-  );
-}
-
 function App() {
   const savedUser = useMemo<User | null>(() => {
     try {
@@ -254,9 +112,7 @@ function App() {
     () => localStorage.getItem(tokenKey) || "",
   );
   const [user, setUser] = useState<User | null>(savedUser);
-  const [page, setPage] = useState<"files" | "sync" | "trash" | "activity">(
-    "files",
-  );
+  const [page, setPage] = useState<Page>("files");
   const [parent, setParent] = useState<string | null>(null);
   const [trail, setTrail] = useState<FileNode[]>([]);
   const [items, setItems] = useState<FileNode[]>([]);
@@ -638,78 +494,13 @@ function App() {
   const visibleItems = searchResults ?? items;
   return (
     <main className="app-shell" onClick={() => setMenuID(null)}>
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <div className="brand-mark small">S</div>
-          <span>SyncHub</span>
-        </div>
-        <nav>
-          <button
-            className={`nav-item ${page === "files" ? "active" : ""}`}
-            onClick={() => navigateToPage("files")}
-          >
-            <Folder size={18} />
-            文件
-          </button>
-          <button
-            className={`nav-item ${page === "trash" ? "active" : ""}`}
-            onClick={() => navigateToPage("trash")}
-          >
-            <Trash2 size={18} />
-            回收站
-          </button>
-          <button
-            className={`nav-item ${page === "activity" ? "active" : ""}`}
-            onClick={() => navigateToPage("activity")}
-          >
-            <Clock3 size={18} />
-            活动记录
-          </button>
-          <button
-            className={`nav-item ${page === "sync" ? "active" : ""}`}
-            onClick={() => navigateToPage("sync")}
-          >
-            <MonitorCog size={18} />
-            同步状态
-          </button>
-        </nav>
-        {usage && (
-          <div className="usage">
-            <span>云端空间</span>
-            <strong>
-              {formatSize(usage.bytes_used)}
-              {usage.quota_bytes > 0 && ` / ${formatSize(usage.quota_bytes)}`}
-            </strong>
-            {usage.quota_bytes > 0 && (
-              <div
-                className="usage-meter"
-                role="progressbar"
-                aria-label="云端空间使用率"
-                aria-valuemin={0}
-                aria-valuemax={usage.quota_bytes}
-                aria-valuenow={Math.min(usage.bytes_used, usage.quota_bytes)}
-              >
-                <span
-                  style={{
-                    width: `${Math.min(100, (usage.bytes_used / usage.quota_bytes) * 100)}%`,
-                  }}
-                />
-              </div>
-            )}
-            <small>
-              {usage.file_count} 个文件
-              {usage.quota_bytes > 0 &&
-                `，剩余 ${formatSize(Math.max(0, usage.quota_bytes - usage.bytes_used))}`}
-            </small>
-          </div>
-        )}
-        <div className="account">
-          <span>{user?.email || "已登录用户"}</span>
-          <button title="退出登录" onClick={logout}>
-            <LogOut size={18} />
-          </button>
-        </div>
-      </aside>
+      <Sidebar
+        page={page}
+        usage={usage}
+        user={user}
+        onNavigate={navigateToPage}
+        onLogout={logout}
+      />
       <section className="workspace">
         {error && (
           <div className="notice">
@@ -1011,61 +802,6 @@ function App() {
         />
       </section>
     </main>
-  );
-}
-
-function Dialog({
-  modal,
-  onClose,
-  onConfirm,
-}: {
-  modal: Modal;
-  onClose: () => void;
-  onConfirm: (value: string) => void | Promise<void>;
-}) {
-  const isDelete = modal.type === "delete";
-  const [value, setValue] = useState(
-    modal.type === "folder" ? "" : modal.item.name,
-  );
-  return (
-    <div className="dialog-backdrop" role="presentation">
-      <form
-        className="dialog"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void onConfirm(value);
-        }}
-      >
-        <h2>
-          {isDelete
-            ? "删除项目？"
-            : modal.type === "rename"
-              ? "重命名"
-              : "新建文件夹"}
-        </h2>
-        {isDelete ? (
-          <p>“{modal.item.name}” 将从云端文件中删除。</p>
-        ) : (
-          <label>
-            名称
-            <input
-              autoFocus
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-              required
-            />
-          </label>
-        )}
-        <div className="dialog-actions">
-          <button type="button" onClick={onClose}>
-            取消
-          </button>
-          <button className={isDelete ? "danger-button" : "primary"}>
-            {isDelete ? "删除" : "确认"}
-          </button>
-        </div>
-      </form>
-    </div>
   );
 }
 
