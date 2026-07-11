@@ -260,7 +260,9 @@ function App() {
   const [parent, setParent] = useState<string | null>(null);
   const [trail, setTrail] = useState<FileNode[]>([]);
   const [items, setItems] = useState<FileNode[]>([]);
+  const [filesCursor, setFilesCursor] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [modal, setModal] = useState<Modal | null>(null);
   const [menuID, setMenuID] = useState<string | null>(null);
@@ -268,10 +270,14 @@ function App() {
   const [previewFile, setPreviewFile] = useState<FileNode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<FileNode[] | null>(null);
+  const [searchCursor, setSearchCursor] = useState("");
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [preparingDirectory, setPreparingDirectory] = useState(false);
   const uploadControllers = useRef(new Map<string, AbortController>());
+  const filesRequestID = useRef(0);
+  const searchRequestID = useRef(0);
   const currentPath = trail.length ? trail[trail.length - 1].path : "我的文件";
   function logout() {
     uploadControllers.current.forEach((controller) => controller.abort());
@@ -285,21 +291,28 @@ function App() {
     setParent(null);
     setUploadTasks([]);
   }
-  async function load(parentID = parent) {
+  async function load(parentID = parent, cursor = "") {
     if (!token) return;
-    setLoading(true);
+    const requestID = ++filesRequestID.current;
+    cursor ? setLoadingMore(true) : setLoading(true);
     setError("");
     try {
       const data = await request<FileListResponse>(
-        `/files${parentID ? `?parent_id=${encodeURIComponent(parentID)}&page_size=100` : "?page_size=100"}`,
+        `/files?${parentID ? `parent_id=${encodeURIComponent(parentID)}&` : ""}page_size=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
         { token },
       );
-      setItems(data.items);
+      if (requestID !== filesRequestID.current) return;
+      setItems((current) => (cursor ? [...current, ...data.items] : data.items));
+      setFilesCursor(data.next_cursor);
     } catch (error) {
+      if (requestID !== filesRequestID.current) return;
       if (errorMessage(error).includes("access token")) logout();
       else setError(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (requestID === filesRequestID.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }
   useEffect(() => {
@@ -318,21 +331,35 @@ function App() {
   ) {
     return request<T>(path, { ...options, token });
   }
-  async function search(query: string) {
+  async function search(query: string, cursor = "") {
+    const requestID = ++searchRequestID.current;
     const trimmed = query.trim();
     setSearchQuery(query);
     if (!trimmed) {
       setSearchResults(null);
+      setSearchCursor("");
       return;
+    }
+    if (cursor) setSearchLoadingMore(true);
+    else {
+      setSearchResults([]);
+      setSearchCursor("");
     }
     try {
       const data = await request<FileListResponse>(
-        `/files/search?q=${encodeURIComponent(trimmed)}&page_size=100`,
+        `/files/search?q=${encodeURIComponent(trimmed)}&page_size=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
         { token },
       );
-      setSearchResults(data.items);
+      if (requestID !== searchRequestID.current) return;
+      setSearchResults((current) =>
+        cursor ? [...(current ?? []), ...data.items] : data.items,
+      );
+      setSearchCursor(data.next_cursor);
     } catch (error) {
+      if (requestID !== searchRequestID.current) return;
       setError(errorMessage(error));
+    } finally {
+      if (requestID === searchRequestID.current) setSearchLoadingMore(false);
     }
   }
   function navigate(folder: FileNode) {
@@ -796,7 +823,8 @@ function App() {
                   </span>
                 </div>
               ) : (
-                visibleItems.map((item) => (
+                <>
+                {visibleItems.map((item) => (
                   <div className="file-row" key={item.id}>
                     <button
                       className="file-name"
@@ -900,7 +928,23 @@ function App() {
                       )}
                     </div>
                   </div>
-                ))
+                ))}
+                {(searchResults ? searchCursor : filesCursor) && (
+                  <button
+                    className="load-more"
+                    disabled={searchResults ? searchLoadingMore : loadingMore}
+                    onClick={() =>
+                      void (searchResults
+                        ? search(searchQuery, searchCursor)
+                        : load(parent, filesCursor))
+                    }
+                  >
+                    {(searchResults ? searchLoadingMore : loadingMore)
+                      ? "正在加载..."
+                      : "加载更多"}
+                  </button>
+                )}
+                </>
               )}
             </div>
           </>
