@@ -10,6 +10,44 @@ import (
 	"github.com/bruceblink/SyncHub/internal/domain"
 )
 
+func TestSQLitePurgeExpiredDeletedFilesRemovesExpiredRootsAndTrees(t *testing.T) {
+	ctx := context.Background()
+	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	user, err := repo.CreateUser(ctx, "trash-cleanup@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	old := time.Now().UTC().Add(-31 * 24 * time.Hour)
+	recent := time.Now().UTC().Add(-2 * 24 * time.Hour)
+	if _, err = repo.db.ExecContext(ctx, `
+		insert into file_nodes (id, user_id, parent_id, name, path, node_type, deleted_at) values
+		('old-root', ?, null, 'old', '/old', 'directory', ?),
+		('old-child', ?, 'old-root', 'child', '/old/child', 'directory', ?),
+		('recent-root', ?, null, 'recent', '/recent', 'directory', ?)
+	`, user.ID, old, user.ID, old, user.ID, recent); err != nil {
+		t.Fatalf("insert deleted trees: %v", err)
+	}
+
+	count, err := repo.PurgeExpiredDeletedFiles(ctx, time.Now().UTC().Add(-30*24*time.Hour), 1)
+	if err != nil || count != 1 {
+		t.Fatalf("purge expired trash = %d, %v", count, err)
+	}
+	for _, id := range []string{"old-root", "old-child"} {
+		var found int
+		if err := repo.db.QueryRowContext(ctx, `select count(*) from file_nodes where id = ?`, id).Scan(&found); err != nil || found != 0 {
+			t.Fatalf("purged node %s count = %d error = %v", id, found, err)
+		}
+	}
+	var recentCount int
+	if err := repo.db.QueryRowContext(ctx, `select count(*) from file_nodes where id = 'recent-root'`).Scan(&recentCount); err != nil || recentCount != 1 {
+		t.Fatalf("recent node count = %d error = %v", recentCount, err)
+	}
+}
+
 func TestSQLiteExpireUploadSessions(t *testing.T) {
 	ctx := context.Background()
 	repo, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

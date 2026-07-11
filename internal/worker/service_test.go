@@ -67,6 +67,35 @@ func TestCleanupExpiredFileVersionsSkipsDisabledMaxAge(t *testing.T) {
 	}
 }
 
+func TestCleanupExpiredTrashUsesRetentionPolicy(t *testing.T) {
+	repo := &fakeCleanupRepo{}
+	service := NewService(repo, nil)
+
+	count, err := service.CleanupExpiredTrash(context.Background(), 30*24*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("cleanup expired trash: %v", err)
+	}
+	if count != 4 {
+		t.Fatalf("count = %d, want 4", count)
+	}
+	if repo.trashLimit != 1000 {
+		t.Fatalf("trash limit = %d, want default 1000", repo.trashLimit)
+	}
+	if repo.trashCutoff.IsZero() || time.Since(repo.trashCutoff) < 29*24*time.Hour {
+		t.Fatalf("trash cutoff = %s, want roughly 30 days ago", repo.trashCutoff)
+	}
+}
+
+func TestCleanupExpiredTrashSkipsDisabledRetention(t *testing.T) {
+	repo := &fakeCleanupRepo{}
+	service := NewService(repo, nil)
+
+	count, err := service.CleanupExpiredTrash(context.Background(), 0, 100)
+	if err != nil || count != 0 || !repo.trashCutoff.IsZero() {
+		t.Fatalf("disabled cleanup = count %d cutoff %s err %v", count, repo.trashCutoff, err)
+	}
+}
+
 func TestCleanupExpiredUploadChunksDeletesObjectsBeforeMetadata(t *testing.T) {
 	repo := &fakeCleanupRepo{
 		expiredChunks: []domain.ExpiredUploadChunk{
@@ -104,6 +133,8 @@ type fakeCleanupRepo struct {
 	cutoff       time.Time
 	minVersions  int64
 	versionLimit int32
+	trashCutoff  time.Time
+	trashLimit   int32
 
 	chunkLimit      int32
 	expiredChunks   []domain.ExpiredUploadChunk
@@ -123,6 +154,13 @@ func (r *fakeCleanupRepo) DeleteExpiredFileVersions(ctx context.Context, cutoff 
 	r.minVersions = minVersions
 	r.versionLimit = limit
 	return 2, nil
+}
+
+func (r *fakeCleanupRepo) PurgeExpiredDeletedFiles(ctx context.Context, cutoff time.Time, limit int32) (int64, error) {
+	_ = ctx
+	r.trashCutoff = cutoff
+	r.trashLimit = limit
+	return 4, nil
 }
 
 func (r *fakeCleanupRepo) ListExpiredUploadChunks(ctx context.Context, limit int32) ([]domain.ExpiredUploadChunk, error) {

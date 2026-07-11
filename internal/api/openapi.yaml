@@ -217,7 +217,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FileListResponse"
+                $ref: "#/components/schemas/TrashListResponse"
   /api/v1/trash/{id}:
     delete:
       tags: [File]
@@ -973,6 +973,18 @@ components:
                     $ref: "#/components/schemas/FileNode"
                 next_cursor:
                   type: string
+    TrashListResponse:
+      allOf:
+        - $ref: "#/components/schemas/FileListResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                retention_days:
+                  type: integer
+                  format: int64
+                  description: Days before automatic permanent deletion; zero means disabled.
     FileVersionListResponse:
       allOf:
         - $ref: "#/components/schemas/APIResponse"

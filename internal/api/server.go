@@ -293,7 +293,7 @@ func (s *Server) searchFiles(c *gin.Context) {
 	for _, node := range result.Items {
 		items = append(items, fileDTO(node))
 	}
-	ok(c, gin.H{"items": items, "next_cursor": result.NextCursor})
+	ok(c, gin.H{"items": items, "next_cursor": result.NextCursor, "retention_days": s.files.TrashRetentionDays()})
 }
 
 func (s *Server) usage(c *gin.Context) {

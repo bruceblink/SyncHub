@@ -12,6 +12,7 @@
 - metrics: `GET /metrics` 输出 Prometheus text format 的请求计数、状态族计数和耗时累计值，可用 4xx / 5xx 状态族估算错误率。
 - readiness: `GET /readyz` 同时检查数据库和 storage，成功响应会列出各组件状态。
 - 过期上传会话由 API 进程内 worker 周期性标记为 `expired`，间隔由 `UPLOAD_CLEANUP_INTERVAL_SECONDS` 控制。
+- 回收站项目默认保留 30 天，并由同一清理周期自动永久删除；`TRASH_RETENTION_DAYS=0` 可关闭该任务。
 - 过期文件版本由 API 进程内 worker 周期性清理，间隔由 `VERSION_CLEANUP_INTERVAL_SECONDS` 控制；未设置时跟随上传清理间隔。
 - 清理任务每轮处理数量由 `CLEANUP_BATCH_LIMIT` 控制，默认 `1000`。
 - CLI daemon 默认读取用户级 workspace registry，监听所有已初始化 workspace，并按周期兜底重试同步；适合开机自启或用户登录自启。

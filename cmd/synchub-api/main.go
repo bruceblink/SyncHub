@@ -40,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 	authService := authsvc.NewService(repo, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
-	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL).WithStorageQuota(cfg.StorageQuotaBytes)
+	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL).WithStorageQuota(cfg.StorageQuotaBytes).WithTrashRetention(cfg.TrashRetention)
 	syncService := syncsvc.NewService(repo)
 	workerService := workersvc.NewService(repo, store)
 	apiServer := api.NewWithSyncAndStorage(authService, fileService, syncService, repo, store)
@@ -55,6 +55,9 @@ func main() {
 	})
 	go workerService.RunFileVersionCleanupLoop(workerCtx, cfg.VersionCleanupInterval, cfg.VersionRetention.MinVersions, cfg.VersionRetention.MaxAge, cfg.CleanupBatchLimit, func(err error) {
 		slog.Error("file version cleanup failed", "error", err)
+	})
+	go workerService.RunTrashCleanupLoop(workerCtx, cfg.UploadCleanupInterval, cfg.TrashRetention, cfg.CleanupBatchLimit, func(err error) {
+		slog.Error("trash cleanup failed", "error", err)
 	})
 
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: apiServer.Handler()}

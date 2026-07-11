@@ -52,6 +52,7 @@ type Service struct {
 	chunkSize         int64
 	uploadSessionTTL  time.Duration
 	storageQuotaBytes int64
+	trashRetention    time.Duration
 }
 
 func NewService(repo Repository, store storage.Storage, chunkSize int64, ttl time.Duration) *Service {
@@ -63,6 +64,17 @@ func (s *Service) WithStorageQuota(quotaBytes int64) *Service {
 		s.storageQuotaBytes = quotaBytes
 	}
 	return s
+}
+
+func (s *Service) WithTrashRetention(retention time.Duration) *Service {
+	if retention > 0 {
+		s.trashRetention = retention
+	}
+	return s
+}
+
+func (s *Service) TrashRetentionDays() int64 {
+	return int64(s.trashRetention / (24 * time.Hour))
 }
 
 func (s *Service) CreateDirectory(ctx context.Context, userID, targetPath string, sourceDeviceID *string) (domain.FileNode, error) {

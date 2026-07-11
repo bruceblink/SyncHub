@@ -13,6 +13,7 @@ type Repository interface {
 	DeleteExpiredFileVersions(ctx context.Context, cutoff time.Time, minVersions int64, limit int32) (int64, error)
 	ListExpiredUploadChunks(ctx context.Context, limit int32) ([]domain.ExpiredUploadChunk, error)
 	DeleteUploadChunk(ctx context.Context, chunkID string) error
+	PurgeExpiredDeletedFiles(ctx context.Context, cutoff time.Time, limit int32) (int64, error)
 }
 
 type Service struct {
@@ -43,6 +44,16 @@ func (s *Service) CleanupExpiredFileVersions(ctx context.Context, minVersions in
 	}
 	cutoff := time.Now().UTC().Add(-maxAge)
 	return s.repo.DeleteExpiredFileVersions(ctx, cutoff, minVersions, limit)
+}
+
+func (s *Service) CleanupExpiredTrash(ctx context.Context, retention time.Duration, limit int32) (int64, error) {
+	if retention <= 0 {
+		return 0, nil
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	return s.repo.PurgeExpiredDeletedFiles(ctx, time.Now().UTC().Add(-retention), limit)
 }
 
 func (s *Service) CleanupExpiredUploadChunks(ctx context.Context, limit int32) (int64, error) {
@@ -120,6 +131,23 @@ func (s *Service) RunFileVersionCleanupLoop(ctx context.Context, interval time.D
 	}
 }
 
+func (s *Service) RunTrashCleanupLoop(ctx context.Context, interval, retention time.Duration, limit int32, onError func(error)) {
+	if interval <= 0 || retention <= 0 {
+		return
+	}
+	s.cleanupTrash(ctx, retention, limit, onError)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.cleanupTrash(ctx, retention, limit, onError)
+		}
+	}
+}
+
 func (s *Service) cleanup(ctx context.Context, limit int32, onError func(error)) {
 	if _, err := s.CleanupExpiredUploadSessions(ctx, limit); err != nil && onError != nil {
 		onError(err)
@@ -134,6 +162,12 @@ func (s *Service) cleanupUploadChunks(ctx context.Context, limit int32, onError 
 
 func (s *Service) cleanupFileVersions(ctx context.Context, minVersions int64, maxAge time.Duration, limit int32, onError func(error)) {
 	if _, err := s.CleanupExpiredFileVersions(ctx, minVersions, maxAge, limit); err != nil && onError != nil {
+		onError(err)
+	}
+}
+
+func (s *Service) cleanupTrash(ctx context.Context, retention time.Duration, limit int32, onError func(error)) {
+	if _, err := s.CleanupExpiredTrash(ctx, retention, limit); err != nil && onError != nil {
 		onError(err)
 	}
 }

@@ -47,6 +47,7 @@ func TestLoadDefaultsToProductionPostgres(t *testing.T) {
 	t.Setenv("VERSION_RETENTION_MIN_VERSIONS", "")
 	t.Setenv("VERSION_RETENTION_MAX_AGE_DAYS", "")
 	t.Setenv("STORAGE_QUOTA_BYTES", "")
+	t.Setenv("TRASH_RETENTION_DAYS", "")
 
 	cfg := Load()
 	if cfg.AppEnv != "production" {
@@ -78,6 +79,20 @@ func TestLoadDefaultsToProductionPostgres(t *testing.T) {
 	}
 	if cfg.StorageQuotaBytes != 0 {
 		t.Fatalf("storage quota = %d, want unlimited", cfg.StorageQuotaBytes)
+	}
+	if cfg.TrashRetention != 30*24*time.Hour {
+		t.Fatalf("trash retention = %s, want 720h", cfg.TrashRetention)
+	}
+}
+
+func TestLoadTrashRetentionCanBeOverriddenOrDisabled(t *testing.T) {
+	t.Setenv("TRASH_RETENTION_DAYS", "14")
+	if got := Load().TrashRetention; got != 14*24*time.Hour {
+		t.Fatalf("trash retention = %s, want 336h", got)
+	}
+	t.Setenv("TRASH_RETENTION_DAYS", "0")
+	if got := Load().TrashRetention; got != 0 {
+		t.Fatalf("disabled trash retention = %s, want 0", got)
 	}
 }
 

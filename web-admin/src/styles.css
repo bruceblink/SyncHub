@@ -325,6 +325,11 @@ button {
   align-items: center;
   gap: 6px;
 }
+.retention-note {
+  margin: 7px 0 0;
+  color: #687a75;
+  font-size: 13px;
+}
 .danger-icon {
   color: #b13737;
 }

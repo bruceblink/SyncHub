@@ -25,6 +25,7 @@ type Config struct {
 	VersionCleanupInterval time.Duration
 	CleanupBatchLimit      int32
 	VersionRetention       VersionRetentionPolicy
+	TrashRetention         time.Duration
 	AccessTokenTTL         time.Duration
 	RefreshTokenTTL        time.Duration
 	LogLevel               string
@@ -74,6 +75,7 @@ func Load() Config {
 			MinVersions: getEnvInt64("VERSION_RETENTION_MIN_VERSIONS", 20),
 			MaxAge:      time.Duration(getEnvNonNegativeInt64("VERSION_RETENTION_MAX_AGE_DAYS", 30)) * 24 * time.Hour,
 		},
+		TrashRetention:  time.Duration(getEnvNonNegativeInt64("TRASH_RETENTION_DAYS", 30)) * 24 * time.Hour,
 		AccessTokenTTL:  time.Duration(getEnvInt64("ACCESS_TOKEN_TTL_SECONDS", 15*60)) * time.Second,
 		RefreshTokenTTL: time.Duration(getEnvInt64("REFRESH_TOKEN_TTL_SECONDS", 30*24*60*60)) * time.Second,
 		LogLevel:        getEnv("LOG_LEVEL", "info"),

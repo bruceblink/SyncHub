@@ -337,6 +337,51 @@ func (r *Repository) PurgeDeletedFile(ctx context.Context, userID, fileID string
 	return wrapDBErr(tx.Commit(ctx))
 }
 
+func (r *Repository) PurgeExpiredDeletedFiles(ctx context.Context, cutoff time.Time, limit int32) (int64, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := r.pool.Query(ctx, `
+		select n.user_id, n.id
+		from file_nodes n
+		where n.deleted_at < $1
+		  and (n.parent_id is null or not exists (
+			select 1 from file_nodes p where p.id = n.parent_id and p.user_id = n.user_id and p.deleted_at is not null
+		  ))
+		order by n.deleted_at, n.id
+		limit $2
+	`, cutoff, limit)
+	if err != nil {
+		return 0, wrapDBErr(err)
+	}
+	type target struct{ userID, fileID string }
+	targets := make([]target, 0)
+	for rows.Next() {
+		var item target
+		if err := rows.Scan(&item.userID, &item.fileID); err != nil {
+			rows.Close()
+			return 0, wrapDBErr(err)
+		}
+		targets = append(targets, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, wrapDBErr(err)
+	}
+	rows.Close()
+	var purged int64
+	for _, item := range targets {
+		if err := r.PurgeDeletedFile(ctx, item.userID, item.fileID); err != nil {
+			if domain.ErrorCodeOf(err) == domain.CodeNotFound {
+				continue
+			}
+			return purged, err
+		}
+		purged++
+	}
+	return purged, nil
+}
+
 func (r *Repository) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
