@@ -148,6 +148,7 @@ func (s *Server) routes() {
 	protected.DELETE("/files/:id/versions/:version/pin", s.unpinFileVersion)
 	protected.GET("/files/by-path", s.getFileByPath)
 	protected.GET("/files", s.listFiles)
+	protected.GET("/files/search", s.searchFiles)
 	protected.GET("/trash", s.listTrash)
 	protected.POST("/trash/:id/restore", s.restoreTrash)
 	protected.POST("/files/directories", s.createDirectory)
@@ -268,6 +269,25 @@ func (s *Server) listFiles(c *gin.Context) {
 		data = append(data, fileDTO(node))
 	}
 	ok(c, gin.H{"items": data, "next_cursor": result.NextCursor})
+}
+
+func (s *Server) searchFiles(c *gin.Context) {
+	limit := int32(100)
+	if raw := c.Query("page_size"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = int32(parsed)
+		}
+	}
+	result, err := s.files.Search(c.Request.Context(), userID(c), c.Query("q"), c.Query("cursor"), limit)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	items := make([]any, 0, len(result.Items))
+	for _, node := range result.Items {
+		items = append(items, fileDTO(node))
+	}
+	ok(c, gin.H{"items": items, "next_cursor": result.NextCursor})
 }
 
 func (s *Server) listTrash(c *gin.Context) {

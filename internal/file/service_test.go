@@ -92,6 +92,11 @@ func (r *fakeRepo) ListFiles(ctx context.Context, userID string, parentID *strin
 	return domain.FileList{}, nil
 }
 
+func (r *fakeRepo) SearchFiles(ctx context.Context, userID, query, cursor string, limit int32) (domain.FileList, error) {
+	_, _, _, _, _ = ctx, userID, query, cursor, limit
+	return domain.FileList{}, nil
+}
+
 func (r *fakeRepo) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
 	_, _, _, _ = ctx, userID, cursor, limit
 	return domain.FileList{}, nil

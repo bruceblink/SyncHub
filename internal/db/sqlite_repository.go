@@ -242,6 +242,38 @@ func (r *SQLiteRepository) ListFiles(ctx context.Context, userID string, parentI
 	return result, nil
 }
 
+func (r *SQLiteRepository) SearchFiles(ctx context.Context, userID, query, cursor string, limit int32) (domain.FileList, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	pattern := "%" + escapeSQLiteLike(query) + "%"
+	rows, err := r.db.QueryContext(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes where user_id = ? and deleted_at is null and (name like ? escape '\' or path like ? escape '\') and (? = '' or id > ?)
+		order by id limit ?`, userID, pattern, pattern, cursor, cursor, limit+1)
+	if err != nil {
+		return domain.FileList{}, wrapSQLiteDBErr(err)
+	}
+	defer rows.Close()
+	items := []domain.FileNode{}
+	for rows.Next() {
+		var node domain.FileNode
+		if err := rows.Scan(fileNodeScan(&node)...); err != nil {
+			return domain.FileList{}, wrapSQLiteDBErr(err)
+		}
+		items = append(items, node)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.FileList{}, wrapSQLiteDBErr(err)
+	}
+	result := domain.FileList{Items: items}
+	if len(items) > int(limit) {
+		result.Items = items[:limit]
+		result.NextCursor = result.Items[len(result.Items)-1].ID
+	}
+	return result, nil
+}
+
 func (r *SQLiteRepository) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
@@ -1275,6 +1307,10 @@ func isDescendantPath(path, parent string) bool {
 func escapeSQLiteLikePrefix(value string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return replacer.Replace(value)
+}
+
+func escapeSQLiteLike(value string) string {
+	return escapeSQLiteLikePrefix(value)
 }
 
 func wrapSQLiteNotFound(err error, message string) error {

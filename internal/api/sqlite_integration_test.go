@@ -173,6 +173,58 @@ func TestSQLiteTrashListsAndRestoresDeletedDirectory(t *testing.T) {
 	}
 }
 
+func TestSQLiteSearchFilesMatchesNameAndPathWithoutDeletedItems(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	server := New(authsvc.NewService(repo, "test-secret", time.Minute, time.Hour), filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour), repo)
+	registered := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "search@example.com", "password": "password123"})
+	var auth struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, registered, &auth)
+	token := auth.Data.Tokens.AccessToken
+	for _, path := range []string{"/reports", "/reports/q1-budget", "/archive"} {
+		response := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": path})
+		if response.Code != http.StatusCreated {
+			t.Fatalf("create %s = %d: %s", path, response.Code, response.Body.String())
+		}
+	}
+	search := doJSON(t, server, http.MethodGet, "/api/v1/files/search?q=budget", token, nil)
+	if search.Code != http.StatusOK || !bytes.Contains(search.Body.Bytes(), []byte(`"path":"/reports/q1-budget"`)) {
+		t.Fatalf("search = %d: %s", search.Code, search.Body.String())
+	}
+	byPath := doJSON(t, server, http.MethodGet, "/api/v1/files/search?q=reports", token, nil)
+	if byPath.Code != http.StatusOK || !bytes.Contains(byPath.Body.Bytes(), []byte(`"path":"/reports/q1-budget"`)) {
+		t.Fatalf("path search = %d: %s", byPath.Code, byPath.Body.String())
+	}
+	var item struct {
+		Data struct {
+			Items []struct {
+				ID      string `json:"id"`
+				Path    string `json:"path"`
+				Version int64  `json:"version"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	decodeBody(t, search, &item)
+	deleted := doJSON(t, server, http.MethodDelete, "/api/v1/files/"+item.Data.Items[0].ID, token, map[string]any{"base_version": item.Data.Items[0].Version})
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	search = doJSON(t, server, http.MethodGet, "/api/v1/files/search?q=budget", token, nil)
+	if search.Code != http.StatusOK || bytes.Contains(search.Body.Bytes(), []byte(`q1-budget`)) {
+		t.Fatalf("deleted search = %d: %s", search.Code, search.Body.String())
+	}
+}
+
 func TestSQLiteUploadConflictRecordsSyncConflict(t *testing.T) {
 	ctx := context.Background()
 	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

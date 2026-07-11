@@ -179,6 +179,37 @@ func (r *Repository) ListFiles(ctx context.Context, userID string, parentID *str
 	return result, nil
 }
 
+func (r *Repository) SearchFiles(ctx context.Context, userID, query, cursor string, limit int32) (domain.FileList, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, `
+		select id, user_id, parent_id, name, path, node_type, current_version_id, size, sha256, storage_key, version, deleted_at, created_at, updated_at
+		from file_nodes where user_id = $1 and deleted_at is null and (name ilike '%' || $2 || '%' or path ilike '%' || $2 || '%') and ($3 = '' or id > $3::uuid)
+		order by id limit $4`, userID, query, cursor, limit+1)
+	if err != nil {
+		return domain.FileList{}, wrapDBErr(err)
+	}
+	defer rows.Close()
+	items := []domain.FileNode{}
+	for rows.Next() {
+		var node domain.FileNode
+		if err := rows.Scan(fileNodeScan(&node)...); err != nil {
+			return domain.FileList{}, wrapDBErr(err)
+		}
+		items = append(items, node)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.FileList{}, wrapDBErr(err)
+	}
+	result := domain.FileList{Items: items}
+	if len(items) > int(limit) {
+		result.Items = items[:limit]
+		result.NextCursor = result.Items[len(result.Items)-1].ID
+	}
+	return result, nil
+}
+
 func (r *Repository) ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100

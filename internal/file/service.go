@@ -20,6 +20,7 @@ type Repository interface {
 	GetFileByID(ctx context.Context, userID, fileID string) (domain.FileNode, error)
 	GetFileByPath(ctx context.Context, userID, path string) (domain.FileNode, error)
 	ListFiles(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error)
+	SearchFiles(ctx context.Context, userID, query, cursor string, limit int32) (domain.FileList, error)
 	ListDeletedFiles(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error)
 	ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error)
 	PinFileVersion(ctx context.Context, userID, fileID string, version int64) (domain.FileVersion, error)
@@ -76,6 +77,14 @@ func (s *Service) GetByPath(ctx context.Context, userID, p string) (domain.FileN
 
 func (s *Service) List(ctx context.Context, userID string, parentID *string, cursor string, limit int32) (domain.FileList, error) {
 	return s.repo.ListFiles(ctx, userID, parentID, strings.TrimSpace(cursor), limit)
+}
+
+func (s *Service) Search(ctx context.Context, userID, query, cursor string, limit int32) (domain.FileList, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return domain.FileList{}, domain.E(domain.CodeInvalidArgument, "search query is required", nil)
+	}
+	return s.repo.SearchFiles(ctx, userID, query, strings.TrimSpace(cursor), limit)
 }
 
 func (s *Service) ListDeleted(ctx context.Context, userID, cursor string, limit int32) (domain.FileList, error) {
