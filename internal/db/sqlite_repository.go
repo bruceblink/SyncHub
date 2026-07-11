@@ -372,6 +372,34 @@ func (r *SQLiteRepository) RestoreDeletedFile(ctx context.Context, userID, fileI
 	return node, nil
 }
 
+func (r *SQLiteRepository) PurgeDeletedFile(ctx context.Context, userID, fileID string) error {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return wrapSQLiteDBErr(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var rootPath string
+	err = tx.QueryRowContext(ctx, `select path from file_nodes where user_id = ? and id = ? and deleted_at is not null`, userID, fileID).Scan(&rootPath)
+	if err != nil {
+		return wrapSQLiteNotFound(err, "deleted file not found")
+	}
+	pathPattern := escapeSQLiteLikePrefix(rootPath) + "/%"
+	if _, err = tx.ExecContext(ctx, `update file_nodes set current_version_id = null, parent_id = null where user_id = ? and deleted_at is not null and (id = ? or path like ? escape '\')`, userID, fileID, pathPattern); err != nil {
+		return wrapSQLiteDBErr(err)
+	}
+	result, err := tx.ExecContext(ctx, `delete from file_nodes where user_id = ? and deleted_at is not null and (id = ? or path like ? escape '\')`, userID, fileID, pathPattern)
+	if err != nil {
+		return wrapSQLiteDBErr(err)
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil {
+		return wrapSQLiteDBErr(affectedErr)
+	} else if affected == 0 {
+		return domain.E(domain.CodeNotFound, "deleted file not found", nil)
+	}
+	return wrapSQLiteDBErr(tx.Commit())
+}
+
 func (r *SQLiteRepository) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100

@@ -176,6 +176,11 @@ func (r *fakeRepo) RestoreDeletedFile(ctx context.Context, userID, fileID string
 	return domain.FileNode{ID: fileID}, nil
 }
 
+func (r *fakeRepo) PurgeDeletedFile(ctx context.Context, userID, fileID string) error {
+	_, _, _ = ctx, userID, fileID
+	return nil
+}
+
 func (r *fakeRepo) CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error) {
 	_ = ctx
 	r.createdUpload = true

@@ -30,6 +30,7 @@ type Repository interface {
 	MoveFile(ctx context.Context, userID, fileID, newPath, newName string, newParentID *string, baseVersion *int64, sourceDeviceID *string) (domain.FileNode, error)
 	DeleteFile(ctx context.Context, userID, fileID string, baseVersion *int64, sourceDeviceID *string) error
 	RestoreDeletedFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) (domain.FileNode, error)
+	PurgeDeletedFile(ctx context.Context, userID, fileID string) error
 	CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error)
 	GetUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error)
 	AbortUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error)
@@ -187,6 +188,13 @@ func (s *Service) RestoreDeleted(ctx context.Context, userID, fileID string, sou
 		return domain.FileNode{}, domain.E(domain.CodeInvalidArgument, "file id is required", nil)
 	}
 	return s.repo.RestoreDeletedFile(ctx, userID, fileID, cleanOptionalString(sourceDeviceID))
+}
+
+func (s *Service) PurgeDeleted(ctx context.Context, userID, fileID string) error {
+	if strings.TrimSpace(fileID) == "" {
+		return domain.E(domain.CodeInvalidArgument, "file id is required", nil)
+	}
+	return s.repo.PurgeDeletedFile(ctx, userID, fileID)
 }
 
 func (s *Service) InitUpload(ctx context.Context, userID, targetPath string, size int64, sha256sum string, requestedChunkSize int64, baseVersion *int64, idempotencyKey, sourceDeviceID string) (domain.UploadSession, error) {

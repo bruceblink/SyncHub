@@ -153,6 +153,7 @@ func (s *Server) routes() {
 	protected.GET("/account/usage", s.usage)
 	protected.GET("/trash", s.listTrash)
 	protected.POST("/trash/:id/restore", s.restoreTrash)
+	protected.DELETE("/trash/:id", s.purgeTrash)
 	protected.POST("/files/directories", s.createDirectory)
 	protected.PATCH("/files/:id", s.moveFile)
 	protected.DELETE("/files/:id", s.deleteFile)
@@ -339,6 +340,14 @@ func (s *Server) restoreTrash(c *gin.Context) {
 		return
 	}
 	ok(c, fileDTO(node))
+}
+
+func (s *Server) purgeTrash(c *gin.Context) {
+	if err := s.files.PurgeDeleted(c.Request.Context(), userID(c), c.Param("id")); err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, gin.H{"purged": true})
 }
 
 func (s *Server) listFileVersions(c *gin.Context) {

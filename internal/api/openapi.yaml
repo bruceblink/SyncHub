@@ -196,6 +196,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileListResponse"
+  /api/v1/trash:
+    get:
+      tags: [File]
+      summary: List top-level deleted files and directories
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: Deleted file list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileListResponse"
+  /api/v1/trash/{id}:
+    delete:
+      tags: [File]
+      summary: Permanently delete a trashed file or directory tree
+      description: Deletes metadata and version history. Immutable storage objects are retained for asynchronous garbage collection.
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+      responses:
+        "200":
+          description: The selected trash item was permanently deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
+        "404":
+          description: Deleted file not found.
+  /api/v1/trash/{id}/restore:
+    post:
+      tags: [File]
+      summary: Restore a trashed file or directory tree
+      parameters:
+        - $ref: "#/components/parameters/FileID"
+      responses:
+        "200":
+          description: Restored file metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileResponse"
   /api/v1/files/by-path:
     get:
       tags: [File]

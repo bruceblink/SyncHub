@@ -238,6 +238,11 @@ func (r *downloadFileRepo) RestoreDeletedFile(ctx context.Context, userID, fileI
 	return domain.FileNode{}, errNotImplemented()
 }
 
+func (r *downloadFileRepo) PurgeDeletedFile(ctx context.Context, userID, fileID string) error {
+	_, _, _ = ctx, userID, fileID
+	return errNotImplemented()
+}
+
 func (r *downloadFileRepo) CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error) {
 	_, _ = ctx, s
 	return domain.UploadSession{}, errNotImplemented()

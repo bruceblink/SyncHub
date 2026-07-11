@@ -174,6 +174,59 @@ func TestSQLiteTrashListsAndRestoresDeletedDirectory(t *testing.T) {
 	}
 }
 
+func TestSQLiteTrashPurgeDeletesOnlySelectedDirectoryTree(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	server := New(authsvc.NewService(repo, "test-secret", time.Minute, time.Hour), filesvc.NewService(repo, storage.NewLocal(t.TempDir()), 1024, time.Hour), repo)
+	register := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{"email": "purge@example.com", "password": "password123"})
+	var auth struct {
+		Data struct {
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, register, &auth)
+	token := auth.Data.Tokens.AccessToken
+
+	created := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/deleted"})
+	var root struct {
+		Data struct {
+			ID      string `json:"id"`
+			Version int64  `json:"version"`
+		} `json:"data"`
+	}
+	decodeBody(t, created, &root)
+	if child := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/deleted/nested"}); child.Code != http.StatusCreated {
+		t.Fatalf("create child = %d: %s", child.Code, child.Body.String())
+	}
+	similar := doJSON(t, server, http.MethodPost, "/api/v1/files/directories", token, map[string]any{"path": "/deleted-copy"})
+	if similar.Code != http.StatusCreated {
+		t.Fatalf("create similar = %d: %s", similar.Code, similar.Body.String())
+	}
+	if deleted := doJSON(t, server, http.MethodDelete, "/api/v1/files/"+root.Data.ID, token, map[string]any{"base_version": root.Data.Version}); deleted.Code != http.StatusOK {
+		t.Fatalf("delete = %d: %s", deleted.Code, deleted.Body.String())
+	}
+
+	purged := doJSON(t, server, http.MethodDelete, "/api/v1/trash/"+root.Data.ID, token, nil)
+	if purged.Code != http.StatusOK || !bytes.Contains(purged.Body.Bytes(), []byte(`"purged":true`)) {
+		t.Fatalf("purge = %d: %s", purged.Code, purged.Body.String())
+	}
+	if restore := doJSON(t, server, http.MethodPost, "/api/v1/trash/"+root.Data.ID+"/restore", token, map[string]any{}); restore.Code != http.StatusNotFound {
+		t.Fatalf("restore purged = %d: %s", restore.Code, restore.Body.String())
+	}
+	if repeated := doJSON(t, server, http.MethodDelete, "/api/v1/trash/"+root.Data.ID, token, nil); repeated.Code != http.StatusNotFound {
+		t.Fatalf("repeat purge = %d: %s", repeated.Code, repeated.Body.String())
+	}
+	if unaffected := doJSON(t, server, http.MethodGet, "/api/v1/files/by-path?path=/deleted-copy", token, nil); unaffected.Code != http.StatusOK {
+		t.Fatalf("similar path affected = %d: %s", unaffected.Code, unaffected.Body.String())
+	}
+}
+
 func TestSQLiteSearchFilesMatchesNameAndPathWithoutDeletedItems(t *testing.T) {
 	ctx := context.Background()
 	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))

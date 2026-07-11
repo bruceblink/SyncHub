@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/bruceblink/SyncHub/internal/domain"
@@ -302,6 +303,38 @@ func (r *Repository) RestoreDeletedFile(ctx context.Context, userID, fileID stri
 		return domain.FileNode{}, wrapDBErr(err)
 	}
 	return node, nil
+}
+
+func (r *Repository) PurgeDeletedFile(ctx context.Context, userID, fileID string) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var rootPath string
+	err = tx.QueryRow(ctx, `select path from file_nodes where user_id = $1 and id = $2 and deleted_at is not null for update`, userID, fileID).Scan(&rootPath)
+	if err != nil {
+		return wrapNotFound(err, "deleted file not found")
+	}
+	pathPattern := escapePostgresLikePrefix(rootPath) + "/%"
+	if _, err = tx.Exec(ctx, `
+		update file_nodes set current_version_id = null, parent_id = null
+		where user_id = $1 and deleted_at is not null and (id = $2 or path like $3 escape '\')
+	`, userID, fileID, pathPattern); err != nil {
+		return wrapDBErr(err)
+	}
+	result, err := tx.Exec(ctx, `
+		delete from file_nodes
+		where user_id = $1 and deleted_at is not null and (id = $2 or path like $3 escape '\')
+	`, userID, fileID, pathPattern)
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	if result.RowsAffected() == 0 {
+		return domain.E(domain.CodeNotFound, "deleted file not found", nil)
+	}
+	return wrapDBErr(tx.Commit(ctx))
 }
 
 func (r *Repository) ListFileVersions(ctx context.Context, userID, fileID string, limit int32) ([]domain.FileVersion, error) {
@@ -1132,6 +1165,10 @@ func wrapDBErr(err error) error {
 		return nil
 	}
 	return domain.E(domain.CodeInternal, "database error", err)
+}
+
+func escapePostgresLikePrefix(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }
 
 func isUniqueViolation(err error) bool {

@@ -319,6 +319,32 @@ button {
   background: #8fd5ba;
   border-radius: inherit;
 }
+.trash-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+.danger-icon {
+  color: #b13737;
+}
+.danger-icon:hover {
+  background: #fae5e5;
+}
+.dialog {
+  position: relative;
+}
+.dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+}
 .workspace {
   min-width: 0;
   padding: 34px 44px;
