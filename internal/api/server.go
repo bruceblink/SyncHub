@@ -635,7 +635,15 @@ func (s *Server) heartbeatDevice(c *gin.Context) {
 		fail(c, domain.E(domain.CodeInternal, "sync service is not configured", nil))
 		return
 	}
-	device, err := s.sync.Heartbeat(c.Request.Context(), userID(c), c.Param("id"))
+	var req struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+		return
+	}
+	device, err := s.sync.Heartbeat(c.Request.Context(), userID(c), c.Param("id"), req.Status, req.Error)
 	if err != nil {
 		fail(c, err)
 		return
@@ -915,7 +923,7 @@ func chunkDTO(chunk domain.UploadChunk) gin.H {
 }
 
 func deviceDTO(device domain.Device) gin.H {
-	return gin.H{"id": device.ID, "name": device.Name, "platform": device.Platform, "last_seen_at": device.LastSeenAt, "last_applied_change_id": device.LastAppliedChangeID, "created_at": device.CreatedAt, "updated_at": device.UpdatedAt}
+	return gin.H{"id": device.ID, "name": device.Name, "platform": device.Platform, "last_seen_at": device.LastSeenAt, "last_sync_at": device.LastSyncAt, "last_sync_status": device.LastSyncStatus, "last_sync_error": device.LastSyncError, "last_applied_change_id": device.LastAppliedChangeID, "created_at": device.CreatedAt, "updated_at": device.UpdatedAt}
 }
 
 func changeEventDTO(event domain.ChangeEvent) gin.H {

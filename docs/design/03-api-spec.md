@@ -263,6 +263,14 @@ Request:
 
 `POST /api/v1/devices/{device_id}/heartbeat`
 
+请求体可为空对象，仅更新设备在线时间。同步客户端在一个完整同步周期结束后可额外上报结果：
+
+```json
+{"status":"error","error":"connection timed out"}
+```
+
+`status` 仅允许 `success` 或 `error`。设备响应包含 `last_sync_at`、`last_sync_status` 和最多 1000 字节的 `last_sync_error`；成功结果会清除之前的错误。
+
 ### 撤销设备
 
 `DELETE /api/v1/devices/{device_id}`

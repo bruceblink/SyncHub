@@ -319,9 +319,23 @@ func TestSQLiteSyncDeviceAndChangeFeed(t *testing.T) {
 		t.Fatalf("ack cursor = %d, want %d", ackBody.Data.LastAppliedChangeID, sourceBody.Data.NextCursor)
 	}
 
-	heartbeatResp := doJSON(t, server, http.MethodPost, "/api/v1/devices/"+deviceBody.Data.ID+"/heartbeat", token, map[string]any{})
+	heartbeatResp := doJSON(t, server, http.MethodPost, "/api/v1/devices/"+deviceBody.Data.ID+"/heartbeat", token, map[string]any{
+		"status": "error",
+		"error":  "connection timed out",
+	})
 	if heartbeatResp.Code != http.StatusOK {
 		t.Fatalf("heartbeat status = %d body = %s", heartbeatResp.Code, heartbeatResp.Body.String())
+	}
+	var heartbeatBody struct {
+		Data struct {
+			LastSyncAt     *time.Time `json:"last_sync_at"`
+			LastSyncStatus *string    `json:"last_sync_status"`
+			LastSyncError  *string    `json:"last_sync_error"`
+		} `json:"data"`
+	}
+	decodeBody(t, heartbeatResp, &heartbeatBody)
+	if heartbeatBody.Data.LastSyncAt == nil || heartbeatBody.Data.LastSyncStatus == nil || *heartbeatBody.Data.LastSyncStatus != "error" || heartbeatBody.Data.LastSyncError == nil || *heartbeatBody.Data.LastSyncError != "connection timed out" {
+		t.Fatalf("heartbeat data = %#v", heartbeatBody.Data)
 	}
 
 	revokeResp := doJSON(t, server, http.MethodDelete, "/api/v1/devices/"+secondDeviceBody.Data.ID, token, nil)

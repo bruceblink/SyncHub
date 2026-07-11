@@ -109,6 +109,9 @@ create table if not exists devices (
     name text not null,
     platform text not null,
     last_seen_at datetime,
+    last_sync_at datetime,
+    last_sync_status text check (last_sync_status is null or last_sync_status in ('success', 'error')),
+    last_sync_error text,
     last_applied_change_id integer not null default 0,
     created_at datetime not null default current_timestamp,
     updated_at datetime not null default current_timestamp

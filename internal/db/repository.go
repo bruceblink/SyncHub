@@ -903,7 +903,7 @@ func (r *Repository) CreateDevice(ctx context.Context, userID, name, platform st
 	err := r.pool.QueryRow(ctx, `
 		insert into devices (id, user_id, name, platform, last_applied_change_id)
 		values ($1, $2, $3, $4, $5)
-		returning id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+		returning id, user_id, name, platform, last_seen_at, last_sync_at, last_sync_status, last_sync_error, last_applied_change_id, created_at, updated_at
 	`, device.ID, device.UserID, device.Name, device.Platform, device.LastAppliedChangeID).Scan(deviceScan(&device)...)
 	return device, wrapDBErr(err)
 }
@@ -913,7 +913,7 @@ func (r *Repository) ListDevices(ctx context.Context, userID string, limit int32
 		limit = 100
 	}
 	rows, err := r.pool.Query(ctx, `
-		select id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+		select id, user_id, name, platform, last_seen_at, last_sync_at, last_sync_status, last_sync_error, last_applied_change_id, created_at, updated_at
 		from devices
 		where user_id = $1
 		order by updated_at desc, id desc
@@ -946,14 +946,18 @@ func (r *Repository) DeleteDevice(ctx context.Context, userID, deviceID string) 
 	return nil
 }
 
-func (r *Repository) HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
+func (r *Repository) HeartbeatDevice(ctx context.Context, userID, deviceID, status, syncError string) (domain.Device, error) {
 	var device domain.Device
 	err := r.pool.QueryRow(ctx, `
 		update devices
-		set last_seen_at = now(), updated_at = now()
+		set last_seen_at = now(),
+			last_sync_at = case when $3 = '' then last_sync_at else now() end,
+			last_sync_status = coalesce(nullif($3, ''), last_sync_status),
+			last_sync_error = case when $3 = '' then last_sync_error when $3 = 'success' then null else nullif($4, '') end,
+			updated_at = now()
 		where user_id = $1 and id = $2
-		returning id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
-	`, userID, deviceID).Scan(deviceScan(&device)...)
+		returning id, user_id, name, platform, last_seen_at, last_sync_at, last_sync_status, last_sync_error, last_applied_change_id, created_at, updated_at
+	`, userID, deviceID, status, syncError).Scan(deviceScan(&device)...)
 	return device, wrapNotFound(err, "device not found")
 }
 
@@ -1044,7 +1048,7 @@ func (r *Repository) AckDevice(ctx context.Context, userID, deviceID string, las
 		update devices
 		set last_applied_change_id = $3, updated_at = now()
 		where user_id = $1 and id = $2
-		returning id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+		returning id, user_id, name, platform, last_seen_at, last_sync_at, last_sync_status, last_sync_error, last_applied_change_id, created_at, updated_at
 	`, userID, deviceID, lastAppliedChangeID).Scan(deviceScan(&device)...)
 	return device, wrapNotFound(err, "device not found")
 }
@@ -1134,7 +1138,7 @@ func (r *Repository) UpdateSyncConflictResolution(ctx context.Context, userID, c
 func (r *Repository) getDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
 	var device domain.Device
 	err := r.pool.QueryRow(ctx, `
-		select id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+		select id, user_id, name, platform, last_seen_at, last_sync_at, last_sync_status, last_sync_error, last_applied_change_id, created_at, updated_at
 		from devices
 		where user_id = $1 and id = $2
 	`, userID, deviceID).Scan(deviceScan(&device)...)
@@ -1191,7 +1195,7 @@ func uploadSessionScan(s *domain.UploadSession) []any {
 }
 
 func deviceScan(d *domain.Device) []any {
-	return []any{&d.ID, &d.UserID, &d.Name, &d.Platform, &d.LastSeenAt, &d.LastAppliedChangeID, &d.CreatedAt, &d.UpdatedAt}
+	return []any{&d.ID, &d.UserID, &d.Name, &d.Platform, &d.LastSeenAt, &d.LastSyncAt, &d.LastSyncStatus, &d.LastSyncError, &d.LastAppliedChangeID, &d.CreatedAt, &d.UpdatedAt}
 }
 
 func changeEventScan(e *domain.ChangeEvent) []any {

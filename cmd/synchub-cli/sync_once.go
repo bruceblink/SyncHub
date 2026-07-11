@@ -13,7 +13,7 @@ import (
 	"github.com/bruceblink/SyncHub/pkg/client"
 )
 
-func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) (runErr error) {
 	fs := flag.NewFlagSet("sync once", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	rootPath := fs.String("path", ".", "local workspace root")
@@ -102,6 +102,11 @@ func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err := ensureSyncOnceDevice(ctx, *rootPath, *workspaceConfigPath, *configPath, *deviceName, *devicePlatform); err != nil {
 		return err
 	}
+	defer func() {
+		if err := reportSyncOnceResult(ctx, *rootPath, *workspaceConfigPath, *configPath, runErr); err != nil {
+			fmt.Fprintf(stderr, "report sync result failed: %v\n", err)
+		}
+	}()
 	pushArgs := append([]string{}, commonArgs...)
 	if *jsonOutput {
 		pushArgs = append(pushArgs, "--json")
@@ -151,6 +156,32 @@ func runSyncOnce(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		})
 	}
 	return runSyncPullWithDeviceEnsure(ctx, pullArgs, stdout, stderr, false)
+}
+
+func reportSyncOnceResult(ctx context.Context, rootPath, workspaceConfigPath, configPath string, syncErr error) error {
+	_, workspace, _, err := loadWorkspace(rootPath, workspaceConfigPath)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(workspace.DeviceID) == "" {
+		return nil
+	}
+	loginConfig, err := readConfigWithRefresh(ctx, configPath)
+	if err != nil {
+		return err
+	}
+	serverURL := workspace.ServerURL
+	if strings.TrimSpace(serverURL) == "" {
+		serverURL = loginConfig.ServerURL
+	}
+	status := "success"
+	errorMessage := ""
+	if syncErr != nil {
+		status = "error"
+		errorMessage = syncErr.Error()
+	}
+	_, err = client.New(serverURL).ReportDeviceSync(ctx, loginConfig.Tokens.AccessToken, workspace.DeviceID, status, errorMessage)
+	return err
 }
 
 type syncOnceSnapshot struct {

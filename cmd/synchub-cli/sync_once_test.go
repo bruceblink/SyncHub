@@ -25,6 +25,7 @@ func TestRunSyncOncePushesAndPulls(t *testing.T) {
 	}
 	registeredDevice := false
 	listedChanges := false
+	reportedSuccess := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer access" {
 			t.Fatalf("authorization = %q", got)
@@ -72,6 +73,23 @@ func TestRunSyncOncePushesAndPulls(t *testing.T) {
 				t.Fatalf("device_id = %q", got)
 			}
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[],"next_cursor":0}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices/dev_1/heartbeat":
+			var req struct {
+				Status string `json:"status"`
+				Error  string `json:"error"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode sync result: %v", err)
+			}
+			if req.Status == "" {
+				_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
+				break
+			}
+			if req.Status != "success" || req.Error != "" {
+				t.Fatalf("sync result = %#v", req)
+			}
+			reportedSuccess = true
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_sync_status":"success","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
 		default:
 			t.Fatalf("request = %s %s", r.Method, r.URL.String())
 		}
@@ -113,8 +131,8 @@ func TestRunSyncOncePushesAndPulls(t *testing.T) {
 			t.Fatalf("stdout missing %q: %s", want, stdout.String())
 		}
 	}
-	if !registeredDevice || !listedChanges {
-		t.Fatalf("sync once did not pull: registered=%v listed=%v", registeredDevice, listedChanges)
+	if !registeredDevice || !listedChanges || !reportedSuccess {
+		t.Fatalf("sync once incomplete: registered=%v listed=%v reported=%v", registeredDevice, listedChanges, reportedSuccess)
 	}
 	if _, err := readManifest(filepath.Join(root, ".synchub", "manifest.json")); err != nil {
 		t.Fatalf("read manifest after sync once: %v", err)
@@ -163,6 +181,8 @@ func TestRunSyncOnceCanOutputJSON(t *testing.T) {
 				t.Fatalf("device_id = %q", got)
 			}
 			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"items":[],"next_cursor":0}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/devices/dev_1/heartbeat":
+			_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"id":"dev_1","name":"test-device","platform":"windows","last_applied_change_id":0,"created_at":"2026-06-30T00:00:00Z","updated_at":"2026-06-30T00:00:00Z"}}`))
 		default:
 			t.Fatalf("request = %s %s", r.Method, r.URL.String())
 		}

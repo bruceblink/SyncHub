@@ -120,6 +120,9 @@ type Device struct {
 	Name                string     `json:"name"`
 	Platform            string     `json:"platform"`
 	LastSeenAt          *time.Time `json:"last_seen_at"`
+	LastSyncAt          *time.Time `json:"last_sync_at"`
+	LastSyncStatus      *string    `json:"last_sync_status"`
+	LastSyncError       *string    `json:"last_sync_error"`
 	LastAppliedChangeID int64      `json:"last_applied_change_id"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at"`
@@ -517,9 +520,16 @@ func (c *Client) ListDevices(ctx context.Context, accessToken string, limit int3
 }
 
 func (c *Client) HeartbeatDevice(ctx context.Context, accessToken, deviceID string) (Device, error) {
+	return c.ReportDeviceSync(ctx, accessToken, deviceID, "", "")
+}
+
+func (c *Client) ReportDeviceSync(ctx context.Context, accessToken, deviceID, status, syncError string) (Device, error) {
 	var data Device
 	path := fmt.Sprintf("/api/v1/devices/%s/heartbeat", url.PathEscape(deviceID))
-	err := c.postJSONAuth(ctx, path, accessToken, map[string]any{}, nil, &data)
+	err := c.postJSONAuth(ctx, path, accessToken, map[string]any{
+		"status": status,
+		"error":  syncError,
+	}, nil, &data)
 	return data, err
 }
 

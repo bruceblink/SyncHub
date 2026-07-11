@@ -1020,7 +1020,7 @@ func (r *SQLiteRepository) ListDevices(ctx context.Context, userID string, limit
 		limit = 100
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		select id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+		select id, user_id, name, platform, last_seen_at, last_sync_at, last_sync_status, last_sync_error, last_applied_change_id, created_at, updated_at
 		from devices
 		where user_id = ?
 		order by updated_at desc, id desc
@@ -1053,13 +1053,17 @@ func (r *SQLiteRepository) DeleteDevice(ctx context.Context, userID, deviceID st
 	return nil
 }
 
-func (r *SQLiteRepository) HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
+func (r *SQLiteRepository) HeartbeatDevice(ctx context.Context, userID, deviceID, status, syncError string) (domain.Device, error) {
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		update devices
-		set last_seen_at = ?, updated_at = ?
+		set last_seen_at = ?,
+			last_sync_at = case when ? = '' then last_sync_at else ? end,
+			last_sync_status = coalesce(nullif(?, ''), last_sync_status),
+			last_sync_error = case when ? = '' then last_sync_error when ? = 'success' then null else nullif(?, '') end,
+			updated_at = ?
 		where user_id = ? and id = ?
-	`, now, now, userID, deviceID)
+	`, now, status, now, status, status, status, syncError, now, userID, deviceID)
 	if err != nil {
 		return domain.Device{}, wrapSQLiteDBErr(err)
 	}
@@ -1271,7 +1275,7 @@ func (r *SQLiteRepository) getSyncConflict(ctx context.Context, conflictID strin
 func (r *SQLiteRepository) getDevice(ctx context.Context, userID, deviceID string) (domain.Device, error) {
 	var device domain.Device
 	err := r.db.QueryRowContext(ctx, `
-		select id, user_id, name, platform, last_seen_at, last_applied_change_id, created_at, updated_at
+		select id, user_id, name, platform, last_seen_at, last_sync_at, last_sync_status, last_sync_error, last_applied_change_id, created_at, updated_at
 		from devices
 		where user_id = ? and id = ?
 	`, userID, deviceID).Scan(deviceScan(&device)...)
@@ -1400,6 +1404,24 @@ func ensureSQLiteSchemaUpgrades(ctx context.Context, conn *sql.DB) error {
 	if !hasSourceDeviceID {
 		if _, err := conn.ExecContext(ctx, "alter table upload_sessions add column source_device_id text"); err != nil {
 			return err
+		}
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "last_sync_at", definition: "datetime"},
+		{name: "last_sync_status", definition: "text"},
+		{name: "last_sync_error", definition: "text"},
+	} {
+		exists, err := sqliteColumnExists(ctx, conn, "devices", column.name)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := conn.ExecContext(ctx, "alter table devices add column "+column.name+" "+column.definition); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

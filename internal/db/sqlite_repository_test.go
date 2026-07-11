@@ -397,8 +397,26 @@ func TestSQLiteListDevices(t *testing.T) {
 	if _, err := repo.CreateDevice(ctx, otherUser.ID, "other", "linux"); err != nil {
 		t.Fatalf("create other device: %v", err)
 	}
-	if _, err := repo.HeartbeatDevice(ctx, user.ID, first.ID); err != nil {
+	heartbeat, err := repo.HeartbeatDevice(ctx, user.ID, first.ID, "error", "connection timed out")
+	if err != nil {
 		t.Fatalf("heartbeat first device: %v", err)
+	}
+	if heartbeat.LastSyncAt == nil || heartbeat.LastSyncStatus == nil || *heartbeat.LastSyncStatus != "error" || heartbeat.LastSyncError == nil || *heartbeat.LastSyncError != "connection timed out" {
+		t.Fatalf("failed sync heartbeat = %#v", heartbeat)
+	}
+	heartbeat, err = repo.HeartbeatDevice(ctx, user.ID, first.ID, "success", "ignored")
+	if err != nil {
+		t.Fatalf("successful heartbeat first device: %v", err)
+	}
+	if heartbeat.LastSyncStatus == nil || *heartbeat.LastSyncStatus != "success" || heartbeat.LastSyncError != nil {
+		t.Fatalf("successful sync heartbeat = %#v", heartbeat)
+	}
+	heartbeat, err = repo.HeartbeatDevice(ctx, user.ID, first.ID, "", "")
+	if err != nil {
+		t.Fatalf("online heartbeat first device: %v", err)
+	}
+	if heartbeat.LastSyncStatus == nil || *heartbeat.LastSyncStatus != "success" || heartbeat.LastSyncError != nil {
+		t.Fatalf("online heartbeat replaced sync result = %#v", heartbeat)
 	}
 
 	devices, err := repo.ListDevices(ctx, user.ID, 10)

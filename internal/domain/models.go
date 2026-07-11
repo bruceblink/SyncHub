@@ -112,6 +112,9 @@ type Device struct {
 	Name                string
 	Platform            string
 	LastSeenAt          *time.Time
+	LastSyncAt          *time.Time
+	LastSyncStatus      *string
+	LastSyncError       *string
 	LastAppliedChangeID int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time

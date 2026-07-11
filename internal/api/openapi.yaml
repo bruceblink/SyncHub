@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: REST API for SyncHub workspace synchronization.
 servers:
-  - url: http://localhost:8765
+  - url: https://sync.likanug.app
 security:
   - bearerAuth: []
 tags:
@@ -207,6 +207,21 @@ paths:
           description: ID of the last deleted item from the previous page.
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [success, error]
+                  description: Optional result of a completed sync cycle.
+                error:
+                  type: string
+                  maxLength: 1000
+                  description: Error summary when status is error.
         - name: page_size
           in: query
           schema:
@@ -1104,6 +1119,17 @@ components:
         last_seen_at:
           type: string
           format: date-time
+          nullable: true
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_sync_status:
+          type: string
+          enum: [success, error]
+          nullable: true
+        last_sync_error:
+          type: string
           nullable: true
         last_applied_change_id:
           type: integer

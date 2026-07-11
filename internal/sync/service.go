@@ -11,7 +11,7 @@ type Repository interface {
 	CreateDevice(ctx context.Context, userID, name, platform string) (domain.Device, error)
 	ListDevices(ctx context.Context, userID string, limit int32) ([]domain.Device, error)
 	DeleteDevice(ctx context.Context, userID, deviceID string) error
-	HeartbeatDevice(ctx context.Context, userID, deviceID string) (domain.Device, error)
+	HeartbeatDevice(ctx context.Context, userID, deviceID, status, syncError string) (domain.Device, error)
 	ListChanges(ctx context.Context, userID, deviceID string, afterChangeID int64, limit int32) ([]domain.ChangeEvent, error)
 	ListActivity(ctx context.Context, userID, fileID string, beforeEventID int64, limit int32) ([]domain.ChangeEvent, error)
 	AckDevice(ctx context.Context, userID, deviceID string, lastAppliedChangeID int64) (domain.Device, error)
@@ -51,11 +51,22 @@ func (s *Service) RevokeDevice(ctx context.Context, userID, deviceID string) err
 	return s.repo.DeleteDevice(ctx, userID, deviceID)
 }
 
-func (s *Service) Heartbeat(ctx context.Context, userID, deviceID string) (domain.Device, error) {
+func (s *Service) Heartbeat(ctx context.Context, userID, deviceID, status, syncError string) (domain.Device, error) {
 	if strings.TrimSpace(deviceID) == "" {
 		return domain.Device{}, domain.E(domain.CodeInvalidArgument, "device id is required", nil)
 	}
-	return s.repo.HeartbeatDevice(ctx, userID, deviceID)
+	status = strings.TrimSpace(status)
+	syncError = strings.TrimSpace(syncError)
+	if status != "" && status != "success" && status != "error" {
+		return domain.Device{}, domain.E(domain.CodeInvalidArgument, "status must be success or error", nil)
+	}
+	if status == "success" {
+		syncError = ""
+	}
+	if len(syncError) > 1000 {
+		syncError = syncError[:1000]
+	}
+	return s.repo.HeartbeatDevice(ctx, userID, deviceID, status, syncError)
 }
 
 func (s *Service) Changes(ctx context.Context, userID, deviceID string, afterChangeID int64, limit int32) ([]domain.ChangeEvent, error) {

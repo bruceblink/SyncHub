@@ -813,6 +813,28 @@ button {
   margin-left: auto;
   text-align: right;
 }
+
+.device-sync {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 150px;
+  color: #657a76;
+}
+
+.device-sync.success { color: #18745f; }
+.device-sync.error { color: #b53636; }
+.device-sync > div { display: grid; gap: 2px; min-width: 0; }
+.device-sync strong { font-size: 13px; }
+.device-sync small { color: #71817e; }
+.device-sync span {
+  max-width: 220px;
+  overflow: hidden;
+  color: #b53636;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .device-meta span {
   display: block;
   color: #52645e;

@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Laptop, MonitorCog, RefreshCw, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Laptop, MonitorCog, RefreshCw, Trash2, XCircle } from 'lucide-react'
 
 type Device = {
   id: string
   name: string
   platform: string
   last_seen_at: string | null
+  last_sync_at: string | null
+  last_sync_status: 'success' | 'error' | null
+  last_sync_error: string | null
   last_applied_change_id: number
 }
 
@@ -77,7 +80,7 @@ export function SyncStatus({ request, onError }: { request: APIRequest; onError:
     <div className="status-grid">
       <section className="status-section">
         <div className="section-title"><Laptop size={19} /><h2>已连接设备</h2><span>{devices.length}</span></div>
-        {loading ? <div className="empty compact-empty">正在读取设备...</div> : devices.length === 0 ? <div className="empty compact-empty"><MonitorCog size={30} /><strong>尚未注册设备</strong><span>桌面客户端开始同步后会显示在这里。</span></div> : <div>{devices.map((device) => <div className="device-row" key={device.id}><span className="device-icon"><Laptop size={19} /></span><div><strong>{device.name}</strong><small>{device.platform || '未知平台'}</small></div><div className="device-meta"><small>最近在线</small><span>{formatDate(device.last_seen_at)}</span><small>同步游标 {device.last_applied_change_id}</small></div><button className="icon-button device-revoke" title={`撤销 ${device.name}`} disabled={revokingID === device.id} onClick={() => void revoke(device)}><Trash2 size={17} /></button></div>)}</div>}
+        {loading ? <div className="empty compact-empty">正在读取设备...</div> : devices.length === 0 ? <div className="empty compact-empty"><MonitorCog size={30} /><strong>尚未注册设备</strong><span>桌面客户端开始同步后会显示在这里。</span></div> : <div>{devices.map((device) => <div className="device-row" key={device.id}><span className="device-icon"><Laptop size={19} /></span><div><strong>{device.name}</strong><small>{device.platform || '未知平台'}</small></div><div className="device-meta"><small>最近在线</small><span>{formatDate(device.last_seen_at)}</span><small>同步游标 {device.last_applied_change_id}</small></div><div className={`device-sync ${device.last_sync_status || 'unknown'}`}>{device.last_sync_status === 'success' ? <CheckCircle2 size={17} /> : device.last_sync_status === 'error' ? <XCircle size={17} /> : <MonitorCog size={17} />}<div><strong>{device.last_sync_status === 'success' ? '同步成功' : device.last_sync_status === 'error' ? '同步失败' : '尚未同步'}</strong><small>{formatDate(device.last_sync_at)}</small>{device.last_sync_error && <span title={device.last_sync_error}>{device.last_sync_error}</span>}</div></div><button className="icon-button device-revoke" title={`撤销 ${device.name}`} disabled={revokingID === device.id} onClick={() => void revoke(device)}><Trash2 size={17} /></button></div>)}</div>}
       </section>
       <section className="status-section">
         <div className="section-title"><AlertTriangle size={19} /><h2>待处理冲突</h2><span className={conflicts.length ? 'warning-count' : ''}>{conflicts.length}</span></div>
