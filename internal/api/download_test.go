@@ -248,6 +248,11 @@ func (r *downloadFileRepo) GetUploadSession(ctx context.Context, userID, uploadI
 	return domain.UploadSession{}, errNotImplemented()
 }
 
+func (r *downloadFileRepo) AbortUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error) {
+	_, _, _ = ctx, userID, uploadID
+	return domain.UploadSession{}, errNotImplemented()
+}
+
 func (r *downloadFileRepo) PutUploadChunk(ctx context.Context, uploadID string, chunkIndex, size int32, sha256sum, storageKey string) (domain.UploadChunk, error) {
 	_, _, _, _, _, _ = ctx, uploadID, chunkIndex, size, sha256sum, storageKey
 	return domain.UploadChunk{}, errNotImplemented()
@@ -256,6 +261,11 @@ func (r *downloadFileRepo) PutUploadChunk(ctx context.Context, uploadID string, 
 func (r *downloadFileRepo) ListUploadChunks(ctx context.Context, uploadID string) ([]domain.UploadChunk, error) {
 	_, _ = ctx, uploadID
 	return nil, errNotImplemented()
+}
+
+func (r *downloadFileRepo) DeleteUploadChunk(ctx context.Context, chunkID string) error {
+	_, _ = ctx, chunkID
+	return errNotImplemented()
 }
 
 func (r *downloadFileRepo) CommitUpload(ctx context.Context, userID, uploadID, storageKey string) (domain.FileNode, int64, error) {

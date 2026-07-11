@@ -156,6 +156,11 @@ func (r *fakeRepo) GetUploadSession(ctx context.Context, userID, uploadID string
 	return domain.UploadSession{}, nil
 }
 
+func (r *fakeRepo) AbortUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error) {
+	_, _, _ = ctx, userID, uploadID
+	return domain.UploadSession{ID: uploadID, Status: domain.UploadStatusAborted}, nil
+}
+
 func (r *fakeRepo) PutUploadChunk(ctx context.Context, uploadID string, chunkIndex, size int32, sha256sum, storageKey string) (domain.UploadChunk, error) {
 	_, _, _, _, _, _ = ctx, uploadID, chunkIndex, size, sha256sum, storageKey
 	return domain.UploadChunk{}, nil
@@ -164,6 +169,11 @@ func (r *fakeRepo) PutUploadChunk(ctx context.Context, uploadID string, chunkInd
 func (r *fakeRepo) ListUploadChunks(ctx context.Context, uploadID string) ([]domain.UploadChunk, error) {
 	_, _ = ctx, uploadID
 	return nil, nil
+}
+
+func (r *fakeRepo) DeleteUploadChunk(ctx context.Context, chunkID string) error {
+	_, _ = ctx, chunkID
+	return nil
 }
 
 func (r *fakeRepo) CommitUpload(ctx context.Context, userID, uploadID, storageKey string) (domain.FileNode, int64, error) {

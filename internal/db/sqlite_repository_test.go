@@ -53,7 +53,8 @@ func TestSQLiteExpiredUploadChunkRepository(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	now := time.Now().UTC()
-	expired := createUploadSession(t, repo, user.ID, "/expired-chunks.txt", domain.UploadStatusExpired, now.Add(-time.Hour))
+	expired := createUploadSession(t, repo, user.ID, "/expired-chunks.txt", domain.UploadStatusPending, now.Add(-time.Hour))
+	aborted := createUploadSession(t, repo, user.ID, "/aborted-chunks.txt", domain.UploadStatusPending, now.Add(time.Hour))
 	pending := createUploadSession(t, repo, user.ID, "/pending-chunks.txt", domain.UploadStatusPending, now.Add(time.Hour))
 	expiredChunk, err := repo.PutUploadChunk(ctx, expired.ID, 0, 4, "sha-expired", "staging/user/expired/0")
 	if err != nil {
@@ -62,16 +63,33 @@ func TestSQLiteExpiredUploadChunkRepository(t *testing.T) {
 	if _, err := repo.PutUploadChunk(ctx, pending.ID, 0, 4, "sha-pending", "staging/user/pending/0"); err != nil {
 		t.Fatalf("put pending chunk: %v", err)
 	}
+	abortedChunk, err := repo.PutUploadChunk(ctx, aborted.ID, 0, 4, "sha-aborted", "staging/user/aborted/0")
+	if err != nil {
+		t.Fatalf("put aborted chunk: %v", err)
+	}
+	if _, err := repo.AbortUploadSession(ctx, user.ID, aborted.ID); err != nil {
+		t.Fatalf("abort upload session: %v", err)
+	}
+	if count, err := repo.ExpireUploadSessions(ctx, now, 100); err != nil || count != 1 {
+		t.Fatalf("expire upload sessions count = %d error = %v", count, err)
+	}
 
 	chunks, err := repo.ListExpiredUploadChunks(ctx, 100)
 	if err != nil {
 		t.Fatalf("list expired upload chunks: %v", err)
 	}
-	if len(chunks) != 1 || chunks[0].ID != expiredChunk.ID || chunks[0].StorageKey != expiredChunk.StorageKey {
-		t.Fatalf("expired chunks = %#v, want expired chunk %#v", chunks, expiredChunk)
+	if len(chunks) != 2 {
+		t.Fatalf("expired chunks = %#v, want expired and aborted chunks", chunks)
+	}
+	chunkIDs := map[string]bool{chunks[0].ID: true, chunks[1].ID: true}
+	if !chunkIDs[expiredChunk.ID] || !chunkIDs[abortedChunk.ID] {
+		t.Fatalf("cleanup chunk ids = %#v, want %s and %s", chunkIDs, expiredChunk.ID, abortedChunk.ID)
 	}
 	if err := repo.DeleteUploadChunk(ctx, expiredChunk.ID); err != nil {
 		t.Fatalf("delete upload chunk: %v", err)
+	}
+	if err := repo.DeleteUploadChunk(ctx, abortedChunk.ID); err != nil {
+		t.Fatalf("delete aborted upload chunk: %v", err)
 	}
 	chunks, err = repo.ListExpiredUploadChunks(ctx, 100)
 	if err != nil {

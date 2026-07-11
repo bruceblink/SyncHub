@@ -547,6 +547,26 @@ func (r *Repository) GetUploadSession(ctx context.Context, userID, uploadID stri
 	return s, wrapNotFound(err, "upload session not found")
 }
 
+func (r *Repository) AbortUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error) {
+	var session domain.UploadSession
+	err := r.pool.QueryRow(ctx, `
+		update upload_sessions
+		set status = $3, updated_at = now()
+		where user_id = $1 and id = $2 and status = $4
+		returning id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at
+	`, userID, uploadID, domain.UploadStatusAborted, domain.UploadStatusPending).Scan(uploadSessionScan(&session)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		session, err = r.GetUploadSession(ctx, userID, uploadID)
+		if err != nil {
+			return domain.UploadSession{}, err
+		}
+		if session.Status != domain.UploadStatusAborted {
+			return domain.UploadSession{}, domain.E(domain.CodeUploadSessionExpired, "upload session cannot be aborted", nil)
+		}
+	}
+	return session, wrapDBErr(err)
+}
+
 func (r *Repository) ExpireUploadSessions(ctx context.Context, now time.Time, limit int32) (int64, error) {
 	if limit <= 0 {
 		limit = 1000
@@ -609,11 +629,15 @@ func (r *Repository) PutUploadChunk(ctx context.Context, uploadID string, chunkI
 	chunk := domain.UploadChunk{ID: uuid.NewString(), UploadID: uploadID, ChunkIndex: chunkIndex, Size: size, SHA256: sha256sum, StorageKey: storageKey}
 	err := r.pool.QueryRow(ctx, `
 		insert into upload_chunks (id, upload_id, chunk_index, size, sha256, storage_key)
-		values ($1,$2,$3,$4,$5,$6)
+		select $1,$2,$3,$4,$5,$6
+		where exists (select 1 from upload_sessions where id = $2 and status = $7)
 		on conflict (upload_id, chunk_index) do update
 		set size = excluded.size, sha256 = excluded.sha256, storage_key = excluded.storage_key
 		returning id, upload_id, chunk_index, size, sha256, storage_key, created_at
-	`, chunk.ID, chunk.UploadID, chunk.ChunkIndex, chunk.Size, chunk.SHA256, chunk.StorageKey).Scan(&chunk.ID, &chunk.UploadID, &chunk.ChunkIndex, &chunk.Size, &chunk.SHA256, &chunk.StorageKey, &chunk.CreatedAt)
+	`, chunk.ID, chunk.UploadID, chunk.ChunkIndex, chunk.Size, chunk.SHA256, chunk.StorageKey, domain.UploadStatusPending).Scan(&chunk.ID, &chunk.UploadID, &chunk.ChunkIndex, &chunk.Size, &chunk.SHA256, &chunk.StorageKey, &chunk.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.UploadChunk{}, domain.E(domain.CodeUploadSessionExpired, "upload session is not active", nil)
+	}
 	return chunk, wrapDBErr(err)
 }
 
@@ -647,10 +671,10 @@ func (r *Repository) ListExpiredUploadChunks(ctx context.Context, limit int32) (
 		select c.id, c.storage_key
 		from upload_chunks c
 		join upload_sessions s on s.id = c.upload_id
-		where s.status = $1
+		where s.status in ($1, $2)
 		order by s.expires_at, c.created_at, c.id
-		limit $2
-	`, domain.UploadStatusExpired, limit)
+		limit $3
+	`, domain.UploadStatusExpired, domain.UploadStatusAborted, limit)
 	if err != nil {
 		return nil, wrapDBErr(err)
 	}

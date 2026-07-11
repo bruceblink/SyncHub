@@ -205,6 +205,12 @@ Headers:
 
 `GET /api/v1/uploads/{upload_id}`
 
+### 取消上传
+
+`DELETE /api/v1/uploads/{upload_id}`
+
+将待处理会话标记为 `aborted`，并回收已经上传的暂存分片。重复取消同一个会话是幂等的；已提交或过期的会话不能取消。
+
 ### 提交上传
 
 `POST /api/v1/uploads/{upload_id}/commit`

@@ -629,6 +629,30 @@ func (r *SQLiteRepository) GetUploadSession(ctx context.Context, userID, uploadI
 	return s, wrapSQLiteNotFound(err, "upload session not found")
 }
 
+func (r *SQLiteRepository) AbortUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, `
+		update upload_sessions
+		set status = ?, updated_at = ?
+		where user_id = ? and id = ? and status = ?
+	`, domain.UploadStatusAborted, now, userID, uploadID, domain.UploadStatusPending)
+	if err != nil {
+		return domain.UploadSession{}, wrapSQLiteDBErr(err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return domain.UploadSession{}, wrapSQLiteDBErr(err)
+	}
+	session, err := r.GetUploadSession(ctx, userID, uploadID)
+	if err != nil {
+		return domain.UploadSession{}, err
+	}
+	if rows == 0 && session.Status != domain.UploadStatusAborted {
+		return domain.UploadSession{}, domain.E(domain.CodeUploadSessionExpired, "upload session cannot be aborted", nil)
+	}
+	return session, nil
+}
+
 func (r *SQLiteRepository) ExpireUploadSessions(ctx context.Context, now time.Time, limit int32) (int64, error) {
 	if limit <= 0 {
 		limit = 1000
@@ -695,14 +719,22 @@ func (r *SQLiteRepository) getUploadSessionByIdempotencyKey(ctx context.Context,
 
 func (r *SQLiteRepository) PutUploadChunk(ctx context.Context, uploadID string, chunkIndex, size int32, sha256sum, storageKey string) (domain.UploadChunk, error) {
 	chunk := domain.UploadChunk{ID: uuid.NewString(), UploadID: uploadID, ChunkIndex: chunkIndex, Size: size, SHA256: sha256sum, StorageKey: storageKey}
-	_, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, `
 		insert into upload_chunks (id, upload_id, chunk_index, size, sha256, storage_key, created_at)
-		values (?, ?, ?, ?, ?, ?, ?)
+		select ?, ?, ?, ?, ?, ?, ?
+		where exists (select 1 from upload_sessions where id = ? and status = ?)
 		on conflict (upload_id, chunk_index) do update
 		set size = excluded.size, sha256 = excluded.sha256, storage_key = excluded.storage_key
-	`, chunk.ID, chunk.UploadID, chunk.ChunkIndex, chunk.Size, chunk.SHA256, chunk.StorageKey, time.Now().UTC())
+	`, chunk.ID, chunk.UploadID, chunk.ChunkIndex, chunk.Size, chunk.SHA256, chunk.StorageKey, time.Now().UTC(), uploadID, domain.UploadStatusPending)
 	if err != nil {
 		return domain.UploadChunk{}, wrapSQLiteDBErr(err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return domain.UploadChunk{}, wrapSQLiteDBErr(err)
+	}
+	if rows == 0 {
+		return domain.UploadChunk{}, domain.E(domain.CodeUploadSessionExpired, "upload session is not active", nil)
 	}
 	err = r.db.QueryRowContext(ctx, `
 		select id, upload_id, chunk_index, size, sha256, storage_key, created_at
@@ -743,10 +775,10 @@ func (r *SQLiteRepository) ListExpiredUploadChunks(ctx context.Context, limit in
 		select c.id, c.storage_key
 		from upload_chunks c
 		join upload_sessions s on s.id = c.upload_id
-		where s.status = ?
+		where s.status in (?, ?)
 		order by s.expires_at, c.created_at, c.id
 		limit ?
-	`, domain.UploadStatusExpired, limit)
+	`, domain.UploadStatusExpired, domain.UploadStatusAborted, limit)
 	if err != nil {
 		return nil, wrapSQLiteDBErr(err)
 	}

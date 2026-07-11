@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -1184,6 +1185,76 @@ func TestSQLiteUploadInitIdempotencyKey(t *testing.T) {
 	decodeBody(t, second, &secondBody)
 	if firstBody.Data.UploadID == "" || firstBody.Data.UploadID != secondBody.Data.UploadID {
 		t.Fatalf("upload ids = %q and %q, want same non-empty id", firstBody.Data.UploadID, secondBody.Data.UploadID)
+	}
+}
+
+func TestSQLiteAbortUploadIsIdempotentAndCleansStagingChunks(t *testing.T) {
+	ctx := context.Background()
+	repo, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "synchub.db"))
+	if err != nil {
+		t.Fatalf("open sqlite repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	storageRoot := t.TempDir()
+	server := New(
+		authsvc.NewService(repo, "test-secret", time.Minute, time.Hour),
+		filesvc.NewService(repo, storage.NewLocal(storageRoot), 1024, time.Hour),
+		repo,
+	)
+
+	registered := doJSON(t, server, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"email": "abort-upload@example.com", "password": "password123",
+	})
+	if registered.Code != http.StatusCreated {
+		t.Fatalf("register status = %d body = %s", registered.Code, registered.Body.String())
+	}
+	var auth struct {
+		Data struct {
+			User struct {
+				ID string `json:"id"`
+			} `json:"user"`
+			Tokens struct {
+				AccessToken string `json:"access_token"`
+			} `json:"tokens"`
+		} `json:"data"`
+	}
+	decodeBody(t, registered, &auth)
+	content := []byte("unfinished upload")
+	sum := sha256.Sum256(content)
+	initialized := doJSON(t, server, http.MethodPost, "/api/v1/uploads", auth.Data.Tokens.AccessToken, map[string]any{
+		"path": "/unfinished.txt", "size": len(content), "sha256": hex.EncodeToString(sum[:]), "chunk_size": len(content),
+	})
+	if initialized.Code != http.StatusCreated {
+		t.Fatalf("init status = %d body = %s", initialized.Code, initialized.Body.String())
+	}
+	var upload struct {
+		Data struct {
+			UploadID string `json:"upload_id"`
+		} `json:"data"`
+	}
+	decodeBody(t, initialized, &upload)
+	putChunk(t, server, auth.Data.Tokens.AccessToken, upload.Data.UploadID, content, hex.EncodeToString(sum[:]))
+	stagingPath := filepath.Join(storageRoot, "staging", auth.Data.User.ID, upload.Data.UploadID, "0")
+	if _, err := os.Stat(stagingPath); err != nil {
+		t.Fatalf("staging chunk before abort: %v", err)
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		aborted := doJSON(t, server, http.MethodDelete, "/api/v1/uploads/"+upload.Data.UploadID, auth.Data.Tokens.AccessToken, nil)
+		if aborted.Code != http.StatusOK {
+			t.Fatalf("abort attempt %d status = %d body = %s", attempt+1, aborted.Code, aborted.Body.String())
+		}
+	}
+	if _, err := os.Stat(stagingPath); !os.IsNotExist(err) {
+		t.Fatalf("staging chunk after abort still exists or stat failed: %v", err)
+	}
+	status := doJSON(t, server, http.MethodGet, "/api/v1/uploads/"+upload.Data.UploadID, auth.Data.Tokens.AccessToken, nil)
+	if status.Code != http.StatusOK || !bytes.Contains(status.Body.Bytes(), []byte(`"status":"aborted"`)) {
+		t.Fatalf("aborted upload status = %d body = %s", status.Code, status.Body.String())
+	}
+	commit := doJSON(t, server, http.MethodPost, "/api/v1/uploads/"+upload.Data.UploadID+"/commit", auth.Data.Tokens.AccessToken, nil)
+	if commit.Code != http.StatusGone {
+		t.Fatalf("aborted commit status = %d body = %s", commit.Code, commit.Body.String())
 	}
 }
 

@@ -32,8 +32,10 @@ type Repository interface {
 	RestoreDeletedFile(ctx context.Context, userID, fileID string, sourceDeviceID *string) (domain.FileNode, error)
 	CreateUploadSession(ctx context.Context, s domain.UploadSession) (domain.UploadSession, error)
 	GetUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error)
+	AbortUploadSession(ctx context.Context, userID, uploadID string) (domain.UploadSession, error)
 	PutUploadChunk(ctx context.Context, uploadID string, chunkIndex, size int32, sha256sum, storageKey string) (domain.UploadChunk, error)
 	ListUploadChunks(ctx context.Context, uploadID string) ([]domain.UploadChunk, error)
+	DeleteUploadChunk(ctx context.Context, chunkID string) error
 	CommitUpload(ctx context.Context, userID, uploadID, storageKey string) (domain.FileNode, int64, error)
 }
 
@@ -273,7 +275,12 @@ func (s *Service) PutChunk(ctx context.Context, userID, uploadID string, chunkIn
 	if counter.n > math.MaxInt32 {
 		return domain.UploadChunk{}, domain.E(domain.CodeInvalidArgument, "chunk too large", nil)
 	}
-	return s.repo.PutUploadChunk(ctx, uploadID, chunkIndex, int32(counter.n), checksum, key)
+	chunk, err := s.repo.PutUploadChunk(ctx, uploadID, chunkIndex, int32(counter.n), checksum, key)
+	if err != nil {
+		_ = s.store.Delete(ctx, key)
+		return domain.UploadChunk{}, err
+	}
+	return chunk, nil
 }
 
 func (s *Service) UploadStatus(ctx context.Context, userID, uploadID string) (domain.UploadSession, []domain.UploadChunk, error) {
@@ -285,6 +292,31 @@ func (s *Service) UploadStatus(ctx context.Context, userID, uploadID string) (do
 	return session, chunks, err
 }
 
+func (s *Service) AbortUpload(ctx context.Context, userID, uploadID string) (domain.UploadSession, error) {
+	if strings.TrimSpace(uploadID) == "" {
+		return domain.UploadSession{}, domain.E(domain.CodeInvalidArgument, "upload id is required", nil)
+	}
+	session, err := s.repo.AbortUploadSession(ctx, userID, uploadID)
+	if err != nil {
+		return domain.UploadSession{}, err
+	}
+	chunks, err := s.repo.ListUploadChunks(ctx, uploadID)
+	if err != nil {
+		return domain.UploadSession{}, err
+	}
+	for _, chunk := range chunks {
+		if s.store != nil {
+			if err := s.store.Delete(ctx, chunk.StorageKey); err != nil {
+				return domain.UploadSession{}, err
+			}
+		}
+		if err := s.repo.DeleteUploadChunk(ctx, chunk.ID); err != nil {
+			return domain.UploadSession{}, err
+		}
+	}
+	return session, nil
+}
+
 func (s *Service) CommitUpload(ctx context.Context, userID, uploadID string) (domain.FileNode, int64, error) {
 	session, chunks, err := s.UploadStatus(ctx, userID, uploadID)
 	if err != nil {
@@ -293,6 +325,9 @@ func (s *Service) CommitUpload(ctx context.Context, userID, uploadID string) (do
 	if session.Status == domain.UploadStatusCommitted {
 		node, err := s.repo.GetFileByPath(ctx, userID, session.TargetPath)
 		return node, 0, err
+	}
+	if session.Status != domain.UploadStatusPending || time.Now().After(session.ExpiresAt) {
+		return domain.FileNode{}, 0, domain.E(domain.CodeUploadSessionExpired, "upload session is not active", nil)
 	}
 	expectedChunks := int(math.Ceil(float64(session.TotalSize) / float64(session.ChunkSize)))
 	if session.TotalSize == 0 {

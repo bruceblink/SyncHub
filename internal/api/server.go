@@ -160,6 +160,7 @@ func (s *Server) routes() {
 	protected.POST("/uploads", s.initUpload)
 	protected.PUT("/uploads/:id/chunks/:index", s.putChunk)
 	protected.GET("/uploads/:id", s.uploadStatus)
+	protected.DELETE("/uploads/:id", s.abortUpload)
 	protected.POST("/uploads/:id/commit", s.commitUpload)
 	protected.GET("/devices", s.listDevices)
 	protected.POST("/devices", s.registerDevice)
@@ -500,6 +501,15 @@ func (s *Server) uploadStatus(c *gin.Context) {
 		return
 	}
 	ok(c, uploadDTO(session, chunks))
+}
+
+func (s *Server) abortUpload(c *gin.Context) {
+	session, err := s.files.AbortUpload(c.Request.Context(), userID(c), c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, uploadDTO(session, nil))
 }
 
 func (s *Server) commitUpload(c *gin.Context) {

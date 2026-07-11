@@ -442,6 +442,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UploadResponse"
+    delete:
+      tags: [Upload]
+      summary: Abort upload session
+      description: Marks a pending upload as aborted and removes uploaded staging chunks. Repeated aborts are idempotent.
+      parameters:
+        - $ref: "#/components/parameters/UploadID"
+      responses:
+        "200":
+          description: Aborted upload session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+        "410":
+          description: The upload was already committed or expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIResponse"
   /api/v1/uploads/{id}/chunks/{index}:
     put:
       tags: [Upload]
