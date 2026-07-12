@@ -16,7 +16,7 @@ MVP checks passed
 
 ## 2. Build And Smoke Test The Docker Image
 
-If a disposable PostgreSQL database is available, run the API/CLI smoke flow against it before the Docker image check:
+If a disposable PostgreSQL database is available, run the PostgreSQL API smoke flow before the Docker image check:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-postgres-api-smoke.ps1 -DatabaseURL $env:DATABASE_URL
@@ -36,7 +36,7 @@ The release Docker image is the primary deployment artifact. The script builds t
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.1
 ```
 
-The script writes the release deployment files, auxiliary Linux CLI/server archives, a Windows developer archive, and `SHA256SUMS.txt` under `dist\synchub-0.1.1`. The archives are fallback/manual-install artifacts; Docker images plus `docker-compose.release.yml` or `fly.toml` are the normal release and deployment path.
+The script writes API server archives, deployment files, and `SHA256SUMS.txt` under `dist\synchub-0.1.1`. The desktop client is released from the companion `synchub-desktop` repository and is not bundled into the server archive.
 
 ## 4. Verify Release Assets
 
@@ -44,7 +44,7 @@ The script writes the release deployment files, auxiliary Linux CLI/server archi
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.1
 ```
 
-The verifier checks the deployment compose file, expected archives, SHA256 hashes, required bundled files, the host-platform CLI version output, and the integrated CLI daemon help.
+The verifier checks deployment files, expected server archives, SHA256 hashes, and required bundled files. Runtime version behavior is covered by the Docker image smoke test.
 
 ## 5. Review Release Notes
 
@@ -74,4 +74,4 @@ git push origin main
 git push origin v0.1.1
 ```
 
-Pushing a `v*` tag triggers the Release workflow on Linux. The workflow reruns the deterministic MVP gate, smoke-tests the Docker image, pushes `ghcr.io/bruceblink/synchub:<version>` plus matching tags, and publishes the GitHub Release with `docker-compose.release.yml`, `fly.toml`, auxiliary archives, and `SHA256SUMS.txt`. The full local MVP gate above remains the pre-tag check for the local API smoke flow.
+Pushing a `v*` tag triggers the Release workflow on Linux. The workflow reruns the deterministic MVP gate, smoke-tests the Docker image, pushes `ghcr.io/bruceblink/synchub:<version>` plus matching tags, and publishes the GitHub Release with `docker-compose.release.yml`, `fly.toml`, API server archives, and `SHA256SUMS.txt`. The full local MVP gate above remains the pre-tag check for the local API smoke flow.
