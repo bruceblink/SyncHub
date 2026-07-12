@@ -63,14 +63,14 @@ Later adapter 配置：
 ## Linux 服务器快速部署
 
 ```bash
-docker pull ghcr.io/bruceblink/synchub:0.2.0
+docker pull ghcr.io/bruceblink/synchub:0.2.1
 docker run -d --name synchub-api \
   -p 8765:8765 \
   -e JWT_SECRET=change-me \
   -e DATABASE_DRIVER=postgres \
   -e DATABASE_URL="$DATABASE_URL" \
   -v synchub-data:/data \
-  ghcr.io/bruceblink/synchub:0.2.0
+  ghcr.io/bruceblink/synchub:0.2.1
 ```
 
 使用 Compose：
@@ -78,7 +78,7 @@ docker run -d --name synchub-api \
 ```bash
 export JWT_SECRET=change-me
 export DATABASE_URL='postgresql://user:password@host:5432/synchub?sslmode=require'
-export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.2.0
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.2.1
 docker compose -f docker-compose.release.yml up -d
 ```
 

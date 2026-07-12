@@ -26,7 +26,7 @@
 ```bash
 export JWT_SECRET=change-me
 export DATABASE_URL='postgresql://user:password@host:5432/synchub?sslmode=require'
-export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.2.0
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.2.1
 docker compose -f docker-compose.release.yml pull
 docker compose -f docker-compose.release.yml up -d
 docker compose -f docker-compose.release.yml ps

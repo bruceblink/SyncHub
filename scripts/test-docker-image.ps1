@@ -7,6 +7,10 @@ param(
     [string]$BuildNetwork = "host",
     [string]$ContainerName = "synchub-image-smoke",
     [string]$VolumeName = "synchub-image-smoke-data",
+    [string]$DatabaseContainerName = "synchub-image-smoke-postgres",
+    [string]$DatabaseVolumeName = "synchub-image-smoke-postgres-data",
+    [string]$NetworkName = "synchub-image-smoke-network",
+    [string]$PostgresImage = "postgres:17-alpine",
     [switch]$SkipBuild
 )
 
@@ -88,6 +92,25 @@ function Wait-Ready {
     throw "SyncHub API did not become ready at $URL within ${TimeoutSeconds}s"
 }
 
+function Wait-Postgres {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Container,
+        [int]$TimeoutSeconds = 60
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        & docker exec $Container pg_isready -U synchub -d synchub *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+        Start-Sleep -Seconds 2
+    }
+
+    throw "PostgreSQL did not become ready within ${TimeoutSeconds}s"
+}
+
 Push-Location $ProjectRoot
 try {
     if (-not $SkipBuild) {
@@ -119,14 +142,31 @@ try {
     Invoke-Docker -Arguments @("run", "--rm", "--entrypoint", "/bin/sh", $Image, "-c", "test ! -e /usr/local/bin/synchub-cli")
 
     Invoke-DockerBestEffort -Arguments @("rm", "-f", $ContainerName)
+    Invoke-DockerBestEffort -Arguments @("rm", "-f", $DatabaseContainerName)
     Invoke-DockerBestEffort -Arguments @("volume", "rm", "-f", $VolumeName)
+    Invoke-DockerBestEffort -Arguments @("volume", "rm", "-f", $DatabaseVolumeName)
+    Invoke-DockerBestEffort -Arguments @("network", "rm", $NetworkName)
 
     $containerDatabaseURL = $env:DATABASE_URL
-    if ([string]::IsNullOrWhiteSpace($containerDatabaseURL)) {
-        throw "DATABASE_URL is required for the PostgreSQL image smoke test"
+    $usesManagedDatabase = [string]::IsNullOrWhiteSpace($containerDatabaseURL)
+    if ($usesManagedDatabase) {
+        Invoke-Docker -Arguments @("network", "create", $NetworkName)
+        Invoke-Docker -Arguments @(
+            "run",
+            "-d",
+            "--name", $DatabaseContainerName,
+            "--network", $NetworkName,
+            "-e", "POSTGRES_USER=synchub",
+            "-e", "POSTGRES_PASSWORD=synchub-smoke-password",
+            "-e", "POSTGRES_DB=synchub",
+            "-v", "${DatabaseVolumeName}:/var/lib/postgresql/data",
+            $PostgresImage
+        )
+        Wait-Postgres -Container $DatabaseContainerName
+        $containerDatabaseURL = "postgresql://synchub:synchub-smoke-password@${DatabaseContainerName}:5432/synchub?sslmode=disable"
     }
 
-    Invoke-Docker -Arguments @(
+    $runArgs = @(
         "run",
         "-d",
         "--name", $ContainerName,
@@ -135,9 +175,13 @@ try {
         "-e", "JWT_SECRET=image-smoke-secret",
         "-e", "DATABASE_DRIVER=postgres",
         "-e", "DATABASE_URL=$containerDatabaseURL",
-        "-v", "${VolumeName}:/data",
-        $Image
+        "-v", "${VolumeName}:/data"
     )
+    if ($usesManagedDatabase) {
+        $runArgs += @("--network", $NetworkName)
+    }
+    $runArgs += $Image
+    Invoke-Docker -Arguments $runArgs
 
     $ready = Wait-Ready -URL "http://127.0.0.1:$Port/readyz"
     $versionResponse = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/version" -TimeoutSec 5
@@ -161,7 +205,10 @@ catch {
 finally {
     try {
         Invoke-DockerBestEffort -Arguments @("rm", "-f", $ContainerName)
+        Invoke-DockerBestEffort -Arguments @("rm", "-f", $DatabaseContainerName)
         Invoke-DockerBestEffort -Arguments @("volume", "rm", "-f", $VolumeName)
+        Invoke-DockerBestEffort -Arguments @("volume", "rm", "-f", $DatabaseVolumeName)
+        Invoke-DockerBestEffort -Arguments @("network", "rm", $NetworkName)
     }
     finally {
         Pop-Location

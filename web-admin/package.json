@@ -2,6 +2,7 @@
   "name": "synchub-admin",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@10.30.2",
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && vite build"

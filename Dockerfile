@@ -3,10 +3,13 @@ ARG RUNTIME_IMAGE=alpine:3.22
 
 FROM node:24-alpine AS admin-build
 
+ENV CI=true
+
 WORKDIR /src/web-admin
 
 COPY web-admin/package.json web-admin/pnpm-lock.yaml ./
-RUN corepack enable && pnpm install --frozen-lockfile
+RUN corepack enable && corepack install --global pnpm@10.30.2 \
+    && pnpm install --frozen-lockfile
 
 COPY web-admin/ ./
 RUN pnpm build
