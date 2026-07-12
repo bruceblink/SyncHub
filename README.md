@@ -1,128 +1,79 @@
 # SyncHub
 
-Developer Workspace Sync Platform
+[中文](#中文) | [English](#english)
 
-## Vision
+## 中文
 
-SyncHub is a Go-based developer workspace synchronization platform.
+SyncHub 是面向开发者工作区的多设备同步平台。本仓库包含 Go API 服务端和 React 管理页面；最终用户通过配套的 SyncHub Desktop 桌面应用完成同步，不需要安装 CLI。
 
-### Goals
+### 架构
 
-- Workspace synchronization
-- AI session synchronization
-- File versioning
-- WebDAV compatibility
-- REST API
-- Native desktop client
-- Multi-device synchronization
+```text
+SyncHub Desktop -> REST API -> SyncHub Server -> PostgreSQL + Object Storage
+                              -> React Admin
+```
 
-## Workspace
+核心能力：
 
-Supports:
+- 用户认证、设备注册与同步游标
+- 文件上传、下载、目录管理与软删除
+- 文件版本、固定版本与历史恢复
+- 变更事件、冲突记录和回收站
+- PostgreSQL 元数据与 Local FS / S3-compatible 存储抽象
+- 健康检查、指标、Swagger 和 React 管理页面
 
-- Claude Code
-- Codex
-- VS Code
-- Cursor
-- Obsidian
-- Git
-- SSH
+### 快速开始
 
-## Architecture
+准备 `.env`，其中 `DATABASE_URL` 在所有环境中都是必需项：
 
-SyncHub Desktop -> REST API -> SyncHub Server -> Storage
+```dotenv
+DATABASE_URL=postgresql://user:password@host:5432/synchub?sslmode=require
+JWT_SECRET=replace-with-a-long-random-secret
+```
 
-## Tech Stack
-
-- Go
-- Gin
-- PostgreSQL for server metadata
-- Local FS / S3-compatible storage
-
-## Roadmap
-
-See docs/roadmap/ROADMAP.md
-
-## User Guide
-
-See [docs/user-guide.md](docs/user-guide.md) for local usage and manual testing steps.
-
-## MVP Quick Start
-
-Build the React admin bundle before running Go commands from a clean checkout. The generated `internal/api/admin_dist` directory is ignored by Git:
+构建管理页面并启动 API：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-web-admin.ps1
+go run .\cmd\synchub-api
 ```
 
-Run the API server with PostgreSQL. Production is the default environment, so `DATABASE_URL` is required:
+服务端默认监听 `http://localhost:8765`，启动时自动执行缺失的 PostgreSQL migration。进程环境变量和部署 secret 的优先级高于 `.env`。
 
-The API loads missing values from `.env` in the current working directory. Existing process environment variables and deployment secrets take precedence.
-
-```bash
-$env:DATABASE_URL = "postgresql://user:password@host:5432/synchub?sslmode=require"
-go run ./cmd/synchub-api
-```
-
-PostgreSQL migrations are applied automatically at startup. `DATABASE_URL` is required in every environment, including local development and tests.
-
-The server listens on `http://localhost:8765` by default.
-
-Useful endpoints:
+常用端点：
 
 - `GET /version`
 - `GET /healthz`
-- `GET /readyz` (includes database and storage readiness checks)
+- `GET /readyz`，包含 database 和 storage 检查
 - `GET /metrics`
 - `GET /swagger/`
 - `GET /swagger/openapi.yaml`
 
-Run the MVP checks:
+### 桌面客户端
+
+配套客户端位于 `F:\project\synchub-desktop`。在桌面应用中配置服务端地址、登录并初始化工作区后，应用会自动执行后台同步，并提供文件、版本、冲突、设备和回收站管理。
+
+旧版本登录配置与工作区 registry 可继续读取以支持无损升级，但服务端发行物不再包含 CLI。
+
+### 验证
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
-```
-
-The MVP check script runs formatting, vet, unit/integration tests, local API smoke checks, and local backup/restore smoke checks.
-
-Build and smoke-test the MVP Docker image:
-
-```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.1 -Image synchub:0.1.1
 ```
 
-Build API server release artifacts:
+`test-mvp.ps1` 构建 React 管理页面，并运行 Go 格式化、vet 和全量测试。Docker smoke 会验证镜像标签、运行时文件、`/readyz` 与 `/version`。
+
+### 发布与部署
+
+构建并验证 API-only 发行包：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.1
 ```
 
-The release directory also includes `docker-compose.release.yml` and `fly.toml` for deployment. It does not include a CLI binary.
-
-See [docs/release-checklist.md](docs/release-checklist.md) for the release gate.
-See [docs/releases/v0.1.1.md](docs/releases/v0.1.1.md) for the MVP release notes.
-
-## Desktop Client
-
-The end-user client is the companion `synchub-desktop` application. Configure the server URL, sign in, and initialize workspace folders in the desktop UI. It owns manifest scanning, push/pull, conflict preservation, trash recovery, diagnostics, and automatic background sync without invoking a CLI executable.
-
-Existing login and workspace registry files are supported for migration from older releases. Create a `.synchubignore` file at a workspace root to exclude local build outputs or other paths from synchronization.
-
-For the release Docker image on a Linux server:
-
-```bash
-docker pull ghcr.io/bruceblink/synchub:0.1.1
-docker run -d --name synchub-api \
-  -p 8765:8765 \
-  -e JWT_SECRET=change-me \
-  -e DATABASE_DRIVER=postgres \
-  -e DATABASE_URL="$DATABASE_URL" \
-  -v synchub-data:/data \
-  ghcr.io/bruceblink/synchub:0.1.1
-```
-
-Or use the release compose file:
+Docker Compose：
 
 ```bash
 export JWT_SECRET=change-me
@@ -131,35 +82,116 @@ export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
 docker compose -f docker-compose.release.yml up -d
 ```
 
-Or deploy to Fly.io from the project Dockerfile:
+Fly.io：
 
 ```powershell
-# Edit fly.toml: set app name and primary_region.
 fly apps create synchub-your-name
-fly volumes create synchub_data --app synchub-your-name --region nrt --size 1
+fly volumes create synchub_data --app synchub-your-name --region nrt --size 20
 fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
 fly secrets set --app synchub-your-name DATABASE_URL="postgresql://user:password@host:5432/synchub?sslmode=require"
 fly deploy --config .\fly.toml
 ```
 
-To use a Cloudflare-hosted custom domain, add a Fly certificate, copy the DNS
-records from `fly certs setup`, and start with Cloudflare proxy disabled:
+详细说明：
+
+- [用户指南](docs/user-guide.md)
+- [部署设计](docs/design/08-deployment.md)
+- [发行检查清单](docs/release-checklist.md)
+- [路线图](docs/roadmap/ROADMAP.md)
+
+## English
+
+SyncHub is a multi-device synchronization platform for developer workspaces. This repository contains the Go API server and React admin interface. End users synchronize through the companion SyncHub Desktop application; no CLI installation is required.
+
+### Architecture
+
+```text
+SyncHub Desktop -> REST API -> SyncHub Server -> PostgreSQL + Object Storage
+                              -> React Admin
+```
+
+Core capabilities:
+
+- Authentication, device registration, and sync cursors
+- File upload, download, directory management, and soft deletion
+- File versions, version pinning, and historical restore
+- Change events, conflict records, and trash recovery
+- PostgreSQL metadata and Local FS / S3-compatible storage abstraction
+- Health checks, metrics, Swagger, and a React admin interface
+
+### Quick Start
+
+Prepare `.env`. `DATABASE_URL` is required in every environment:
+
+```dotenv
+DATABASE_URL=postgresql://user:password@host:5432/synchub?sslmode=require
+JWT_SECRET=replace-with-a-long-random-secret
+```
+
+Build the admin interface and start the API:
 
 ```powershell
-$env:FLY_APP = "synchub-your-name"
-$env:SYNCHUB_DOMAIN = "sync.example.com"
-
-fly certs add $env:SYNCHUB_DOMAIN --app $env:FLY_APP
-fly certs setup $env:SYNCHUB_DOMAIN --app $env:FLY_APP
-fly certs check $env:SYNCHUB_DOMAIN --app $env:FLY_APP
-curl.exe -fsS "https://$env:SYNCHUB_DOMAIN/readyz"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-web-admin.ps1
+go run .\cmd\synchub-api
 ```
 
-For automatic deployment, enable the Fly.io GitHub integration for this repository. The repository CI stays focused on tests, while Fly.io reports its own deployment check on push.
+The server listens on `http://localhost:8765` by default and applies missing PostgreSQL migrations during startup. Process environment variables and deployment secrets take precedence over `.env`.
 
-For a containerized local development server:
+Useful endpoints:
+
+- `GET /version`
+- `GET /healthz`
+- `GET /readyz`, including database and storage checks
+- `GET /metrics`
+- `GET /swagger/`
+- `GET /swagger/openapi.yaml`
+
+### Desktop Client
+
+The companion client lives at `F:\project\synchub-desktop`. Configure the server URL, sign in, and initialize workspace folders in the desktop application. It then runs background synchronization and provides file, version, conflict, device, and trash management.
+
+Existing login and workspace registry files remain readable for lossless upgrades, but server releases no longer include a CLI binary.
+
+### Verification
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.1 -Image synchub:0.1.1
+```
+
+`test-mvp.ps1` builds the React admin interface and runs Go formatting, vet, and the complete test suite. The Docker smoke test validates image metadata, runtime contents, `/readyz`, and `/version`.
+
+### Release And Deployment
+
+Build and verify API-only release archives:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.1
+```
+
+Docker Compose:
 
 ```bash
-cp .env.example .env
-docker compose up --build
+export JWT_SECRET=change-me
+export DATABASE_URL='postgresql://user:password@host:5432/synchub?sslmode=require'
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
+docker compose -f docker-compose.release.yml up -d
 ```
+
+Fly.io:
+
+```powershell
+fly apps create synchub-your-name
+fly volumes create synchub_data --app synchub-your-name --region nrt --size 20
+fly secrets set --app synchub-your-name JWT_SECRET="replace-with-a-long-random-secret"
+fly secrets set --app synchub-your-name DATABASE_URL="postgresql://user:password@host:5432/synchub?sslmode=require"
+fly deploy --config .\fly.toml
+```
+
+Further documentation:
+
+- [User guide](docs/user-guide.md)
+- [Deployment design](docs/design/08-deployment.md)
+- [Release checklist](docs/release-checklist.md)
+- [Roadmap](docs/roadmap/ROADMAP.md)
