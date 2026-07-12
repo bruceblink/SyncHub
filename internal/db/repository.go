@@ -703,6 +703,16 @@ func (r *Repository) CreateUploadSession(ctx context.Context, s domain.UploadSes
 	if s.Status == "" {
 		s.Status = domain.UploadStatusPending
 	}
+	if s.IdempotencyKey != nil {
+		if _, err := r.pool.Exec(ctx, `
+			update upload_sessions
+			set status = $3, updated_at = now()
+			where user_id = $1 and idempotency_key = $2
+				and status = $4 and expires_at <= now()
+		`, s.UserID, *s.IdempotencyKey, domain.UploadStatusExpired, domain.UploadStatusPending); err != nil {
+			return domain.UploadSession{}, wrapDBErr(err)
+		}
+	}
 	err := r.pool.QueryRow(ctx, `
 		insert into upload_sessions (id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id)
 		values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
@@ -797,8 +807,8 @@ func (r *Repository) getUploadSessionByIdempotencyKey(ctx context.Context, userI
 	err := r.pool.QueryRow(ctx, `
 		select id, user_id, target_path, target_file_id, base_version, total_size, chunk_size, sha256, status, staging_key, expires_at, idempotency_key, source_device_id, created_at, updated_at
 		from upload_sessions
-		where user_id = $1 and idempotency_key = $2
-	`, userID, idempotencyKey).Scan(uploadSessionScan(&s)...)
+		where user_id = $1 and idempotency_key = $2 and status = $3
+	`, userID, idempotencyKey, domain.UploadStatusPending).Scan(uploadSessionScan(&s)...)
 	return s, wrapNotFound(err, "upload session not found")
 }
 

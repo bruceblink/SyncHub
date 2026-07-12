@@ -150,6 +150,58 @@ func TestPostgresObjectGCDoesNotClaimReferencedObject(t *testing.T) {
 	}
 }
 
+func TestPostgresUploadIdempotencyOnlyReusesActiveSession(t *testing.T) {
+	repo, _ := newPostgresMigrationTestRepository(t)
+	ctx := context.Background()
+	user, err := repo.CreateUser(ctx, "postgres-upload-idempotency-"+uuid.NewString()+"@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	key := "same-content"
+	create := func(expiresAt time.Time) domain.UploadSession {
+		session, err := repo.CreateUploadSession(ctx, domain.UploadSession{
+			UserID: user.ID, TargetPath: "/file.txt", TotalSize: 1, ChunkSize: 1,
+			SHA256: "hash", ExpiresAt: expiresAt, IdempotencyKey: &key,
+		})
+		if err != nil {
+			t.Fatalf("create upload session: %v", err)
+		}
+		return session
+	}
+
+	first := create(time.Now().Add(time.Hour))
+	reused := create(time.Now().Add(time.Hour))
+	if reused.ID != first.ID {
+		t.Fatalf("active idempotent session id = %q, want %q", reused.ID, first.ID)
+	}
+	if _, _, err := repo.CommitUpload(ctx, user.ID, first.ID, "objects/"+user.ID+"/hash"); err != nil {
+		t.Fatalf("commit first upload: %v", err)
+	}
+	afterCommit := create(time.Now().Add(time.Hour))
+	if afterCommit.ID == first.ID {
+		t.Fatal("committed upload session was reused")
+	}
+
+	expiredKey := "expired-content"
+	expired, err := repo.CreateUploadSession(ctx, domain.UploadSession{
+		UserID: user.ID, TargetPath: "/expired.txt", TotalSize: 1, ChunkSize: 1,
+		SHA256: "hash", ExpiresAt: time.Now().Add(-time.Minute), IdempotencyKey: &expiredKey,
+	})
+	if err != nil {
+		t.Fatalf("create expired upload: %v", err)
+	}
+	replacement, err := repo.CreateUploadSession(ctx, domain.UploadSession{
+		UserID: user.ID, TargetPath: "/expired.txt", TotalSize: 1, ChunkSize: 1,
+		SHA256: "hash", ExpiresAt: time.Now().Add(time.Hour), IdempotencyKey: &expiredKey,
+	})
+	if err != nil {
+		t.Fatalf("replace expired upload: %v", err)
+	}
+	if replacement.ID == expired.ID {
+		t.Fatal("expired pending upload session was reused")
+	}
+}
+
 func commitPostgresTestFile(t *testing.T, repo *Repository, userID, targetPath, storageKey string) domain.FileNode {
 	t.Helper()
 	now := time.Now().UTC()
