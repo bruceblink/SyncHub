@@ -57,7 +57,7 @@ go run .\cmd\synchub-api
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.1 -Image synchub:0.1.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.2.0 -Image synchub:0.2.0
 ```
 
 `test-mvp.ps1` 构建 React 管理页面，并运行 Go 格式化、vet 和全量测试。Docker smoke 会验证镜像标签、运行时文件、`/readyz` 与 `/version`。
@@ -67,8 +67,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.
 构建并验证 API-only 发行包：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.2.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.2.0
 ```
 
 Docker Compose：
@@ -76,7 +76,7 @@ Docker Compose：
 ```bash
 export JWT_SECRET=change-me
 export DATABASE_URL='postgresql://user:password@host:5432/synchub?sslmode=require'
-export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.2.0
 docker compose -f docker-compose.release.yml up -d
 ```
 

@@ -57,7 +57,7 @@ Existing login and workspace registry files remain readable for lossless upgrade
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.1.1 -Image synchub:0.1.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.ps1 -Version 0.2.0 -Image synchub:0.2.0
 ```
 
 `test-mvp.ps1` builds the React admin interface and runs Go formatting, vet, and the complete test suite. The Docker smoke test validates image metadata, runtime contents, `/readyz`, and `/version`.
@@ -67,8 +67,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-docker-image.
 Build and verify API-only release archives:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.1.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.2.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-release.ps1 -Version 0.2.0
 ```
 
 Docker Compose:
@@ -76,7 +76,7 @@ Docker Compose:
 ```bash
 export JWT_SECRET=change-me
 export DATABASE_URL='postgresql://user:password@host:5432/synchub?sslmode=require'
-export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.1.1
+export SYNCHUB_IMAGE=ghcr.io/bruceblink/synchub:0.2.0
 docker compose -f docker-compose.release.yml up -d
 ```
 
