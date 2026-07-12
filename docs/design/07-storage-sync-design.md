@@ -52,7 +52,7 @@ Phase 1 不做内容级合并。Phase 2 使用 keep-both 默认策略：
 
 - 远端文件保持原路径。
 - 本地冲突版本上传为 `{name}.conflict-{device}-{timestamp}{ext}`。
-- 记录 sync_conflicts，后续由 CLI daemon local API 或任意客户端提示用户处理。
+- 记录 sync_conflicts，由 SyncHub Desktop 提示用户处理。
 
 不推荐长期使用 last-write-wins 作为默认策略，因为它会静默覆盖工作区文件。只有用户显式配置某些目录为 LWW 时才启用。
 

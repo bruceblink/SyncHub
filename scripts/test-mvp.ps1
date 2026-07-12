@@ -1,7 +1,5 @@
 param(
-    [string]$ProjectRoot = "",
-    [int]$Port = 18765,
-    [switch]$SkipLocalApiSmoke
+    [string]$ProjectRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,11 +50,6 @@ try {
     Invoke-ExternalStep -Name "go vet ./..." -FilePath "go" -Arguments @("vet", "./...")
     Invoke-ExternalStep -Name "go test ./..." -FilePath "go" -Arguments @("test", "./...")
 
-    if (-not $SkipLocalApiSmoke) {
-        Invoke-ScriptStep -Name "local API smoke" -Script {
-            & (Join-Path $ProjectRoot "scripts/test-local-api-smoke.ps1") -ProjectRoot $ProjectRoot -Port $Port
-        }
-    }
     Write-Output "MVP checks passed"
 }
 finally {

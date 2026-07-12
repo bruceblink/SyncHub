@@ -91,7 +91,7 @@ jobs:
 
       - name: Verify MVP
         shell: pwsh
-        run: ./scripts/test-mvp.ps1 -SkipLocalApiSmoke
+        run: ./scripts/test-mvp.ps1
 
       - name: Build release artifacts
         shell: pwsh

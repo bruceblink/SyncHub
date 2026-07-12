@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mvp.ps1
 PostgreSQL 部署路径可用独立 smoke 脚本验证：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-postgres-api-smoke.ps1 -DatabaseURL $env:DATABASE_URL
+go test ./...
 ```
 
 该脚本会创建临时 PostgreSQL schema，通过 `DATABASE_SCHEMA` 启动 API，复用本地 API smoke 的注册、双 workspace 同步、daemon、版本历史和恢复流程，最后删除临时 schema。

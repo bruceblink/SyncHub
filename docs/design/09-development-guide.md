@@ -21,11 +21,9 @@ go vet ./...
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-web-admin.ps1
 go test ./...
 go run ./cmd/synchub-api
-go run ./cmd/synchub-cli register --server http://localhost:8765 --email user@example.com --password password
-go run ./cmd/synchub-cli workspace init --path . --remote-path /workspace
-go run ./cmd/synchub-cli sync once --path .
-go run ./cmd/synchub-cli sync status --path .
 ```
+
+然后在 `F:\project\synchub-desktop` 运行 `cargo run`，将服务端地址配置为 `http://localhost:8765`，并从桌面 UI 验证同步流程。
 
 ## 本地配置
 
