@@ -224,6 +224,7 @@ try {
         }
 
         Assert-PathExists -Path (Join-Path $extractDir "README.md") -Message "$archiveName missing README.md"
+        Assert-PathExists -Path (Join-Path $extractDir "README.en.md") -Message "$archiveName missing README.en.md"
         Assert-PathExists -Path (Join-Path $extractDir "LICENSE") -Message "$archiveName missing LICENSE"
 
         $suffix = ""

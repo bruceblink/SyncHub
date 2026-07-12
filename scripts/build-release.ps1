@@ -177,6 +177,7 @@ try {
         }
 
         Copy-Item -LiteralPath (Join-Path $ProjectRoot "README.md") -Destination $staging
+        Copy-Item -LiteralPath (Join-Path $ProjectRoot "README.en.md") -Destination $staging
         Copy-Item -LiteralPath (Join-Path $ProjectRoot "LICENSE") -Destination $staging
 
         $archiveName = Get-ArchiveName -ArtifactName $artifactName -GOOS $goos
