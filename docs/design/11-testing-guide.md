@@ -7,7 +7,7 @@
 - API integration tests: Gin router + test database + mock/local storage。
 - Storage tests: Local FS backend 的 put/read/delete/compose/range。
 - Sync tests: change cursor、manifest diff、冲突检测。
-- CLI E2E tests: 使用 PostgreSQL API test server 和临时 workspace 验证双设备同步闭环。
+- Desktop tests: 使用 Rust 单元测试和临时 workspace 验证 manifest、push、pull、冲突与后台同步。
 
 ## 首期必须覆盖
 

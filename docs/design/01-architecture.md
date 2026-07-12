@@ -31,14 +31,14 @@ internal/
   sync/               # sync planner, conflict detection, change log
   worker/             # background jobs
 pkg/
-  client/             # Go API client used by CLI
+  synchub-desktop/    # Companion Rust + GPUI desktop repository
 migrations/
 ```
 
 ## 请求数据流
 
 ```text
-CLI / API Client
+SyncHub Desktop / API Client
   -> Gin Router
   -> middleware: trace, request id, auth, rate limit
   -> API handler

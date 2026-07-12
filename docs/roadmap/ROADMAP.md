@@ -9,14 +9,14 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 项目目标之一是训练 Go 工程能力。
 - Go 在本项目中的开发体验和迭代效率优于 Rust。
 - SyncHub 的主要瓶颈预计在网络、磁盘、数据库和对象存储 IO，不存在必须依赖 Rust 才能解决的性能瓶颈。
-- 服务端和 CLI daemon 可以统一使用 Go，减少模型、协议、错误处理和构建流程割裂。
+- 服务端使用 Go + Gin，桌面同步客户端使用 Rust + GPUI，各自保持清晰边界。
 
 核心技术组合：
 
 - Language: Go stable
 - Web: Gin
-- DB: PostgreSQL for server metadata; SQLite remains available for local development and smoke tests
-- Migration: embedded PostgreSQL migration runner plus SQLite bootstrap; external migration tools are deferred
+- DB: PostgreSQL for server metadata
+- Migration: embedded PostgreSQL migration runner; external migration tools are deferred
 - Auth: JWT access token + refresh token
 - Storage: Local FS for current MVP; S3 / OSS / MinIO compatible storage is deferred
 - API schema: OpenAPI
@@ -25,13 +25,13 @@ SyncHub 主技术栈确定为 Go + Gin。
 
 ## 总体目标
 
-先做一个可靠的个人开发者工作区同步闭环：单用户、多设备、PostgreSQL、Local FS、CLI daemon。
+先做一个可靠的个人开发者工作区同步闭环：单用户、多设备、PostgreSQL、Local FS、SyncHub Desktop。
 
 优先级顺序：
 
 1. 文件上传下载正确。
 2. 元数据、版本和变更日志正确。
-3. CLI daemon 能稳定增量同步。
+3. 桌面客户端能稳定增量同步。
 4. 冲突不会静默覆盖用户文件。
 5. Docker 镜像发布、Linux Compose 部署和恢复流程稳定。
 
@@ -40,7 +40,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - WebDAV adapter。
 - S3 / OSS / MinIO storage backend。
 - 团队空间、共享目录和复杂权限模型。
-- 独立客户端 SDK、第三方客户端适配层、Web / desktop / mobile 客户端规划。
+- 独立客户端 SDK、第三方客户端适配层和移动客户端。
 - MySQL 生产级 adapter。
 
 ## Phase 0: Go 工程基础
@@ -52,8 +52,6 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 创建 Go module。
 - 建立目录结构：
   - `cmd/synchub-api`
-  - `cmd/synchub-cli`
-  - `internal/syncdaemon`
   - `internal/api`
   - `internal/auth`
   - `internal/config`
@@ -63,12 +61,11 @@ SyncHub 主技术栈确定为 Go + Gin。
   - `internal/storage`
   - `internal/sync`
   - `internal/worker`
-  - `pkg/client`
   - `migrations`
-- 引入基础依赖：gin、SQLite driver、jwt、argon2、uuid、OpenTelemetry。
+- 引入基础依赖：gin、pgx、jwt、argon2、uuid、OpenTelemetry。
 - 建立配置加载：环境变量 + typed config。
 - 建立错误模型：domain error -> API error response。
-- 建立 PostgreSQL metadata path、本地 SQLite fallback、Docker 镜像构建和 Linux Compose API 部署。
+- 建立 PostgreSQL metadata path、Docker 镜像构建和 Linux Compose API 部署。
 - 建立 CI 命令：fmt、vet、test。
 
 验收标准：
@@ -87,7 +84,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 任务：
 
 - users、refresh_tokens migration。
-- SQLite repository wrapper 和 PostgreSQL repository wrapper。
+- PostgreSQL repository。
 - 注册、登录、refresh、logout API。
 - Argon2id password hash。
 - JWT access token 和 refresh token。
@@ -105,7 +102,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 任务：
 
 - file_nodes、file_versions、change_events migration。
-- SQLite repository wrapper 和 PostgreSQL repository wrapper。
+- PostgreSQL repository。
 - 目录创建、列表、按路径查询、移动、删除 API。
 - path normalization。
 - 用户级数据隔离。
@@ -167,7 +164,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - ETag 命中返回 304。
 - 下载不存在或无权限文件返回统一错误。
 
-## Phase 2: CLI daemon 与增量同步
+## Phase 2: SyncHub Desktop 与增量同步
 
 目标：打通多设备同步闭环。
 
@@ -199,14 +196,14 @@ SyncHub 主技术栈确定为 Go + Gin。
 - ack 后游标推进。
 - 游标失效时返回明确错误，引导 full scan。
 
-### 2.3 CLI daemon MVP
+### 2.3 Desktop Sync MVP
 
 任务：
 
-- CLI login：调用服务端登录 API，并将 token 写入本地配置。
+- Desktop login：调用服务端登录 API，并将 token 写入本地配置。
 - workspace init：创建本地 `.synchub/workspace.json`，记录本地根目录、远端路径和登录上下文。
 - 本地 manifest 扫描：生成 `.synchub/manifest.json`，记录 path、relative_path、size、mtime、sha256。
-- CLI daemon 文件监听。
+- 桌面进程内后台同步循环。
 - push 本地新增 / 修改文件。
 - pull 服务端变更。
 - sync status：读取工作区配置和本地 manifest，展示本地同步准备状态。
@@ -225,7 +222,7 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 基于 base_version 和 sha256 检测冲突。
 - keep-both 默认策略。
 - 冲突文件命名。
-- CLI 展示冲突状态。
+- Desktop 展示并处理冲突状态。
 
 验收标准：
 
@@ -290,23 +287,22 @@ SyncHub 主技术栈确定为 Go + Gin。
 - 后台任务可重复执行且幂等。
 - readyz 能检查 DB 和 storage。
 
-## Later: Client Adapter
+## Completed: Native Desktop Client
 
-目标：在稳定 CLI daemon 能力之上，再考虑任意客户端形态接入。GUI 不是当前路线。
+目标：以原生桌面应用承载完整用户同步工作流，替代旧 CLI 客户端。
 
 任务：
 
-- 提供 CLI daemon local API 或 IPC，用于外部客户端读取同步状态和触发操作。
-- 固化客户端配置文件格式。
-- 提供客户端适配文档。
-- 提供 Web / desktop / mobile 接入建议，但不指定 GUI 框架。
-- 暴露冲突列表、版本历史、同步进度和错误状态。
+- Rust + GPUI 桌面应用直接调用 REST API。
+- 原生实现登录、工作区、manifest、push、pull、完整同步和后台同步。
+- 暴露冲突列表、版本历史、设备、回收站和同步错误状态。
+- 兼容读取旧登录与 workspace registry 文件，完成无损迁移。
 
 验收标准：
 
-- 第三方客户端可以通过稳定 API 获取同步状态、冲突和版本信息。
+- 桌面客户端不调用或要求安装 CLI。
 - 客户端可以触发 login、workspace init、sync、pause、resume。
-- 不引入对特定 GUI 框架的强依赖。
+- 登录后自动为注册工作区启动后台同步。
 
 ## Long-term
 
@@ -322,11 +318,11 @@ SyncHub 主技术栈确定为 Go + Gin。
 
 1. 创建 Go module 和目录骨架。
 2. 实现 `cmd/synchub-api` 的 health / ready endpoint。
-3. 建立 SQLite 开发 schema 和 users / refresh_tokens 表。
-4. 保留数据库 repository 边界，配置 pgx / MySQL driver 预留点、内置 PostgreSQL migration 和 Docker Compose。
+3. 建立 PostgreSQL users / refresh_tokens schema。
+4. 保留数据库 repository 边界，配置 pgx、内置 PostgreSQL migration 和 Docker Compose。
 5. 实现 Auth MVP。
 6. 实现 file_nodes / file_versions / change_events migration。
 7. 实现 Storage interface 和 Local FS backend。
 8. 实现 chunk upload 闭环。
 
-完成以上 8 步后，SyncHub 就具备继续做 CLI daemon 同步的服务端基础。
+以上服务端基础已经完成，当前客户端主线是 `synchub-desktop` 的可靠性、安装包和跨平台体验。

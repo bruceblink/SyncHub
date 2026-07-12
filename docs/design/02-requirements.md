@@ -4,7 +4,7 @@
 
 - 在多台机器之间同步工作区文件的开发者。
 - 需要同步 Codex、Claude Code、Cursor、VS Code、Obsidian 等工具配置和会话上下文的重度工具用户。
-- 希望通过 HTTP API / CLI 接入私有同步服务的个人开发者。
+- 希望通过 SyncHub Desktop 接入私有同步服务的个人开发者。
 
 ## Phase 1 功能需求
 
@@ -28,7 +28,7 @@
 ## Phase 3 功能需求
 
 - 文件版本历史查询与恢复。
-- CLI 操作：login、sync、status、pull、push。
+- 桌面操作：login、sync、status、pull、push。
 
 ## Later 功能需求
 
