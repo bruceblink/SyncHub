@@ -28,14 +28,15 @@ type Pinger interface {
 }
 
 type Server struct {
-	router   *gin.Engine
-	auth     *authsvc.Service
-	files    *filesvc.Service
-	sync     *syncsvc.Service
-	metadata *metadatasvc.Service
-	db       Pinger
-	storage  storage.ReadinessChecker
-	metrics  *requestMetrics
+	router                 *gin.Engine
+	auth                   *authsvc.Service
+	files                  *filesvc.Service
+	sync                   *syncsvc.Service
+	metadata               *metadatasvc.Service
+	db                     Pinger
+	storage                storage.ReadinessChecker
+	metrics                *requestMetrics
+	metadataAllowedOrigins map[string]struct{}
 }
 
 func New(auth *authsvc.Service, files *filesvc.Service, db Pinger) *Server {
@@ -58,8 +59,18 @@ func NewWithSyncAndStorage(auth *authsvc.Service, files *filesvc.Service, sync *
 	if repository, ok := db.(metadatasvc.Repository); ok {
 		metadataService = metadatasvc.NewService(repository)
 	}
-	s := &Server{router: r, auth: auth, files: files, sync: sync, metadata: metadataService, db: db, storage: store, metrics: metrics}
+	s := &Server{router: r, auth: auth, files: files, sync: sync, metadata: metadataService, db: db, storage: store, metrics: metrics, metadataAllowedOrigins: map[string]struct{}{}}
 	s.routes()
+	return s
+}
+
+func (s *Server) WithMetadataAllowedOrigins(origins []string) *Server {
+	s.metadataAllowedOrigins = make(map[string]struct{}, len(origins))
+	for _, origin := range origins {
+		if normalized := strings.TrimSpace(origin); normalized != "" {
+			s.metadataAllowedOrigins[normalized] = struct{}{}
+		}
+	}
 	return s
 }
 
@@ -186,9 +197,34 @@ func (s *Server) routes() {
 	protected.PATCH("/sync/conflicts/:id", s.resolveSyncConflict)
 
 	metadataAPI := v1.Group("/metadata/:application")
+	metadataAPI.Use(s.metadataCORSMiddleware())
+	metadataAPI.OPTIONS("/:collection", func(c *gin.Context) {})
 	metadataAPI.Use(s.requireMetadataKey())
 	metadataAPI.GET("/:collection", s.getMetadataDocument)
 	metadataAPI.PUT("/:collection", s.putMetadataDocument)
+}
+
+func (s *Server) metadataCORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		origin := strings.TrimSpace(c.GetHeader("Origin"))
+		if origin != "" {
+			if _, allowed := s.metadataAllowedOrigins[origin]; !allowed {
+				fail(c, domain.E(domain.CodePermissionDenied, "origin is not allowed", nil))
+				c.Abort()
+				return
+			}
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-Trace-ID")
+			c.Header("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+			c.Header("Vary", "Origin")
+		}
+		if c.Request.Method == http.MethodOptions {
+			c.Status(http.StatusNoContent)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 func (s *Server) subscription(c *gin.Context) {

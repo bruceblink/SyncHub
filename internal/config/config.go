@@ -30,6 +30,7 @@ type Config struct {
 	AccessTokenTTL         time.Duration
 	RefreshTokenTTL        time.Duration
 	LogLevel               string
+	MetadataAllowedOrigins []string
 }
 
 type VersionRetentionPolicy struct {
@@ -65,11 +66,23 @@ func Load() Config {
 			MinVersions: getEnvInt64("VERSION_RETENTION_MIN_VERSIONS", 20),
 			MaxAge:      time.Duration(getEnvNonNegativeInt64("VERSION_RETENTION_MAX_AGE_DAYS", 30)) * 24 * time.Hour,
 		},
-		TrashRetention:  time.Duration(getEnvNonNegativeInt64("TRASH_RETENTION_DAYS", 30)) * 24 * time.Hour,
-		AccessTokenTTL:  time.Duration(getEnvInt64("ACCESS_TOKEN_TTL_SECONDS", 15*60)) * time.Second,
-		RefreshTokenTTL: time.Duration(getEnvInt64("REFRESH_TOKEN_TTL_SECONDS", 30*24*60*60)) * time.Second,
-		LogLevel:        getEnv("LOG_LEVEL", "info"),
+		TrashRetention:         time.Duration(getEnvNonNegativeInt64("TRASH_RETENTION_DAYS", 30)) * 24 * time.Hour,
+		AccessTokenTTL:         time.Duration(getEnvInt64("ACCESS_TOKEN_TTL_SECONDS", 15*60)) * time.Second,
+		RefreshTokenTTL:        time.Duration(getEnvInt64("REFRESH_TOKEN_TTL_SECONDS", 30*24*60*60)) * time.Second,
+		LogLevel:               getEnv("LOG_LEVEL", "info"),
+		MetadataAllowedOrigins: splitCSV(os.Getenv("METADATA_ALLOWED_ORIGINS")),
 	}
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if normalized := strings.TrimSpace(part); normalized != "" {
+			values = append(values, normalized)
+		}
+	}
+	return values
 }
 
 func normalizeAppEnv(value string) string {
