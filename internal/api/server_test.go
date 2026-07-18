@@ -309,17 +309,25 @@ func TestMetadataCORSPermitsBrowserPreflight(t *testing.T) {
 
 }
 
-func TestSyncEndpointsRequireDesktopAPIKey(t *testing.T) {
+func TestSyncEndpointsAcceptDesktopAPIKeyOrAccountSession(t *testing.T) {
 	apiKey := "shk_desktop_test"
+	jwtSecret := "sync-web-admin-test-secret"
 	repo := &syncKeyRepository{keyHash: authsvc.TokenHash(apiKey)}
-	server := New(nil, nil, repo)
+	server := New(authsvc.NewService(nil, jwtSecret, 15*time.Minute, 24*time.Hour), nil, repo)
 
-	missingKey := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
-	missingKey.Header.Set("Authorization", "Bearer not-an-api-key")
-	missingKeyRec := httptest.NewRecorder()
-	server.Handler().ServeHTTP(missingKeyRec, missingKey)
-	if missingKeyRec.Code != http.StatusUnauthorized {
-		t.Fatalf("Bearer token sync status = %d body = %s", missingKeyRec.Code, missingKeyRec.Body.String())
+	missingCredentials := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
+	missingCredentialsRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(missingCredentialsRec, missingCredentials)
+	if missingCredentialsRec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing sync credentials status = %d body = %s", missingCredentialsRec.Code, missingCredentialsRec.Body.String())
+	}
+
+	invalidSession := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
+	invalidSession.Header.Set("Authorization", "Bearer invalid-session")
+	invalidSessionRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(invalidSessionRec, invalidSession)
+	if invalidSessionRec.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid account session status = %d body = %s", invalidSessionRec.Code, invalidSessionRec.Body.String())
 	}
 
 	validKey := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
@@ -328,6 +336,14 @@ func TestSyncEndpointsRequireDesktopAPIKey(t *testing.T) {
 	server.Handler().ServeHTTP(validKeyRec, validKey)
 	if validKeyRec.Code != http.StatusInternalServerError || !strings.Contains(validKeyRec.Body.String(), "sync service is not configured") {
 		t.Fatalf("valid API key should pass auth middleware: status=%d body=%s", validKeyRec.Code, validKeyRec.Body.String())
+	}
+
+	accountSession := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
+	accountSession.Header.Set("Authorization", "Bearer "+testAccessToken(t, jwtSecret, "user-1"))
+	accountSessionRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(accountSessionRec, accountSession)
+	if accountSessionRec.Code != http.StatusInternalServerError || !strings.Contains(accountSessionRec.Body.String(), "sync service is not configured") {
+		t.Fatalf("account session should pass auth middleware: status=%d body=%s", accountSessionRec.Code, accountSessionRec.Body.String())
 	}
 }
 

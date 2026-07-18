@@ -988,12 +988,23 @@ func (s *Server) requireMetadataKey() gin.HandlerFunc {
 
 func (s *Server) requireSyncKey() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if s.metadata == nil {
-			fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
-			c.Abort()
-			return
+		var userID string
+		var err error
+		if key := strings.TrimSpace(c.GetHeader("X-API-Key")); key != "" {
+			if s.metadata == nil {
+				fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
+				c.Abort()
+				return
+			}
+			userID, err = s.metadata.Authorize(c.Request.Context(), key, "synchub-desktop")
+		} else {
+			header := c.GetHeader("Authorization")
+			if s.auth == nil || !strings.HasPrefix(header, "Bearer ") {
+				err = domain.E(domain.CodeUnauthenticated, "missing sync credentials", nil)
+			} else {
+				userID, err = s.auth.VerifyAccessToken(strings.TrimPrefix(header, "Bearer "))
+			}
 		}
-		userID, err := s.metadata.Authorize(c.Request.Context(), strings.TrimSpace(c.GetHeader("X-API-Key")), "synchub-desktop")
 		if err != nil {
 			fail(c, err)
 			c.Abort()
