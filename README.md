@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-SyncHub 是面向开发者工作区的多设备同步平台。本仓库包含 Go API 服务端和 React 管理页面；最终用户通过配套的 SyncHub Desktop 桌面应用完成同步，不需要安装 CLI。
+SyncHub 是面向开发者工作区和应用数据的多设备同步平台。本仓库包含 Go API 服务端和 React 管理页面；它为 KVideo、LatestNews 等应用提供用户历史和收藏同步能力。
 
 ## 架构
 
@@ -14,6 +14,7 @@ SyncHub Desktop -> REST API -> SyncHub Server -> PostgreSQL + Object Storage
 核心能力：
 
 - 用户认证、设备注册与同步游标
+- 应用限定 API Key、订阅权益校验与用户元数据同步
 - 文件上传、下载、目录管理与软删除
 - 文件版本、固定版本与历史恢复
 - 变更事件、冲突记录和回收站
@@ -52,6 +53,23 @@ go run .\cmd\synchub-api
 配套客户端位于 `F:\project\synchub-desktop`。在桌面应用中配置服务端地址、登录并初始化工作区后，应用会自动执行后台同步，并提供文件、版本、冲突、设备和回收站管理。
 
 旧版本登录配置与工作区 registry 可继续读取以支持无损升级，但服务端发行物不再包含 CLI。
+
+## 应用数据同步
+
+用户使用 SyncHub 账号登录后，可用 Bearer Token 创建仅限 `kvideo` 或 `latestnews` 的 API Key。Key 只在创建响应中返回一次，服务端仅保存哈希；撤销后立即失效。每个 Key 只可读写对应应用支持的 collection：
+
+- `KVideo`：`watch-history`、`favorites`
+- `LatestNews`：`reading-history`、`favorites`
+
+应用通过 `X-API-Key` 调用：
+
+```text
+GET /api/v1/metadata/kvideo/watch-history
+PUT /api/v1/metadata/kvideo/watch-history
+{ "payload": [...] }
+```
+
+服务端按用户、应用与 collection 隔离文档，每次写入增加 `version`。账户订阅为 `active` 时才允许创建或使用 API Key；支付和续费系统可直接更新 `subscriptions` 表的计划、状态与到期时间。
 
 ## 验证
 

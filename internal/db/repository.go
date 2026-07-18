@@ -39,9 +39,15 @@ func (r *Repository) CreateUser(ctx context.Context, email, passwordHash string)
 		UpdatedAt:    now,
 	}
 	err := r.pool.QueryRow(ctx, `
-		insert into users (id, email, password_hash, status, created_at, updated_at)
-		values ($1, $2, $3, $4, $5, $6)
-		returning id, email, password_hash, status, created_at, updated_at
+		with created as (
+			insert into users (id, email, password_hash, status, created_at, updated_at)
+			values ($1, $2, $3, $4, $5, $6)
+			returning id, email, password_hash, status, created_at, updated_at
+		), subscription as (
+			insert into subscriptions (user_id)
+			select id from created
+		)
+		select id, email, password_hash, status, created_at, updated_at from created
 	`, user.ID, user.Email, user.PasswordHash, user.Status, user.CreatedAt, user.UpdatedAt).Scan(
 		&user.ID, &user.Email, &user.PasswordHash, &user.Status, &user.CreatedAt, &user.UpdatedAt,
 	)
@@ -96,6 +102,90 @@ func (r *Repository) GetRefreshToken(ctx context.Context, tokenHash string) (dom
 func (r *Repository) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
 	_, err := r.pool.Exec(ctx, `update refresh_tokens set revoked_at = now() where token_hash = $1`, tokenHash)
 	return wrapDBErr(err)
+}
+
+func (r *Repository) CreateAPIKey(ctx context.Context, userID, name, application, keyPrefix, secretHash string) (domain.APIKey, error) {
+	key := domain.APIKey{ID: uuid.NewString(), UserID: userID, Name: name, Application: application, KeyPrefix: keyPrefix, CreatedAt: time.Now().UTC()}
+	err := r.pool.QueryRow(ctx, `
+		insert into api_keys (id, user_id, name, application, key_prefix, secret_hash, created_at)
+		values ($1, $2, $3, $4, $5, $6, $7)
+		returning id, user_id, name, application, key_prefix, last_used_at, revoked_at, created_at
+	`, key.ID, key.UserID, key.Name, key.Application, key.KeyPrefix, secretHash, key.CreatedAt).Scan(apiKeyScan(&key)...)
+	return key, wrapDBErr(err)
+}
+
+func (r *Repository) ListAPIKeys(ctx context.Context, userID string) ([]domain.APIKey, error) {
+	rows, err := r.pool.Query(ctx, `
+		select id, user_id, name, application, key_prefix, last_used_at, revoked_at, created_at
+		from api_keys where user_id = $1 order by created_at desc
+	`, userID)
+	if err != nil {
+		return nil, wrapDBErr(err)
+	}
+	defer rows.Close()
+	keys := []domain.APIKey{}
+	for rows.Next() {
+		var key domain.APIKey
+		if err := rows.Scan(apiKeyScan(&key)...); err != nil {
+			return nil, wrapDBErr(err)
+		}
+		keys = append(keys, key)
+	}
+	return keys, wrapDBErr(rows.Err())
+}
+
+func (r *Repository) RevokeAPIKey(ctx context.Context, userID, keyID string) error {
+	result, err := r.pool.Exec(ctx, `update api_keys set revoked_at = now() where id = $1 and user_id = $2 and revoked_at is null`, keyID, userID)
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	if result.RowsAffected() == 0 {
+		return domain.E(domain.CodeNotFound, "api key not found", nil)
+	}
+	return nil
+}
+
+func (r *Repository) GetAPIKeyBySecretHash(ctx context.Context, secretHash string) (domain.APIKey, error) {
+	var key domain.APIKey
+	err := r.pool.QueryRow(ctx, `
+		select id, user_id, name, application, key_prefix, last_used_at, revoked_at, created_at
+		from api_keys where secret_hash = $1 and revoked_at is null
+	`, secretHash).Scan(apiKeyScan(&key)...)
+	return key, wrapNotFound(err, "api key not found")
+}
+
+func (r *Repository) TouchAPIKey(ctx context.Context, keyID string) error {
+	_, err := r.pool.Exec(ctx, `update api_keys set last_used_at = now() where id = $1`, keyID)
+	return wrapDBErr(err)
+}
+
+func (r *Repository) GetSubscription(ctx context.Context, userID string) (domain.Subscription, error) {
+	var subscription domain.Subscription
+	err := r.pool.QueryRow(ctx, `
+		select user_id, plan, status, expires_at, created_at, updated_at from subscriptions where user_id = $1
+	`, userID).Scan(subscriptionScan(&subscription)...)
+	return subscription, wrapNotFound(err, "subscription not found")
+}
+
+func (r *Repository) GetMetadataDocument(ctx context.Context, userID, application, collection string) (domain.MetadataDocument, error) {
+	var document domain.MetadataDocument
+	err := r.pool.QueryRow(ctx, `
+		select user_id, application, collection, payload, version, updated_at
+		from app_metadata_documents where user_id = $1 and application = $2 and collection = $3
+	`, userID, application, collection).Scan(metadataDocumentScan(&document)...)
+	return document, wrapNotFound(err, "metadata document not found")
+}
+
+func (r *Repository) PutMetadataDocument(ctx context.Context, userID, application, collection string, payload []byte) (domain.MetadataDocument, error) {
+	var document domain.MetadataDocument
+	err := r.pool.QueryRow(ctx, `
+		insert into app_metadata_documents (user_id, application, collection, payload)
+		values ($1, $2, $3, $4::jsonb)
+		on conflict (user_id, application, collection) do update
+		set payload = excluded.payload, version = app_metadata_documents.version + 1, updated_at = now()
+		returning user_id, application, collection, payload, version, updated_at
+	`, userID, application, collection, payload).Scan(metadataDocumentScan(&document)...)
+	return document, wrapDBErr(err)
 }
 
 func (r *Repository) CreateDirectory(ctx context.Context, userID, path, name string, parentID, sourceDeviceID *string) (domain.FileNode, error) {
@@ -1306,6 +1396,18 @@ func changeEventScan(e *domain.ChangeEvent) []any {
 
 func syncConflictScan(c *domain.SyncConflict) []any {
 	return []any{&c.ID, &c.UserID, &c.FileID, &c.Path, &c.LocalVersion, &c.RemoteVersion, &c.Resolution, &c.CreatedAt, &c.ResolvedAt}
+}
+
+func apiKeyScan(k *domain.APIKey) []any {
+	return []any{&k.ID, &k.UserID, &k.Name, &k.Application, &k.KeyPrefix, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt}
+}
+
+func subscriptionScan(s *domain.Subscription) []any {
+	return []any{&s.UserID, &s.Plan, &s.Status, &s.ExpiresAt, &s.CreatedAt, &s.UpdatedAt}
+}
+
+func metadataDocumentScan(d *domain.MetadataDocument) []any {
+	return []any{&d.UserID, &d.Application, &d.Collection, &d.Payload, &d.Version, &d.UpdatedAt}
 }
 
 func wrapNotFound(err error, message string) error {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	authsvc "github.com/bruceblink/SyncHub/internal/auth"
 	"github.com/bruceblink/SyncHub/internal/domain"
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
+	metadatasvc "github.com/bruceblink/SyncHub/internal/metadata"
 	"github.com/bruceblink/SyncHub/internal/storage"
 	syncsvc "github.com/bruceblink/SyncHub/internal/sync"
 	"github.com/bruceblink/SyncHub/internal/version"
@@ -26,13 +28,14 @@ type Pinger interface {
 }
 
 type Server struct {
-	router  *gin.Engine
-	auth    *authsvc.Service
-	files   *filesvc.Service
-	sync    *syncsvc.Service
-	db      Pinger
-	storage storage.ReadinessChecker
-	metrics *requestMetrics
+	router   *gin.Engine
+	auth     *authsvc.Service
+	files    *filesvc.Service
+	sync     *syncsvc.Service
+	metadata *metadatasvc.Service
+	db       Pinger
+	storage  storage.ReadinessChecker
+	metrics  *requestMetrics
 }
 
 func New(auth *authsvc.Service, files *filesvc.Service, db Pinger) *Server {
@@ -51,7 +54,11 @@ func NewWithSyncAndStorage(auth *authsvc.Service, files *filesvc.Service, sync *
 	r.Use(traceMiddleware())
 	r.Use(requestMetricsMiddleware(metrics))
 	r.Use(requestLogMiddleware())
-	s := &Server{router: r, auth: auth, files: files, sync: sync, db: db, storage: store, metrics: metrics}
+	var metadataService *metadatasvc.Service
+	if repository, ok := db.(metadatasvc.Repository); ok {
+		metadataService = metadatasvc.NewService(repository)
+	}
+	s := &Server{router: r, auth: auth, files: files, sync: sync, metadata: metadataService, db: db, storage: store, metrics: metrics}
 	s.routes()
 	return s
 }
@@ -152,6 +159,10 @@ func (s *Server) routes() {
 	protected.GET("/files", s.listFiles)
 	protected.GET("/files/search", s.searchFiles)
 	protected.GET("/account/usage", s.usage)
+	protected.GET("/account/subscription", s.subscription)
+	protected.GET("/account/api-keys", s.listAPIKeys)
+	protected.POST("/account/api-keys", s.createAPIKey)
+	protected.DELETE("/account/api-keys/:id", s.revokeAPIKey)
 	protected.GET("/trash", s.listTrash)
 	protected.POST("/trash/:id/restore", s.restoreTrash)
 	protected.DELETE("/trash/:id", s.purgeTrash)
@@ -173,6 +184,103 @@ func (s *Server) routes() {
 	protected.POST("/sync/ack", s.ackChanges)
 	protected.GET("/sync/conflicts", s.listSyncConflicts)
 	protected.PATCH("/sync/conflicts/:id", s.resolveSyncConflict)
+
+	metadataAPI := v1.Group("/metadata/:application")
+	metadataAPI.Use(s.requireMetadataKey())
+	metadataAPI.GET("/:collection", s.getMetadataDocument)
+	metadataAPI.PUT("/:collection", s.putMetadataDocument)
+}
+
+func (s *Server) subscription(c *gin.Context) {
+	if s.metadata == nil {
+		fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
+		return
+	}
+	subscription, err := s.metadata.Subscription(c.Request.Context(), userID(c))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, subscriptionDTO(subscription))
+}
+
+func (s *Server) listAPIKeys(c *gin.Context) {
+	if s.metadata == nil {
+		fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
+		return
+	}
+	keys, err := s.metadata.ListAPIKeys(c.Request.Context(), userID(c))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	items := make([]any, 0, len(keys))
+	for _, key := range keys {
+		items = append(items, apiKeyDTO(key))
+	}
+	ok(c, gin.H{"items": items})
+}
+
+func (s *Server) createAPIKey(c *gin.Context) {
+	if s.metadata == nil {
+		fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
+		return
+	}
+	var req struct {
+		Name        string `json:"name"`
+		Application string `json:"application"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+		return
+	}
+	key, secret, err := s.metadata.CreateAPIKey(c.Request.Context(), userID(c), req.Name, req.Application)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	created(c, gin.H{"api_key": apiKeyDTO(key), "secret": secret})
+}
+
+func (s *Server) revokeAPIKey(c *gin.Context) {
+	if s.metadata == nil {
+		fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
+		return
+	}
+	if err := s.metadata.RevokeAPIKey(c.Request.Context(), userID(c), c.Param("id")); err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, gin.H{"revoked": true})
+}
+
+func (s *Server) getMetadataDocument(c *gin.Context) {
+	document, err := s.metadata.GetDocument(c.Request.Context(), userID(c), c.Param("application"), c.Param("collection"))
+	if err != nil {
+		if domain.ErrorCodeOf(err) == domain.CodeNotFound {
+			ok(c, gin.H{"payload": json.RawMessage("null"), "version": 0})
+			return
+		}
+		fail(c, err)
+		return
+	}
+	ok(c, metadataDocumentDTO(document))
+}
+
+func (s *Server) putMetadataDocument(c *gin.Context) {
+	var req struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+		return
+	}
+	document, err := s.metadata.PutDocument(c.Request.Context(), userID(c), c.Param("application"), c.Param("collection"), req.Payload)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, metadataDocumentDTO(document))
 }
 
 func (s *Server) register(c *gin.Context) {
@@ -792,6 +900,25 @@ func (s *Server) requireAuth() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) requireMetadataKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s.metadata == nil {
+			fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
+			c.Abort()
+			return
+		}
+		key := strings.TrimSpace(c.GetHeader("X-API-Key"))
+		userID, err := s.metadata.Authorize(c.Request.Context(), key, c.Param("application"))
+		if err != nil {
+			fail(c, err)
+			c.Abort()
+			return
+		}
+		c.Set("user_id", userID)
+		c.Next()
+	}
+}
+
 func userID(c *gin.Context) string {
 	v, _ := c.Get("user_id")
 	id, _ := v.(string)
@@ -933,4 +1060,16 @@ func changeEventDTO(event domain.ChangeEvent) gin.H {
 
 func syncConflictDTO(conflict domain.SyncConflict) gin.H {
 	return gin.H{"id": conflict.ID, "file_id": conflict.FileID, "path": conflict.Path, "local_version": conflict.LocalVersion, "remote_version": conflict.RemoteVersion, "resolution": conflict.Resolution, "created_at": conflict.CreatedAt, "resolved_at": conflict.ResolvedAt}
+}
+
+func subscriptionDTO(subscription domain.Subscription) gin.H {
+	return gin.H{"plan": subscription.Plan, "status": subscription.Status, "expires_at": subscription.ExpiresAt}
+}
+
+func apiKeyDTO(key domain.APIKey) gin.H {
+	return gin.H{"id": key.ID, "name": key.Name, "application": key.Application, "key_prefix": key.KeyPrefix, "last_used_at": key.LastUsedAt, "revoked_at": key.RevokedAt, "created_at": key.CreatedAt}
+}
+
+func metadataDocumentDTO(document domain.MetadataDocument) gin.H {
+	return gin.H{"payload": json.RawMessage(document.Payload), "version": document.Version, "updated_at": document.UpdatedAt}
 }

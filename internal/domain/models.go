@@ -20,6 +20,35 @@ type RefreshToken struct {
 	CreatedAt time.Time
 }
 
+type Subscription struct {
+	UserID    string
+	Plan      string
+	Status    string
+	ExpiresAt *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type APIKey struct {
+	ID          string
+	UserID      string
+	Name        string
+	Application string
+	KeyPrefix   string
+	LastUsedAt  *time.Time
+	RevokedAt   *time.Time
+	CreatedAt   time.Time
+}
+
+type MetadataDocument struct {
+	UserID      string
+	Application string
+	Collection  string
+	Payload     []byte
+	Version     int64
+	UpdatedAt   time.Time
+}
+
 type FileNode struct {
 	ID               string
 	UserID           string
