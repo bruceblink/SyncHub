@@ -1,13 +1,14 @@
-import { Clock3, Folder, LogOut, MonitorCog, Trash2 } from "lucide-react";
+import { Clock3, Folder, KeyRound, LogOut, MonitorCog, Trash2 } from "lucide-react";
 import { formatSize, type StorageUsage, type User } from "./api";
 
-export type Page = "files" | "sync" | "trash" | "activity";
+export type Page = "files" | "sync" | "trash" | "activity" | "account";
 
 const pages: Array<{ id: Page; label: string; icon: typeof Folder }> = [
   { id: "files", label: "文件", icon: Folder },
   { id: "trash", label: "回收站", icon: Trash2 },
   { id: "activity", label: "活动记录", icon: Clock3 },
   { id: "sync", label: "同步状态", icon: MonitorCog },
+  { id: "account", label: "账户服务", icon: KeyRound },
 ];
 
 export function Sidebar({ page, usage, user, onNavigate, onLogout }: {

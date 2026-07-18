@@ -814,6 +814,39 @@ button {
   text-align: right;
 }
 
+.account-page { display: grid; gap: 22px; padding: 30px; }
+.section-header { display: flex; align-items: center; justify-content: space-between; }
+.section-header h1 { margin: 3px 0 0; font-size: 25px; }
+.account-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #cddbd5; background: #fff; border-radius: 8px; }
+.account-summary div { display: grid; gap: 7px; padding: 18px; border-right: 1px solid #dce7e2; }
+.account-summary div:last-child { border-right: 0; }
+.account-summary span, .key-row span, .section-title p { color: #687a75; font-size: 12px; }
+.account-summary strong { font-size: 17px; }
+.renewal-row { display: flex; align-items: center; justify-content: space-between; border: 1px solid #cddbd5; background: #fff; border-radius: 8px; padding: 14px 18px; }
+.key-section { display: grid; gap: 16px; }
+.section-title h2 { margin: 0; font-size: 18px; }
+.section-title p { margin: 5px 0 0; }
+.key-form { display: grid; grid-template-columns: minmax(220px, 1fr) 170px auto; gap: 10px; }
+.key-form input, .key-form select { min-width: 0; border: 1px solid #b9cbc4; background: #fff; color: #17211f; border-radius: 7px; padding: 11px 12px; }
+.secret-notice { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 14px; border: 1px solid #1f9d67; background: rgba(31, 157, 103, .08); border-radius: 8px; }
+.secret-notice div { display: grid; gap: 7px; min-width: 0; }
+.secret-notice code { overflow: auto; white-space: nowrap; }
+.key-list { display: grid; border: 1px solid #cddbd5; border-radius: 8px; overflow: hidden; }
+.key-row { display: grid; grid-template-columns: minmax(210px, 1fr) 170px 170px 42px; gap: 16px; align-items: center; padding: 14px 16px; border-bottom: 1px solid #dce7e2; background: #fff; }
+.key-row:last-child { border-bottom: 0; }
+.key-row > div { display: grid; gap: 4px; min-width: 0; }
+.key-row.revoked { opacity: .58; }
+.status-pill { justify-self: end; border: 1px solid #b9cbc4; border-radius: 999px; padding: 4px 8px; }
+
+@media (max-width: 900px) {
+  .account-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .account-summary div:nth-child(2) { border-right: 0; }
+  .account-summary div:nth-child(-n+2) { border-bottom: 1px solid #dce7e2; }
+  .key-form { grid-template-columns: 1fr; }
+  .key-row { grid-template-columns: 1fr auto; }
+  .key-row > div:nth-child(2), .key-row > div:nth-child(3) { display: none; }
+}
+
 .device-sync {
   display: flex;
   align-items: flex-start;

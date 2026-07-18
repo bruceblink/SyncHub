@@ -23,6 +23,30 @@ export type StorageUsage = {
   bytes_used: number;
   quota_bytes: number;
 };
+export type APIKey = {
+  id: string;
+  name: string;
+  application: "kvideo" | "latestnews";
+  key_prefix: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+};
+export type Subscription = {
+  plan: "free" | "pro";
+  status: "active" | "past_due" | "canceled" | "expired";
+  currency: string;
+  unit_amount: number;
+  billing_interval: "month" | "year";
+  expires_at: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  provider: string | null;
+};
+export type BillingOverview = {
+  subscription: Subscription;
+  payment_provider_configured: boolean;
+};
 export type RequestOptions = {
   token?: string;
   method?: string;

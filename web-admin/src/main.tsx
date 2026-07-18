@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   Download,
@@ -21,6 +21,7 @@ import { SyncStatus } from "./sync-status";
 import { VersionHistory } from "./version-history";
 import { Trash } from "./trash";
 import { Activity } from "./activity";
+import { Account } from "./account";
 import { canPreview, FilePreview } from "./file-preview";
 import { UploadQueue, type UploadTask } from "./upload-queue";
 import {
@@ -186,12 +187,12 @@ function App() {
         .catch(() => {});
     }
   }, [token, items]);
-  async function authenticatedRequest<T>(
+  const authenticatedRequest = useCallback(async function authenticatedRequest<T>(
     path: string,
     options: Omit<RequestOptions, "token"> = {},
   ) {
     return request<T>(path, { ...options, token });
-  }
+  }, [token]);
   async function search(query: string, cursor = "") {
     const requestID = ++searchRequestID.current;
     const trimmed = query.trim();
@@ -512,6 +513,8 @@ function App() {
         )}
         {page === "sync" ? (
           <SyncStatus request={authenticatedRequest} onError={setError} />
+        ) : page === "account" ? (
+          <Account request={authenticatedRequest} onError={setError} />
         ) : page === "trash" ? (
           <Trash request={authenticatedRequest} onError={setError} />
         ) : page === "activity" ? (

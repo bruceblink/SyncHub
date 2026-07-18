@@ -56,10 +56,11 @@ go run .\cmd\synchub-api
 
 ## 应用数据同步
 
-用户使用 SyncHub 账号登录后，可用 Bearer Token 创建仅限 `kvideo` 或 `latestnews` 的 API Key。Key 只在创建响应中返回一次，服务端仅保存哈希；撤销后立即失效。每个 Key 只可读写对应应用支持的 collection：
+用户使用 SyncHub 账号登录后，可用 Bearer Token 创建 API Key。Key 只在创建响应中返回一次，服务端仅保存哈希；撤销后立即失效。所有同步数据接口均要求 `X-API-Key`，Bearer Token 只用于注册、登录和账户/Key 管理。每个 Key 只可读写对应应用支持的资源：
 
 - `KVideo`：`watch-history`、`favorites`
 - `LatestNews`：`reading-history`、`favorites`
+- `SyncHub Desktop`：文件、上传、下载、设备和变更同步接口
 
 应用通过 `X-API-Key` 调用：
 
@@ -72,6 +73,8 @@ PUT /api/v1/metadata/kvideo/watch-history
 服务端按用户、应用与 collection 隔离文档，每次写入增加 `version`。账户订阅为 `active` 时才允许创建或使用 API Key；支付和续费系统可直接更新 `subscriptions` 表的计划、状态与到期时间。
 
 元数据接口允许浏览器跨域调用，所有实际读写请求都必须携带有效的 `X-API-Key`。服务端会校验 Key 是否未撤销、订阅是否有效，以及 Key 是否绑定到请求的应用；未通过校验的请求会直接被拒绝。
+
+登录管理页面后可在“账户服务”中创建、查看和撤销 API Key，并查看套餐、计费周期与续订状态。当前版本提供可接支付渠道的订阅管理接口，不会在尚未配置支付提供商时伪造结算或扣款结果。
 
 ## 验证
 
