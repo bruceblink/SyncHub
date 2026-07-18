@@ -10,6 +10,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	authsvc "github.com/bruceblink/SyncHub/internal/auth"
+	"github.com/bruceblink/SyncHub/internal/domain"
+	metadatasvc "github.com/bruceblink/SyncHub/internal/metadata"
 )
 
 func TestHealthz(t *testing.T) {
@@ -95,6 +100,19 @@ func TestVersionEndpoint(t *testing.T) {
 	}
 	if body.Code != 0 || body.Data.Name != "SyncHub" || body.Data.Version == "" {
 		t.Fatalf("version response = %#v", body)
+	}
+}
+
+func TestBillingPlansArePublic(t *testing.T) {
+	server := New(nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/billing/plans", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("billing plans status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"id":"free"`) || !strings.Contains(body, `"id":"pro"`) {
+		t.Fatalf("billing plans body = %s", body)
 	}
 }
 
@@ -291,6 +309,28 @@ func TestMetadataCORSPermitsBrowserPreflight(t *testing.T) {
 
 }
 
+func TestSyncEndpointsRequireDesktopAPIKey(t *testing.T) {
+	apiKey := "shk_desktop_test"
+	repo := &syncKeyRepository{keyHash: authsvc.TokenHash(apiKey)}
+	server := New(nil, nil, repo)
+
+	missingKey := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
+	missingKey.Header.Set("Authorization", "Bearer not-an-api-key")
+	missingKeyRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(missingKeyRec, missingKey)
+	if missingKeyRec.Code != http.StatusUnauthorized {
+		t.Fatalf("Bearer token sync status = %d body = %s", missingKeyRec.Code, missingKeyRec.Body.String())
+	}
+
+	validKey := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
+	validKey.Header.Set("X-API-Key", apiKey)
+	validKeyRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(validKeyRec, validKey)
+	if validKeyRec.Code != http.StatusInternalServerError || !strings.Contains(validKeyRec.Body.String(), "sync service is not configured") {
+		t.Fatalf("valid API key should pass auth middleware: status=%d body=%s", validKeyRec.Code, validKeyRec.Body.String())
+	}
+}
+
 type fakePinger struct {
 	calls int
 	err   error
@@ -306,6 +346,40 @@ type fakeReadinessChecker struct {
 	calls int
 	err   error
 }
+
+type syncKeyRepository struct{ keyHash string }
+
+func (r *syncKeyRepository) Ping(context.Context) error { return nil }
+func (r *syncKeyRepository) CreateAPIKey(context.Context, string, string, string, string, string) (domain.APIKey, error) {
+	return domain.APIKey{}, errors.New("not implemented")
+}
+func (r *syncKeyRepository) ListAPIKeys(context.Context, string) ([]domain.APIKey, error) {
+	return nil, errors.New("not implemented")
+}
+func (r *syncKeyRepository) RevokeAPIKey(context.Context, string, string) error {
+	return errors.New("not implemented")
+}
+func (r *syncKeyRepository) GetAPIKeyBySecretHash(_ context.Context, hash string) (domain.APIKey, error) {
+	if hash != r.keyHash {
+		return domain.APIKey{}, domain.E(domain.CodeNotFound, "api key not found", nil)
+	}
+	return domain.APIKey{ID: "desktop-key", UserID: "user-1", Application: "synchub-desktop"}, nil
+}
+func (r *syncKeyRepository) TouchAPIKey(context.Context, string) error { return nil }
+func (r *syncKeyRepository) GetSubscription(context.Context, string) (domain.Subscription, error) {
+	return domain.Subscription{Plan: "free", Status: "active", CreatedAt: time.Now(), UpdatedAt: time.Now()}, nil
+}
+func (r *syncKeyRepository) UpdateSubscriptionCancellation(context.Context, string, bool) (domain.Subscription, error) {
+	return domain.Subscription{}, errors.New("not implemented")
+}
+func (r *syncKeyRepository) GetMetadataDocument(context.Context, string, string, string) (domain.MetadataDocument, error) {
+	return domain.MetadataDocument{}, errors.New("not implemented")
+}
+func (r *syncKeyRepository) PutMetadataDocument(context.Context, string, string, string, []byte) (domain.MetadataDocument, error) {
+	return domain.MetadataDocument{}, errors.New("not implemented")
+}
+
+var _ metadatasvc.Repository = (*syncKeyRepository)(nil)
 
 func (c *fakeReadinessChecker) Ping(ctx context.Context) error {
 	_ = ctx

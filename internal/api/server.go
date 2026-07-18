@@ -147,43 +147,50 @@ func (s *Server) routes() {
 	v1.POST("/auth/login", s.login)
 	v1.POST("/auth/refresh", s.refresh)
 	v1.POST("/auth/logout", s.logout)
+	v1.GET("/billing/plans", s.billingPlans)
 
 	protected := v1.Group("")
 	protected.Use(s.requireAuth())
-	protected.GET("/files/:id", s.getFile)
-	protected.GET("/files/:id/versions", s.listFileVersions)
-	protected.POST("/files/:id/versions/:version/restore", s.restoreFileVersion)
-	protected.POST("/files/:id/versions/:version/pin", s.pinFileVersion)
-	protected.DELETE("/files/:id/versions/:version/pin", s.unpinFileVersion)
-	protected.GET("/files/by-path", s.getFileByPath)
-	protected.GET("/files", s.listFiles)
-	protected.GET("/files/search", s.searchFiles)
 	protected.GET("/account/usage", s.usage)
 	protected.GET("/account/subscription", s.subscription)
+	protected.GET("/account/billing", s.billingOverview)
+	protected.POST("/account/subscription/cancel", s.cancelSubscription)
+	protected.POST("/account/subscription/resume", s.resumeSubscription)
 	protected.GET("/account/api-keys", s.listAPIKeys)
 	protected.POST("/account/api-keys", s.createAPIKey)
 	protected.DELETE("/account/api-keys/:id", s.revokeAPIKey)
-	protected.GET("/trash", s.listTrash)
-	protected.POST("/trash/:id/restore", s.restoreTrash)
-	protected.DELETE("/trash/:id", s.purgeTrash)
-	protected.POST("/files/directories", s.createDirectory)
-	protected.PATCH("/files/:id", s.moveFile)
-	protected.DELETE("/files/:id", s.deleteFile)
-	protected.GET("/files/:id/content", s.download)
-	protected.POST("/uploads", s.initUpload)
-	protected.PUT("/uploads/:id/chunks/:index", s.putChunk)
-	protected.GET("/uploads/:id", s.uploadStatus)
-	protected.DELETE("/uploads/:id", s.abortUpload)
-	protected.POST("/uploads/:id/commit", s.commitUpload)
-	protected.GET("/devices", s.listDevices)
-	protected.POST("/devices", s.registerDevice)
-	protected.DELETE("/devices/:id", s.revokeDevice)
-	protected.POST("/devices/:id/heartbeat", s.heartbeatDevice)
-	protected.GET("/activity", s.listActivity)
-	protected.GET("/sync/changes", s.listChanges)
-	protected.POST("/sync/ack", s.ackChanges)
-	protected.GET("/sync/conflicts", s.listSyncConflicts)
-	protected.PATCH("/sync/conflicts/:id", s.resolveSyncConflict)
+
+	syncAPI := v1.Group("")
+	syncAPI.Use(s.requireSyncKey())
+	syncAPI.GET("/files/:id", s.getFile)
+	syncAPI.GET("/files/:id/versions", s.listFileVersions)
+	syncAPI.POST("/files/:id/versions/:version/restore", s.restoreFileVersion)
+	syncAPI.POST("/files/:id/versions/:version/pin", s.pinFileVersion)
+	syncAPI.DELETE("/files/:id/versions/:version/pin", s.unpinFileVersion)
+	syncAPI.GET("/files/by-path", s.getFileByPath)
+	syncAPI.GET("/files", s.listFiles)
+	syncAPI.GET("/files/search", s.searchFiles)
+	syncAPI.GET("/trash", s.listTrash)
+	syncAPI.POST("/trash/:id/restore", s.restoreTrash)
+	syncAPI.DELETE("/trash/:id", s.purgeTrash)
+	syncAPI.POST("/files/directories", s.createDirectory)
+	syncAPI.PATCH("/files/:id", s.moveFile)
+	syncAPI.DELETE("/files/:id", s.deleteFile)
+	syncAPI.GET("/files/:id/content", s.download)
+	syncAPI.POST("/uploads", s.initUpload)
+	syncAPI.PUT("/uploads/:id/chunks/:index", s.putChunk)
+	syncAPI.GET("/uploads/:id", s.uploadStatus)
+	syncAPI.DELETE("/uploads/:id", s.abortUpload)
+	syncAPI.POST("/uploads/:id/commit", s.commitUpload)
+	syncAPI.GET("/devices", s.listDevices)
+	syncAPI.POST("/devices", s.registerDevice)
+	syncAPI.DELETE("/devices/:id", s.revokeDevice)
+	syncAPI.POST("/devices/:id/heartbeat", s.heartbeatDevice)
+	syncAPI.GET("/activity", s.listActivity)
+	syncAPI.GET("/sync/changes", s.listChanges)
+	syncAPI.POST("/sync/ack", s.ackChanges)
+	syncAPI.GET("/sync/conflicts", s.listSyncConflicts)
+	syncAPI.PATCH("/sync/conflicts/:id", s.resolveSyncConflict)
 
 	metadataAPI := v1.Group("/metadata/:application")
 	metadataAPI.Use(s.metadataCORSMiddleware())
@@ -191,6 +198,13 @@ func (s *Server) routes() {
 	metadataAPI.Use(s.requireMetadataKey())
 	metadataAPI.GET("/:collection", s.getMetadataDocument)
 	metadataAPI.PUT("/:collection", s.putMetadataDocument)
+}
+
+func (s *Server) billingPlans(c *gin.Context) {
+	ok(c, gin.H{"items": []gin.H{
+		{"id": "free", "name": "Free", "currency": "USD", "unit_amount": 0, "billing_interval": "month", "features": []string{"application_metadata_sync", "api_key_management"}},
+		{"id": "pro", "name": "Pro", "currency": "USD", "unit_amount": 500, "billing_interval": "month", "features": []string{"application_metadata_sync", "api_key_management", "priority_support"}},
+	}})
 }
 
 func (s *Server) metadataCORSMiddleware() gin.HandlerFunc {
@@ -213,6 +227,43 @@ func (s *Server) subscription(c *gin.Context) {
 		return
 	}
 	subscription, err := s.metadata.Subscription(c.Request.Context(), userID(c))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, subscriptionDTO(subscription))
+}
+
+func (s *Server) billingOverview(c *gin.Context) {
+	if s.metadata == nil {
+		fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
+		return
+	}
+	subscription, err := s.metadata.Subscription(c.Request.Context(), userID(c))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, gin.H{
+		"subscription":                subscriptionDTO(subscription),
+		"payment_provider_configured": subscription.Provider != nil,
+	})
+}
+
+func (s *Server) cancelSubscription(c *gin.Context) {
+	s.updateSubscriptionCancellation(c, true)
+}
+
+func (s *Server) resumeSubscription(c *gin.Context) {
+	s.updateSubscriptionCancellation(c, false)
+}
+
+func (s *Server) updateSubscriptionCancellation(c *gin.Context, cancel bool) {
+	if s.metadata == nil {
+		fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
+		return
+	}
+	subscription, err := s.metadata.UpdateSubscriptionCancellation(c.Request.Context(), userID(c), cancel)
 	if err != nil {
 		fail(c, err)
 		return
@@ -935,6 +986,24 @@ func (s *Server) requireMetadataKey() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) requireSyncKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s.metadata == nil {
+			fail(c, domain.E(domain.CodeInternal, "metadata service is not configured", nil))
+			c.Abort()
+			return
+		}
+		userID, err := s.metadata.Authorize(c.Request.Context(), strings.TrimSpace(c.GetHeader("X-API-Key")), "synchub-desktop")
+		if err != nil {
+			fail(c, err)
+			c.Abort()
+			return
+		}
+		c.Set("user_id", userID)
+		c.Next()
+	}
+}
+
 func userID(c *gin.Context) string {
 	v, _ := c.Get("user_id")
 	id, _ := v.(string)
@@ -1079,7 +1148,14 @@ func syncConflictDTO(conflict domain.SyncConflict) gin.H {
 }
 
 func subscriptionDTO(subscription domain.Subscription) gin.H {
-	return gin.H{"plan": subscription.Plan, "status": subscription.Status, "expires_at": subscription.ExpiresAt}
+	return gin.H{
+		"plan": subscription.Plan, "status": subscription.Status,
+		"currency": subscription.Currency, "unit_amount": subscription.UnitAmount,
+		"billing_interval": subscription.BillingInterval, "expires_at": subscription.ExpiresAt,
+		"current_period_end":   subscription.CurrentPeriodEnd,
+		"cancel_at_period_end": subscription.CancelAtPeriodEnd,
+		"provider":             subscription.Provider,
+	}
 }
 
 func apiKeyDTO(key domain.APIKey) gin.H {

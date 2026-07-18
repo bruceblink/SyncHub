@@ -162,8 +162,24 @@ func (r *Repository) TouchAPIKey(ctx context.Context, keyID string) error {
 func (r *Repository) GetSubscription(ctx context.Context, userID string) (domain.Subscription, error) {
 	var subscription domain.Subscription
 	err := r.pool.QueryRow(ctx, `
-		select user_id, plan, status, expires_at, created_at, updated_at from subscriptions where user_id = $1
+		select user_id, plan, status, currency, unit_amount, billing_interval, expires_at,
+		       current_period_end, cancel_at_period_end, provider, provider_customer_id,
+		       provider_subscription_id, created_at, updated_at
+		from subscriptions where user_id = $1
 	`, userID).Scan(subscriptionScan(&subscription)...)
+	return subscription, wrapNotFound(err, "subscription not found")
+}
+
+func (r *Repository) UpdateSubscriptionCancellation(ctx context.Context, userID string, cancelAtPeriodEnd bool) (domain.Subscription, error) {
+	var subscription domain.Subscription
+	err := r.pool.QueryRow(ctx, `
+		update subscriptions
+		set cancel_at_period_end = $2, updated_at = now()
+		where user_id = $1
+		returning user_id, plan, status, currency, unit_amount, billing_interval, expires_at,
+		          current_period_end, cancel_at_period_end, provider, provider_customer_id,
+		          provider_subscription_id, created_at, updated_at
+	`, userID, cancelAtPeriodEnd).Scan(subscriptionScan(&subscription)...)
 	return subscription, wrapNotFound(err, "subscription not found")
 }
 
@@ -1403,7 +1419,7 @@ func apiKeyScan(k *domain.APIKey) []any {
 }
 
 func subscriptionScan(s *domain.Subscription) []any {
-	return []any{&s.UserID, &s.Plan, &s.Status, &s.ExpiresAt, &s.CreatedAt, &s.UpdatedAt}
+	return []any{&s.UserID, &s.Plan, &s.Status, &s.Currency, &s.UnitAmount, &s.BillingInterval, &s.ExpiresAt, &s.CurrentPeriodEnd, &s.CancelAtPeriodEnd, &s.Provider, &s.ProviderCustomerID, &s.ProviderSubscriptionID, &s.CreatedAt, &s.UpdatedAt}
 }
 
 func metadataDocumentScan(d *domain.MetadataDocument) []any {

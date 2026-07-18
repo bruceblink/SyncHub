@@ -17,6 +17,12 @@ var allowedCollections = map[string]map[string]bool{
 	"latestnews": {"reading-history": true, "favorites": true},
 }
 
+var supportedApplications = map[string]bool{
+	"kvideo":          true,
+	"latestnews":      true,
+	"synchub-desktop": true,
+}
+
 type Repository interface {
 	CreateAPIKey(ctx context.Context, userID, name, application, keyPrefix, secretHash string) (domain.APIKey, error)
 	ListAPIKeys(ctx context.Context, userID string) ([]domain.APIKey, error)
@@ -24,6 +30,7 @@ type Repository interface {
 	GetAPIKeyBySecretHash(ctx context.Context, secretHash string) (domain.APIKey, error)
 	TouchAPIKey(ctx context.Context, keyID string) error
 	GetSubscription(ctx context.Context, userID string) (domain.Subscription, error)
+	UpdateSubscriptionCancellation(ctx context.Context, userID string, cancelAtPeriodEnd bool) (domain.Subscription, error)
 	GetMetadataDocument(ctx context.Context, userID, application, collection string) (domain.MetadataDocument, error)
 	PutMetadataDocument(ctx context.Context, userID, application, collection string, payload []byte) (domain.MetadataDocument, error)
 }
@@ -35,7 +42,7 @@ func NewService(repo Repository) *Service { return &Service{repo: repo} }
 func (s *Service) CreateAPIKey(ctx context.Context, userID, name, application string) (domain.APIKey, string, error) {
 	application = normalizeApplication(application)
 	name = strings.TrimSpace(name)
-	if name == "" || len(name) > 100 || application == "" {
+	if name == "" || len(name) > 100 || !supportedApplications[application] {
 		return domain.APIKey{}, "", domain.E(domain.CodeInvalidArgument, "name and supported application are required", nil)
 	}
 	if err := s.requireActiveSubscription(ctx, userID); err != nil {
@@ -60,6 +67,17 @@ func (s *Service) RevokeAPIKey(ctx context.Context, userID, keyID string) error 
 
 func (s *Service) Subscription(ctx context.Context, userID string) (domain.Subscription, error) {
 	return s.repo.GetSubscription(ctx, userID)
+}
+
+func (s *Service) UpdateSubscriptionCancellation(ctx context.Context, userID string, cancel bool) (domain.Subscription, error) {
+	subscription, err := s.repo.GetSubscription(ctx, userID)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if subscription.Plan == "free" {
+		return domain.Subscription{}, domain.E(domain.CodeInvalidArgument, "free plan has no renewal to manage", nil)
+	}
+	return s.repo.UpdateSubscriptionCancellation(ctx, userID, cancel)
 }
 
 func (s *Service) Authorize(ctx context.Context, key, application string) (string, error) {

@@ -21,12 +21,20 @@ type RefreshToken struct {
 }
 
 type Subscription struct {
-	UserID    string
-	Plan      string
-	Status    string
-	ExpiresAt *time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	UserID                 string
+	Plan                   string
+	Status                 string
+	Currency               string
+	UnitAmount             int64
+	BillingInterval        string
+	ExpiresAt              *time.Time
+	CurrentPeriodEnd       *time.Time
+	CancelAtPeriodEnd      bool
+	Provider               *string
+	ProviderCustomerID     *string
+	ProviderSubscriptionID *string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 type APIKey struct {

@@ -14,6 +14,7 @@ import (
 	authsvc "github.com/bruceblink/SyncHub/internal/auth"
 	"github.com/bruceblink/SyncHub/internal/domain"
 	filesvc "github.com/bruceblink/SyncHub/internal/file"
+	metadatasvc "github.com/bruceblink/SyncHub/internal/metadata"
 	"github.com/bruceblink/SyncHub/internal/storage"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -113,10 +114,12 @@ func newDownloadTestServer(t *testing.T) (*Server, string, domain.FileNode, stri
 	}
 	repo := &downloadFileRepo{node: node}
 
-	secret := "test-secret"
-	authService := authsvc.NewService(nil, secret, 15*time.Minute, 24*time.Hour)
+	apiKey := "shk_download_test"
+	authService := authsvc.NewService(nil, "test-secret", 15*time.Minute, 24*time.Hour)
 	fileService := filesvc.NewService(repo, store, 4*1024*1024, 24*time.Hour)
-	return New(authService, fileService, nil), testAccessToken(t, secret, userID), node, fileETag(node)
+	server := New(authService, fileService, nil)
+	server.metadata = metadatasvc.NewService(&downloadMetadataRepo{userID: userID, keyHash: authsvc.TokenHash(apiKey)})
+	return server, apiKey, node, fileETag(node)
 }
 
 func testAccessToken(t *testing.T, secret, userID string) string {
@@ -138,11 +141,11 @@ func testAccessToken(t *testing.T, secret, userID string) string {
 	return token
 }
 
-func serveDownload(t *testing.T, server *Server, token, fileID, byteRange, ifNoneMatch string) *httptest.ResponseRecorder {
+func serveDownload(t *testing.T, server *Server, apiKey, fileID, byteRange, ifNoneMatch string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+fileID+"/content", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-API-Key", apiKey)
 	if byteRange != "" {
 		req.Header.Set("Range", byteRange)
 	}
@@ -152,6 +155,40 @@ func serveDownload(t *testing.T, server *Server, token, fileID, byteRange, ifNon
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	return rec
+}
+
+type downloadMetadataRepo struct {
+	userID  string
+	keyHash string
+}
+
+func (r *downloadMetadataRepo) CreateAPIKey(context.Context, string, string, string, string, string) (domain.APIKey, error) {
+	return domain.APIKey{}, errNotImplemented()
+}
+func (r *downloadMetadataRepo) ListAPIKeys(context.Context, string) ([]domain.APIKey, error) {
+	return nil, errNotImplemented()
+}
+func (r *downloadMetadataRepo) RevokeAPIKey(context.Context, string, string) error {
+	return errNotImplemented()
+}
+func (r *downloadMetadataRepo) GetAPIKeyBySecretHash(_ context.Context, hash string) (domain.APIKey, error) {
+	if hash != r.keyHash {
+		return domain.APIKey{}, domain.E(domain.CodeNotFound, "api key not found", nil)
+	}
+	return domain.APIKey{ID: "key-1", UserID: r.userID, Application: "synchub-desktop"}, nil
+}
+func (r *downloadMetadataRepo) TouchAPIKey(context.Context, string) error { return nil }
+func (r *downloadMetadataRepo) GetSubscription(context.Context, string) (domain.Subscription, error) {
+	return domain.Subscription{Plan: "free", Status: "active"}, nil
+}
+func (r *downloadMetadataRepo) UpdateSubscriptionCancellation(context.Context, string, bool) (domain.Subscription, error) {
+	return domain.Subscription{}, errNotImplemented()
+}
+func (r *downloadMetadataRepo) GetMetadataDocument(context.Context, string, string, string) (domain.MetadataDocument, error) {
+	return domain.MetadataDocument{}, errNotImplemented()
+}
+func (r *downloadMetadataRepo) PutMetadataDocument(context.Context, string, string, string, []byte) (domain.MetadataDocument, error) {
+	return domain.MetadataDocument{}, errNotImplemented()
 }
 
 type downloadFileRepo struct {

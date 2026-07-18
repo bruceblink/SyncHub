@@ -13,6 +13,8 @@ tags:
   - name: Auth
   - name: File
   - name: Account
+  - name: Billing
+  - name: Metadata
   - name: Upload
   - name: Download
   - name: Sync
@@ -91,6 +93,120 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StorageUsageResponse"
+  /api/v1/billing/plans:
+    get:
+      tags: [Billing]
+      summary: List available subscription plans
+      security: []
+      responses:
+        "200":
+          description: Public plan catalog.
+  /api/v1/account/billing:
+    get:
+      tags: [Billing]
+      summary: Current account billing overview
+      responses:
+        "200":
+          description: Subscription and payment provider state.
+  /api/v1/account/subscription/cancel:
+    post:
+      tags: [Billing]
+      summary: Cancel renewal at the end of the current billing period
+      responses:
+        "200":
+          description: Updated subscription.
+  /api/v1/account/subscription/resume:
+    post:
+      tags: [Billing]
+      summary: Resume automatic renewal
+      responses:
+        "200":
+          description: Updated subscription.
+  /api/v1/account/api-keys:
+    get:
+      tags: [Account]
+      summary: List current account API keys
+      responses:
+        "200":
+          description: API key metadata. Secrets are never returned.
+    post:
+      tags: [Account]
+      summary: Create an application-bound API key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, application]
+              properties:
+                name:
+                  type: string
+                application:
+                  type: string
+                  enum: [kvideo, latestnews]
+      responses:
+        "201":
+          description: API key metadata and its one-time secret.
+  /api/v1/account/api-keys/{id}:
+    delete:
+      tags: [Account]
+      summary: Revoke an API key
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: API key revoked.
+  /api/v1/metadata/{application}/{collection}:
+    options:
+      tags: [Metadata]
+      summary: Browser CORS preflight
+      security: []
+      parameters:
+        - name: application
+          in: path
+          required: true
+          schema: { type: string, enum: [kvideo, latestnews] }
+        - name: collection
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Preflight accepted. }
+    get:
+      tags: [Metadata]
+      summary: Read an application metadata document
+      security: [{ apiKeyAuth: [] }]
+      parameters:
+        - name: application
+          in: path
+          required: true
+          schema: { type: string, enum: [kvideo, latestnews] }
+        - name: collection
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Metadata payload and version. }
+    put:
+      tags: [Metadata]
+      summary: Replace an application metadata document
+      security: [{ apiKeyAuth: [] }]
+      parameters:
+        - name: application
+          in: path
+          required: true
+          schema: { type: string, enum: [kvideo, latestnews] }
+        - name: collection
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Updated metadata payload and version. }
   /api/v1/auth/register:
     post:
       tags: [Auth]
@@ -811,6 +927,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
   parameters:
     FileID:
       name: id

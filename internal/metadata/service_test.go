@@ -65,6 +65,26 @@ func TestMetadataDocumentsValidateApplicationCollections(t *testing.T) {
 	}
 }
 
+func TestCreateAPIKeyRejectsUnsupportedApplication(t *testing.T) {
+	_, _, err := NewService(newFakeRepository()).CreateAPIKey(context.Background(), "user-1", "Unknown", "unknown-app")
+	if domain.ErrorCodeOf(err) != domain.CodeInvalidArgument {
+		t.Fatalf("unsupported application error = %v", err)
+	}
+}
+
+func TestSubscriptionCancellationRejectsFreePlan(t *testing.T) {
+	repo := newFakeRepository()
+	service := NewService(repo)
+	if _, err := service.UpdateSubscriptionCancellation(context.Background(), "user-1", true); domain.ErrorCodeOf(err) != domain.CodeInvalidArgument {
+		t.Fatalf("free cancellation error = %v", err)
+	}
+	repo.subscription.Plan = "pro"
+	updated, err := service.UpdateSubscriptionCancellation(context.Background(), "user-1", true)
+	if err != nil || !updated.CancelAtPeriodEnd {
+		t.Fatalf("cancel pro subscription = %#v err=%v", updated, err)
+	}
+}
+
 type fakeRepository struct {
 	keys         map[string]domain.APIKey
 	keyHashes    map[string]string
@@ -117,6 +137,10 @@ func (r *fakeRepository) TouchAPIKey(_ context.Context, keyID string) error {
 	return nil
 }
 func (r *fakeRepository) GetSubscription(_ context.Context, _ string) (domain.Subscription, error) {
+	return r.subscription, nil
+}
+func (r *fakeRepository) UpdateSubscriptionCancellation(_ context.Context, _ string, cancel bool) (domain.Subscription, error) {
+	r.subscription.CancelAtPeriodEnd = cancel
 	return r.subscription, nil
 }
 func (r *fakeRepository) GetMetadataDocument(_ context.Context, userID, application, collection string) (domain.MetadataDocument, error) {
