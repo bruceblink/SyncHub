@@ -59,7 +59,7 @@ go run .\cmd\synchub-api
 用户使用 SyncHub 账号登录后，可用 Bearer Token 创建 API Key。Key 只在创建响应中返回一次，服务端仅保存哈希；撤销后立即失效。所有同步数据接口均要求 `X-API-Key`，Bearer Token 只用于注册、登录和账户/Key 管理。每个 Key 只可读写对应应用支持的资源：
 
 - `KVideo`：`watch-history`、`favorites`
-- `LatestNews`：`reading-history`、`favorites`
+- `LatestNews`：`reading-history`、`favorites`、`preferences`
 - `SyncHub Desktop`：文件、上传、下载、设备和变更同步接口
 
 应用通过 `X-API-Key` 调用：

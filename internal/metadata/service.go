@@ -14,7 +14,7 @@ import (
 
 var allowedCollections = map[string]map[string]bool{
 	"kvideo":     {"watch-history": true, "favorites": true},
-	"latestnews": {"reading-history": true, "favorites": true},
+	"latestnews": {"reading-history": true, "favorites": true, "preferences": true},
 }
 
 var supportedApplications = map[string]bool{

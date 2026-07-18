@@ -65,6 +65,19 @@ func TestMetadataDocumentsValidateApplicationCollections(t *testing.T) {
 	}
 }
 
+func TestLatestNewsPreferencesCollectionIsSupported(t *testing.T) {
+	service := NewService(newFakeRepository())
+	payload := json.RawMessage(`{"color_scheme":"auto","metadata":{"data":{},"action":"sync","updatedTime":1}}`)
+
+	document, err := service.PutDocument(context.Background(), "user-1", "latestnews", "preferences", payload)
+	if err != nil {
+		t.Fatalf("put LatestNews preferences: %v", err)
+	}
+	if document.Collection != "preferences" || string(document.Payload) != string(payload) {
+		t.Fatalf("preferences document = %#v", document)
+	}
+}
+
 func TestCreateAPIKeyRejectsUnsupportedApplication(t *testing.T) {
 	_, _, err := NewService(newFakeRepository()).CreateAPIKey(context.Background(), "user-1", "Unknown", "unknown-app")
 	if domain.ErrorCodeOf(err) != domain.CodeInvalidArgument {
