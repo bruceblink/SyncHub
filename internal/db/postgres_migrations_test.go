@@ -14,6 +14,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func TestEmbeddedMigrationsIncludeLatestNewsPreferencesConstraint(t *testing.T) {
+	loaded, err := loadPostgresMigrations(migrations.FS)
+	if err != nil {
+		t.Fatalf("load embedded migrations: %v", err)
+	}
+	if len(loaded) == 0 {
+		t.Fatal("no embedded migrations loaded")
+	}
+	latest := loaded[len(loaded)-1]
+	if latest.Version != "000011_add_latestnews_preferences_collection" {
+		t.Fatalf("latest migration = %q", latest.Version)
+	}
+	if !strings.Contains(latest.SQL, "'preferences'") || !strings.Contains(latest.SQL, "app_metadata_documents_collection_check") {
+		t.Fatalf("latest migration does not expand the preferences constraint: %s", latest.SQL)
+	}
+}
+
 func TestApplyPostgresMigrationsCreatesConflictSchema(t *testing.T) {
 	repo, pool := newPostgresMigrationTestRepository(t)
 	ctx := context.Background()
@@ -82,6 +99,24 @@ func TestPostgresListActivityAllowsEmptyFileFilter(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Path != "/docs" {
 		t.Fatalf("activity events = %#v, want /docs create event", events)
+	}
+}
+
+func TestPostgresStoresLatestNewsPreferencesMetadata(t *testing.T) {
+	repo, _ := newPostgresMigrationTestRepository(t)
+	ctx := context.Background()
+	user, err := repo.CreateUser(ctx, "postgres-preferences-"+uuid.NewString()+"@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	payload := []byte(`{"colorScheme":"auto"}`)
+
+	document, err := repo.PutMetadataDocument(ctx, user.ID, "latestnews", "preferences", payload)
+	if err != nil {
+		t.Fatalf("store LatestNews preferences: %v", err)
+	}
+	if document.Collection != "preferences" || string(document.Payload) != string(payload) {
+		t.Fatalf("stored preferences = %#v", document)
 	}
 }
 
