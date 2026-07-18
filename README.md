@@ -71,7 +71,7 @@ PUT /api/v1/metadata/kvideo/watch-history
 
 服务端按用户、应用与 collection 隔离文档，每次写入增加 `version`。账户订阅为 `active` 时才允许创建或使用 API Key；支付和续费系统可直接更新 `subscriptions` 表的计划、状态与到期时间。
 
-浏览器客户端需要在服务端设置 `METADATA_ALLOWED_ORIGINS`，以逗号分隔 KVideo 与 LatestNews 的实际 HTTPS 来源。未列入白名单的跨域请求会被拒绝；不要使用通配符。
+元数据接口允许浏览器跨域调用，所有实际读写请求都必须携带有效的 `X-API-Key`。服务端会校验 Key 是否未撤销、订阅是否有效，以及 Key 是否绑定到请求的应用；未通过校验的请求会直接被拒绝。
 
 ## 验证
 

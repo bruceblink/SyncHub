@@ -278,24 +278,17 @@ func TestAdminUI(t *testing.T) {
 	}
 }
 
-func TestMetadataCORSOnlyAllowsConfiguredOrigins(t *testing.T) {
-	server := New(nil, nil, nil).WithMetadataAllowedOrigins([]string{"https://kvideo.example.com"})
+func TestMetadataCORSPermitsBrowserPreflight(t *testing.T) {
+	server := New(nil, nil, nil)
 
 	allowed := httptest.NewRequest(http.MethodOptions, "/api/v1/metadata/kvideo/favorites", nil)
 	allowed.Header.Set("Origin", "https://kvideo.example.com")
 	allowedRec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(allowedRec, allowed)
-	if allowedRec.Code != http.StatusNoContent || allowedRec.Header().Get("Access-Control-Allow-Origin") != "https://kvideo.example.com" {
-		t.Fatalf("allowed CORS response = %d headers=%v", allowedRec.Code, allowedRec.Header())
+	if allowedRec.Code != http.StatusNoContent || allowedRec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("CORS preflight response = %d headers=%v", allowedRec.Code, allowedRec.Header())
 	}
 
-	blocked := httptest.NewRequest(http.MethodOptions, "/api/v1/metadata/kvideo/favorites", nil)
-	blocked.Header.Set("Origin", "https://untrusted.example.com")
-	blockedRec := httptest.NewRecorder()
-	server.Handler().ServeHTTP(blockedRec, blocked)
-	if blockedRec.Code != http.StatusForbidden {
-		t.Fatalf("blocked CORS status = %d body=%s", blockedRec.Code, blockedRec.Body.String())
-	}
 }
 
 type fakePinger struct {

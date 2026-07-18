@@ -43,7 +43,7 @@ func main() {
 	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL).WithStorageQuota(cfg.StorageQuotaBytes).WithTrashRetention(cfg.TrashRetention)
 	syncService := syncsvc.NewService(repo)
 	workerService := workersvc.NewService(repo, store)
-	apiServer := api.NewWithSyncAndStorage(authService, fileService, syncService, repo, store).WithMetadataAllowedOrigins(cfg.MetadataAllowedOrigins)
+	apiServer := api.NewWithSyncAndStorage(authService, fileService, syncService, repo, store)
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	defer stopWorker()
