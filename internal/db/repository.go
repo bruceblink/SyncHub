@@ -200,6 +200,43 @@ func (r *Repository) ConsumeOAuthLoginCode(ctx context.Context, codeHash string,
 	return user, wrapNotFound(err, "OAuth login code not found")
 }
 
+func (r *Repository) DeleteUser(ctx context.Context, userID string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		insert into object_gc_queue (storage_key, available_at)
+		select staging_key, now() from upload_sessions where user_id = $1
+		union
+		select c.storage_key, now()
+		from upload_chunks c join upload_sessions u on u.id = c.upload_id
+		where u.user_id = $1
+		on conflict (storage_key) do update set
+			status = 'pending', available_at = least(object_gc_queue.available_at, excluded.available_at), updated_at = now()
+	`, userID); err != nil {
+		return wrapDBErr(err)
+	}
+	if _, err := tx.Exec(ctx, `
+		update file_nodes set parent_id = null, current_version_id = null where user_id = $1
+	`, userID); err != nil {
+		return wrapDBErr(err)
+	}
+	result, err := tx.Exec(ctx, `delete from users where id = $1`, userID)
+	if err != nil {
+		return wrapDBErr(err)
+	}
+	if result.RowsAffected() == 0 {
+		return domain.E(domain.CodeNotFound, "user not found", nil)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return wrapDBErr(err)
+	}
+	return nil
+}
+
 func (r *Repository) CreateAPIKey(ctx context.Context, userID, name, application, keyPrefix, secretHash string) (domain.APIKey, error) {
 	key := domain.APIKey{ID: uuid.NewString(), UserID: userID, Name: name, Application: application, KeyPrefix: keyPrefix, CreatedAt: time.Now().UTC()}
 	err := r.pool.QueryRow(ctx, `

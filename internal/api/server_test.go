@@ -368,7 +368,7 @@ func TestSyncEndpointsAcceptDesktopAPIKeyOrAccountSession(t *testing.T) {
 	apiKey := "shk_desktop_test"
 	jwtSecret := "sync-web-admin-test-secret"
 	repo := &syncKeyRepository{keyHash: authsvc.TokenHash(apiKey)}
-	server := New(authsvc.NewService(nil, jwtSecret, 15*time.Minute, 24*time.Hour), nil, repo)
+	server := New(authsvc.NewService(repo, jwtSecret, 15*time.Minute, 24*time.Hour), nil, repo)
 
 	missingCredentials := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	missingCredentialsRec := httptest.NewRecorder()
@@ -402,6 +402,39 @@ func TestSyncEndpointsAcceptDesktopAPIKeyOrAccountSession(t *testing.T) {
 	}
 }
 
+func TestDeleteAccountRequiresConfirmationAndInvalidatesSession(t *testing.T) {
+	jwtSecret := "delete-account-test-secret"
+	repo := &syncKeyRepository{}
+	server := New(authsvc.NewService(repo, jwtSecret, 15*time.Minute, 24*time.Hour), nil, repo)
+	token := testAccessToken(t, jwtSecret, "user-1")
+
+	wrong := httptest.NewRequest(http.MethodDelete, "/api/v1/account", strings.NewReader(`{"email":"wrong@example.com"}`))
+	wrong.Header.Set("Authorization", "Bearer "+token)
+	wrong.Header.Set("Content-Type", "application/json")
+	wrongRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(wrongRec, wrong)
+	if wrongRec.Code != http.StatusUnauthorized || repo.deleted {
+		t.Fatalf("wrong confirmation response = %d %s deleted=%v", wrongRec.Code, wrongRec.Body.String(), repo.deleted)
+	}
+
+	valid := httptest.NewRequest(http.MethodDelete, "/api/v1/account", strings.NewReader(`{"email":"user@example.com"}`))
+	valid.Header.Set("Authorization", "Bearer "+token)
+	valid.Header.Set("Content-Type", "application/json")
+	validRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(validRec, valid)
+	if validRec.Code != http.StatusOK || !repo.deleted {
+		t.Fatalf("delete response = %d %s deleted=%v", validRec.Code, validRec.Body.String(), repo.deleted)
+	}
+
+	reused := httptest.NewRequest(http.MethodGet, "/api/v1/account/usage", nil)
+	reused.Header.Set("Authorization", "Bearer "+token)
+	reusedRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(reusedRec, reused)
+	if reusedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted account session status = %d body=%s", reusedRec.Code, reusedRec.Body.String())
+	}
+}
+
 type fakePinger struct {
 	calls int
 	err   error
@@ -418,9 +451,46 @@ type fakeReadinessChecker struct {
 	err   error
 }
 
-type syncKeyRepository struct{ keyHash string }
+type syncKeyRepository struct {
+	keyHash string
+	deleted bool
+}
 
 func (r *syncKeyRepository) Ping(context.Context) error { return nil }
+func (r *syncKeyRepository) CreateUser(context.Context, string, string) (domain.User, error) {
+	return domain.User{}, errors.New("not implemented")
+}
+func (r *syncKeyRepository) GetUserByEmail(context.Context, string) (domain.User, error) {
+	return domain.User{}, errors.New("not implemented")
+}
+func (r *syncKeyRepository) GetUserByID(_ context.Context, id string) (domain.User, error) {
+	if id != "user-1" || r.deleted {
+		return domain.User{}, domain.E(domain.CodeNotFound, "user not found", nil)
+	}
+	return domain.User{ID: id, Email: "user@example.com", Status: "active"}, nil
+}
+func (r *syncKeyRepository) CreateRefreshToken(context.Context, string, string, time.Time) (domain.RefreshToken, error) {
+	return domain.RefreshToken{}, errors.New("not implemented")
+}
+func (r *syncKeyRepository) GetRefreshToken(context.Context, string) (domain.RefreshToken, error) {
+	return domain.RefreshToken{}, errors.New("not implemented")
+}
+func (r *syncKeyRepository) RevokeRefreshToken(context.Context, string) error {
+	return errors.New("not implemented")
+}
+func (r *syncKeyRepository) ResolveOAuthUser(context.Context, string, string, string, string, string) (domain.User, error) {
+	return domain.User{}, errors.New("not implemented")
+}
+func (r *syncKeyRepository) CreateOAuthLoginCode(context.Context, string, string, time.Time) error {
+	return errors.New("not implemented")
+}
+func (r *syncKeyRepository) ConsumeOAuthLoginCode(context.Context, string, time.Time) (domain.User, error) {
+	return domain.User{}, errors.New("not implemented")
+}
+func (r *syncKeyRepository) DeleteUser(context.Context, string) error {
+	r.deleted = true
+	return nil
+}
 func (r *syncKeyRepository) CreateAPIKey(context.Context, string, string, string, string, string) (domain.APIKey, error) {
 	return domain.APIKey{}, errors.New("not implemented")
 }
@@ -451,6 +521,7 @@ func (r *syncKeyRepository) PutMetadataDocument(context.Context, string, string,
 }
 
 var _ metadatasvc.Repository = (*syncKeyRepository)(nil)
+var _ authsvc.Repository = (*syncKeyRepository)(nil)
 
 func (c *fakeReadinessChecker) Ping(ctx context.Context) error {
 	_ = ctx

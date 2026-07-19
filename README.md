@@ -58,6 +58,8 @@ go run .\cmd\synchub-api
 
 管理页面支持邮箱密码注册/登录和 GitHub OAuth2 登录。生产环境配置 `GITHUB_OAUTH_CLIENT_ID`、`GITHUB_OAUTH_CLIENT_SECRET`，并将 GitHub OAuth App 回调地址设置为 `https://sync.likanug.app/api/v1/auth/github/callback`。首次 GitHub 登录会使用 GitHub 已验证的主邮箱关联同邮箱注册用户；没有对应用户时创建一个仅支持第三方登录的账户。之后按 GitHub 用户 ID 登录同一账户。
 
+账户页面支持永久注销。密码账户需确认邮箱和当前密码；仅使用 GitHub 登录的账户需确认邮箱。注销会撤销全部会话和 API Key，并删除同步数据与云端文件。
+
 ## 应用数据同步
 
 用户使用 SyncHub 账号登录后，可用 Bearer Token 创建 API Key。Key 只在创建响应中返回一次，服务端仅保存哈希；撤销后立即失效。所有同步数据接口均要求 `X-API-Key`，Bearer Token 只用于注册、登录和账户/Key 管理。每个 Key 只可读写对应应用支持的资源：

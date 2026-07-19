@@ -183,6 +183,51 @@ func TestPostgresOAuthIdentityCreatesPasswordlessUser(t *testing.T) {
 	}
 }
 
+func TestPostgresDeleteUserCascadesAccountDataAndQueuesStorageObjects(t *testing.T) {
+	repo, pool := newPostgresMigrationTestRepository(t)
+	ctx := context.Background()
+	user, err := repo.CreateUser(ctx, "postgres-delete-"+uuid.NewString()+"@example.com", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := repo.CreateAPIKey(ctx, user.ID, "test key", "kvideo", "shk_test", "secret-hash-"+uuid.NewString()); err != nil {
+		t.Fatalf("create API key: %v", err)
+	}
+	if _, err := repo.PutMetadataDocument(ctx, user.ID, "kvideo", "favorites", []byte(`[]`)); err != nil {
+		t.Fatalf("create metadata: %v", err)
+	}
+	fileStorageKey := "objects/" + user.ID + "/file"
+	commitPostgresTestFile(t, repo, user.ID, "/delete-me.txt", fileStorageKey)
+	upload, err := repo.CreateUploadSession(ctx, domain.UploadSession{
+		UserID: user.ID, TargetPath: "/pending.txt", TotalSize: 1, ChunkSize: 1, SHA256: "hash",
+		StagingKey: "staging/" + user.ID + "/pending", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("create pending upload: %v", err)
+	}
+	chunkStorageKey := upload.StagingKey + "/0"
+	if _, err := repo.PutUploadChunk(ctx, upload.ID, 0, 1, "hash", chunkStorageKey); err != nil {
+		t.Fatalf("create pending chunk: %v", err)
+	}
+
+	if err := repo.DeleteUser(ctx, user.ID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+	for _, table := range []string{"users", "subscriptions", "api_keys", "app_metadata_documents", "file_nodes", "file_versions", "upload_sessions", "upload_chunks", "refresh_tokens"} {
+		var count int
+		query := "select count(*) from " + pgx.Identifier{table}.Sanitize()
+		if err := pool.QueryRow(ctx, query).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s count = %d err=%v", table, count, err)
+		}
+	}
+	for _, storageKey := range []string{fileStorageKey, upload.StagingKey, chunkStorageKey} {
+		var queued bool
+		if err := pool.QueryRow(ctx, `select exists(select 1 from object_gc_queue where storage_key = $1)`, storageKey).Scan(&queued); err != nil || !queued {
+			t.Fatalf("storage key %q queued = %v err=%v", storageKey, queued, err)
+		}
+	}
+}
+
 func TestPostgresObjectGCQueueProtectsReferencedAndReusedObjects(t *testing.T) {
 	repo, pool := newPostgresMigrationTestRepository(t)
 	ctx := context.Background()

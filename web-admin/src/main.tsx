@@ -538,7 +538,7 @@ function App() {
         {page === "sync" ? (
           <SyncStatus request={authenticatedRequest} onError={setError} />
         ) : page === "account" ? (
-          <Account request={authenticatedRequest} onError={setError} />
+          <Account request={authenticatedRequest} email={user?.email ?? ""} onDeleted={logout} onError={setError} />
         ) : page === "trash" ? (
           <Trash request={authenticatedRequest} onError={setError} />
         ) : page === "activity" ? (

@@ -837,12 +837,17 @@ button {
 .key-row > div { display: grid; gap: 4px; min-width: 0; }
 .key-row.revoked { opacity: .58; }
 .status-pill { justify-self: end; border: 1px solid #b9cbc4; border-radius: 999px; padding: 4px 8px; }
+.danger-zone { display: grid; gap: 16px; padding-top: 22px; border-top: 1px solid #e1c2c2; }
+.danger-zone h2 { color: #9f2f2f; }
+.delete-account-form { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto; gap: 10px; }
+.delete-account-form input { min-width: 0; border: 1px solid #d3b3b3; background: #fff; color: #17211f; border-radius: 7px; padding: 11px 12px; }
 
 @media (max-width: 900px) {
   .account-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .account-summary div:nth-child(2) { border-right: 0; }
   .account-summary div:nth-child(-n+2) { border-bottom: 1px solid #dce7e2; }
   .key-form { grid-template-columns: 1fr; }
+	.delete-account-form { grid-template-columns: 1fr; }
   .key-row { grid-template-columns: 1fr auto; }
   .key-row > div:nth-child(2), .key-row > div:nth-child(3) { display: none; }
 }

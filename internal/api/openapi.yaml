@@ -93,6 +93,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StorageUsageResponse"
+  /api/v1/account:
+    delete:
+      tags: [Account]
+      summary: Permanently delete the current account and its data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                password:
+                  type: string
+                  description: Required for password accounts and omitted for OAuth-only accounts.
+      responses:
+        "200": { description: Account permanently deleted. }
+        "401": { description: Email or password confirmation failed. }
   /api/v1/billing/plans:
     get:
       tags: [Billing]

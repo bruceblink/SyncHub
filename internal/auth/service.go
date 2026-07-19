@@ -25,6 +25,7 @@ type Repository interface {
 	ResolveOAuthUser(ctx context.Context, provider, providerUserID, email, login, avatarURL string) (domain.User, error)
 	CreateOAuthLoginCode(ctx context.Context, userID, codeHash string, expiresAt time.Time) error
 	ConsumeOAuthLoginCode(ctx context.Context, codeHash string, now time.Time) (domain.User, error)
+	DeleteUser(ctx context.Context, userID string) error
 }
 
 type Service struct {
@@ -114,6 +115,26 @@ func (s *Service) ExchangeOAuthLoginCode(ctx context.Context, code string) (doma
 	return user, tokens, err
 }
 
+func (s *Service) DeleteAccount(ctx context.Context, userID, email, password string) error {
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return domain.E(domain.CodeUnauthenticated, "account is not available", err)
+	}
+	if normalizeEmail(email) != normalizeEmail(user.Email) {
+		return domain.E(domain.CodeInvalidCredentials, "account email does not match", nil)
+	}
+	if user.PasswordHash != "" {
+		ok, verifyErr := VerifyPassword(password, user.PasswordHash)
+		if verifyErr != nil || !ok {
+			return domain.E(domain.CodeInvalidCredentials, "invalid password", verifyErr)
+		}
+	}
+	if err := s.repo.DeleteUser(ctx, user.ID); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
 	hash := TokenHash(refreshToken)
 	stored, err := s.repo.GetRefreshToken(ctx, hash)
@@ -133,13 +154,16 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	return s.repo.RevokeRefreshToken(ctx, TokenHash(refreshToken))
 }
 
-func (s *Service) VerifyAccessToken(tokenString string) (string, error) {
+func (s *Service) VerifyAccessToken(ctx context.Context, tokenString string) (string, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 		return s.jwtSecret, nil
 	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 	if err != nil || !token.Valid || claims.UserID == "" {
 		return "", domain.E(domain.CodeUnauthenticated, "invalid access token", err)
+	}
+	if _, err := s.repo.GetUserByID(ctx, claims.UserID); err != nil {
+		return "", domain.E(domain.CodeUnauthenticated, "account is no longer active", err)
 	}
 	return claims.UserID, nil
 }

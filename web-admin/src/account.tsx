@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, KeyRound, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Copy, KeyRound, Plus, RefreshCw, Trash2 } from "lucide-react";
 import {
   errorMessage,
   formatDate,
@@ -10,13 +10,16 @@ import {
 
 type AccountRequest = <T>(path: string, options?: Omit<RequestOptions, "token">) => Promise<T>;
 
-export function Account({ request, onError }: { request: AccountRequest; onError: (message: string) => void }) {
+export function Account({ request, email, onDeleted, onError }: { request: AccountRequest; email: string; onDeleted: () => void; onError: (message: string) => void }) {
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [billing, setBilling] = useState<BillingOverview | null>(null);
   const [name, setName] = useState("");
   const [application, setApplication] = useState<APIKey["application"]>("kvideo");
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+	const [confirmEmail, setConfirmEmail] = useState("");
+	const [password, setPassword] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -68,6 +71,20 @@ export function Account({ request, onError }: { request: AccountRequest; onError
     finally { setBusy(false); }
   }
 
+	async function deleteAccount(event: React.FormEvent) {
+		event.preventDefault();
+		if (!window.confirm("账户、API Key、同步数据和云端文件将被永久删除，且无法恢复。确认注销？")) return;
+		setDeleting(true);
+		try {
+			await request("/account", { method: "DELETE", body: { email: confirmEmail, password } });
+			onDeleted();
+		} catch (error) {
+			onError(errorMessage(error));
+		} finally {
+			setDeleting(false);
+		}
+	}
+
   const subscription = billing?.subscription;
   return (
     <div className="account-page">
@@ -114,6 +131,15 @@ export function Account({ request, onError }: { request: AccountRequest; onError
           ))}
         </div>
       </section>
+
+		<section className="danger-zone">
+			<div className="section-title"><div><h2>注销账户</h2><p>永久删除账户、API Key、同步数据和云端文件。GitHub 登录账户无需填写密码。</p></div></div>
+			<form className="delete-account-form" onSubmit={deleteAccount}>
+				<input type="email" value={confirmEmail} onChange={(event) => setConfirmEmail(event.target.value)} placeholder={`输入 ${email} 确认`} required />
+				<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="当前密码（GitHub 登录可留空）" autoComplete="current-password" />
+				<button className="danger-button" disabled={deleting || confirmEmail.trim().toLowerCase() !== email.trim().toLowerCase()}><Trash2 size={17} />{deleting ? "正在注销..." : "永久注销账户"}</button>
+			</form>
+		</section>
     </div>
   );
 }

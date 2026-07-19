@@ -173,6 +173,7 @@ func (s *Server) routes() {
 	protected.GET("/account/api-keys", s.listAPIKeys)
 	protected.POST("/account/api-keys", s.createAPIKey)
 	protected.DELETE("/account/api-keys/:id", s.revokeAPIKey)
+	protected.DELETE("/account", s.deleteAccount)
 
 	syncAPI := v1.Group("")
 	syncAPI.Use(s.requireSyncKey())
@@ -337,6 +338,22 @@ func (s *Server) revokeAPIKey(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"revoked": true})
+}
+
+func (s *Server) deleteAccount(c *gin.Context) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+		return
+	}
+	if err := s.auth.DeleteAccount(c.Request.Context(), userID(c), req.Email, req.Password); err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, gin.H{"deleted": true})
 }
 
 func (s *Server) getMetadataDocument(c *gin.Context) {
@@ -1048,7 +1065,7 @@ func (s *Server) requireAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		id, err := s.auth.VerifyAccessToken(strings.TrimPrefix(header, "Bearer "))
+		id, err := s.auth.VerifyAccessToken(c.Request.Context(), strings.TrimPrefix(header, "Bearer "))
 		if err != nil {
 			fail(c, err)
 			c.Abort()
@@ -1094,7 +1111,7 @@ func (s *Server) requireSyncKey() gin.HandlerFunc {
 			if s.auth == nil || !strings.HasPrefix(header, "Bearer ") {
 				err = domain.E(domain.CodeUnauthenticated, "missing sync credentials", nil)
 			} else {
-				userID, err = s.auth.VerifyAccessToken(strings.TrimPrefix(header, "Bearer "))
+				userID, err = s.auth.VerifyAccessToken(c.Request.Context(), strings.TrimPrefix(header, "Bearer "))
 			}
 		}
 		if err != nil {

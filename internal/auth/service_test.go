@@ -34,6 +34,7 @@ type authRepository struct {
 	oauthUserID   string
 	oauthEmail    string
 	codes         map[string]time.Time
+	deletedUserID string
 }
 
 func newAuthRepository() *authRepository {
@@ -47,6 +48,9 @@ func (r *authRepository) GetUserByEmail(context.Context, string) (domain.User, e
 	return r.user, nil
 }
 func (r *authRepository) GetUserByID(context.Context, string) (domain.User, error) {
+	if r.deletedUserID != "" {
+		return domain.User{}, domain.E(domain.CodeNotFound, "not found", nil)
+	}
 	return r.user, nil
 }
 func (r *authRepository) CreateRefreshToken(_ context.Context, userID, tokenHash string, expiresAt time.Time) (domain.RefreshToken, error) {
@@ -71,6 +75,63 @@ func (r *authRepository) ConsumeOAuthLoginCode(_ context.Context, codeHash strin
 	}
 	delete(r.codes, codeHash)
 	return r.user, nil
+}
+func (r *authRepository) DeleteUser(_ context.Context, userID string) error {
+	r.deletedUserID = userID
+	return nil
+}
+
+func TestDeleteAccountRequiresEmailAndPasswordForPasswordUser(t *testing.T) {
+	repo := newAuthRepository()
+	hash, err := HashPassword("password123")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	repo.user.PasswordHash = hash
+	service := NewService(repo, "delete-test-secret", 15*time.Minute, time.Hour)
+
+	if err := service.DeleteAccount(context.Background(), repo.user.ID, "other@example.com", "password123"); domain.ErrorCodeOf(err) != domain.CodeInvalidCredentials {
+		t.Fatalf("wrong email error = %v", err)
+	}
+	if err := service.DeleteAccount(context.Background(), repo.user.ID, repo.user.Email, "wrong-password"); domain.ErrorCodeOf(err) != domain.CodeInvalidCredentials {
+		t.Fatalf("wrong password error = %v", err)
+	}
+	if err := service.DeleteAccount(context.Background(), repo.user.ID, "USER@example.com", "password123"); err != nil {
+		t.Fatalf("delete password account: %v", err)
+	}
+	if repo.deletedUserID != repo.user.ID {
+		t.Fatalf("deleted user = %q", repo.deletedUserID)
+	}
+}
+
+func TestDeleteAccountAllowsPasswordlessOAuthUserWithEmailConfirmation(t *testing.T) {
+	repo := newAuthRepository()
+	service := NewService(repo, "delete-test-secret", 15*time.Minute, time.Hour)
+
+	if err := service.DeleteAccount(context.Background(), repo.user.ID, repo.user.Email, ""); err != nil {
+		t.Fatalf("delete OAuth account: %v", err)
+	}
+	if repo.deletedUserID != repo.user.ID {
+		t.Fatalf("deleted user = %q", repo.deletedUserID)
+	}
+}
+
+func TestDeletedAccountAccessTokenIsRejectedImmediately(t *testing.T) {
+	repo := newAuthRepository()
+	service := NewService(repo, "delete-token-test-secret", 15*time.Minute, time.Hour)
+	tokens, err := service.issueTokens(context.Background(), repo.user.ID)
+	if err != nil {
+		t.Fatalf("issue tokens: %v", err)
+	}
+	if _, err := service.VerifyAccessToken(context.Background(), tokens.AccessToken); err != nil {
+		t.Fatalf("verify active account token: %v", err)
+	}
+	if err := service.DeleteAccount(context.Background(), repo.user.ID, repo.user.Email, ""); err != nil {
+		t.Fatalf("delete account: %v", err)
+	}
+	if _, err := service.VerifyAccessToken(context.Background(), tokens.AccessToken); domain.ErrorCodeOf(err) != domain.CodeUnauthenticated {
+		t.Fatalf("deleted account token error = %v", err)
+	}
 }
 
 var _ Repository = (*authRepository)(nil)
