@@ -35,6 +35,7 @@ type authRepository struct {
 	oauthEmail    string
 	codes         map[string]time.Time
 	deletedUserID string
+	revokedToken  string
 }
 
 func newAuthRepository() *authRepository {
@@ -59,7 +60,10 @@ func (r *authRepository) CreateRefreshToken(_ context.Context, userID, tokenHash
 func (r *authRepository) GetRefreshToken(context.Context, string) (domain.RefreshToken, error) {
 	return domain.RefreshToken{}, domain.E(domain.CodeNotFound, "not found", nil)
 }
-func (r *authRepository) RevokeRefreshToken(context.Context, string) error { return nil }
+func (r *authRepository) RevokeRefreshToken(_ context.Context, tokenHash string) error {
+	r.revokedToken = tokenHash
+	return nil
+}
 func (r *authRepository) ResolveOAuthUser(_ context.Context, provider, providerUserID, email, _, _ string) (domain.User, error) {
 	r.oauthProvider, r.oauthUserID, r.oauthEmail = provider, providerUserID, email
 	return r.user, nil
@@ -131,6 +135,18 @@ func TestDeletedAccountAccessTokenIsRejectedImmediately(t *testing.T) {
 	}
 	if _, err := service.VerifyAccessToken(context.Background(), tokens.AccessToken); domain.ErrorCodeOf(err) != domain.CodeUnauthenticated {
 		t.Fatalf("deleted account token error = %v", err)
+	}
+}
+
+func TestLogoutRevokesRefreshTokenByHash(t *testing.T) {
+	repo := newAuthRepository()
+	service := NewService(repo, "logout-test-secret", 15*time.Minute, time.Hour)
+
+	if err := service.Logout(context.Background(), "refresh-token"); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if repo.revokedToken != TokenHash("refresh-token") {
+		t.Fatalf("revoked token hash = %q", repo.revokedToken)
 	}
 }
 
