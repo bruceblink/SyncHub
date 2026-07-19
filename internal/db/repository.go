@@ -146,7 +146,7 @@ func (r *Repository) ResolveOAuthUser(ctx context.Context, provider, providerUse
 			with created as (
 				insert into users (id, email, password_hash, status, created_at, updated_at)
 				values ($1, $2, null, $3, $4, $5)
-				returning id, email, coalesce(password_hash, ''), status, created_at, updated_at
+				returning id, email, password_hash, status, created_at, updated_at
 			), subscription as (
 				insert into subscriptions (user_id) select id from created
 			)
