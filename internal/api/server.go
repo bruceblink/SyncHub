@@ -148,6 +148,8 @@ func (s *Server) routes() {
 	v1.POST("/auth/refresh", s.refresh)
 	v1.POST("/auth/logout", s.logout)
 	v1.GET("/billing/plans", s.billingPlans)
+	v1.OPTIONS("/metadata/capabilities", s.metadataCORSMiddleware())
+	v1.GET("/metadata/capabilities", s.metadataCORSMiddleware(), s.metadataCapabilities)
 
 	protected := v1.Group("")
 	protected.Use(s.requireAuth())
@@ -219,6 +221,10 @@ func (s *Server) metadataCORSMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func (s *Server) metadataCapabilities(c *gin.Context) {
+	ok(c, metadatasvc.MetadataCapabilities())
 }
 
 func (s *Server) subscription(c *gin.Context) {

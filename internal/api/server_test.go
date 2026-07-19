@@ -309,6 +309,30 @@ func TestMetadataCORSPermitsBrowserPreflight(t *testing.T) {
 
 }
 
+func TestMetadataCapabilitiesArePublicAndMatchClientContract(t *testing.T) {
+	server := New(nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metadata/capabilities", nil)
+	req.Header.Set("Origin", "https://third-party.example")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("capabilities response = %d headers=%v body=%s", rec.Code, rec.Header(), rec.Body.String())
+	}
+	var body struct {
+		Data metadatasvc.Capabilities `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode capabilities: %v", err)
+	}
+	if got := body.Data.Applications["kvideo"].Collections; len(got) != 2 || got[0] != "watch-history" || got[1] != "favorites" {
+		t.Fatalf("KVideo collections = %#v", got)
+	}
+	if got := body.Data.Applications["latestnews"].Collections; len(got) != 3 || got[0] != "reading-history" || got[1] != "favorites" || got[2] != "preferences" {
+		t.Fatalf("LatestNews collections = %#v", got)
+	}
+}
+
 func TestSyncEndpointsAcceptDesktopAPIKeyOrAccountSession(t *testing.T) {
 	apiKey := "shk_desktop_test"
 	jwtSecret := "sync-web-admin-test-secret"

@@ -161,6 +161,20 @@ paths:
       responses:
         "200":
           description: API key revoked.
+  /api/v1/metadata/capabilities:
+    get:
+      tags: [Metadata]
+      summary: Discover the public application metadata sync contract
+      security: []
+      responses:
+        "200":
+          description: Authentication scheme, document limit, applications, and collections.
+    options:
+      tags: [Metadata]
+      summary: Browser CORS preflight
+      security: []
+      responses:
+        "204": { description: Preflight accepted. }
   /api/v1/metadata/{application}/{collection}:
     options:
       tags: [Metadata]

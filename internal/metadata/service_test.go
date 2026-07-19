@@ -85,6 +85,23 @@ func TestCreateAPIKeyRejectsUnsupportedApplication(t *testing.T) {
 	}
 }
 
+func TestMetadataCapabilitiesMatchSupportedCollections(t *testing.T) {
+	capabilities := MetadataCapabilities()
+	if capabilities.Authentication != "api_key" || capabilities.APIKeyHeader != "X-API-Key" {
+		t.Fatalf("authentication capability = %#v", capabilities)
+	}
+	if capabilities.MaxDocumentBytes != MaxDocumentBytes {
+		t.Fatalf("max document bytes = %d", capabilities.MaxDocumentBytes)
+	}
+	for application, capability := range capabilities.Applications {
+		for _, collection := range capability.Collections {
+			if !validCollection(application, collection) {
+				t.Fatalf("advertised unsupported collection %s/%s", application, collection)
+			}
+		}
+	}
+}
+
 func TestSubscriptionCancellationRejectsFreePlan(t *testing.T) {
 	repo := newFakeRepository()
 	service := NewService(repo)

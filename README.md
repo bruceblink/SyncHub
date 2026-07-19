@@ -62,6 +62,8 @@ go run .\cmd\synchub-api
 - `LatestNews`：`reading-history`、`favorites`、`preferences`
 - `SyncHub Desktop`：文件、上传、下载、设备和变更同步接口
 
+生产服务地址为 `https://sync.likanug.app`。客户端可在不携带 API Key 的情况下请求 `GET /api/v1/metadata/capabilities`，发现鉴权头、文档大小限制以及当前应用和 collection 映射；实际读取或写入同步数据仍必须携带与应用绑定的有效 `X-API-Key`。
+
 应用通过 `X-API-Key` 调用：
 
 ```text

@@ -12,15 +12,41 @@ import (
 	"github.com/bruceblink/SyncHub/internal/domain"
 )
 
-var allowedCollections = map[string]map[string]bool{
-	"kvideo":     {"watch-history": true, "favorites": true},
-	"latestnews": {"reading-history": true, "favorites": true, "preferences": true},
+var applicationCollections = map[string][]string{
+	"kvideo":     {"watch-history", "favorites"},
+	"latestnews": {"reading-history", "favorites", "preferences"},
 }
 
 var supportedApplications = map[string]bool{
 	"kvideo":          true,
 	"latestnews":      true,
 	"synchub-desktop": true,
+}
+
+const MaxDocumentBytes = 1024 * 1024
+
+type ApplicationCapability struct {
+	Collections []string `json:"collections"`
+}
+
+type Capabilities struct {
+	Authentication   string                           `json:"authentication"`
+	APIKeyHeader     string                           `json:"api_key_header"`
+	MaxDocumentBytes int                              `json:"max_document_bytes"`
+	Applications     map[string]ApplicationCapability `json:"applications"`
+}
+
+func MetadataCapabilities() Capabilities {
+	applications := make(map[string]ApplicationCapability, len(applicationCollections))
+	for application, collections := range applicationCollections {
+		applications[application] = ApplicationCapability{Collections: append([]string(nil), collections...)}
+	}
+	return Capabilities{
+		Authentication:   "api_key",
+		APIKeyHeader:     "X-API-Key",
+		MaxDocumentBytes: MaxDocumentBytes,
+		Applications:     applications,
+	}
 }
 
 type Repository interface {
@@ -109,7 +135,7 @@ func (s *Service) PutDocument(ctx context.Context, userID, application, collecti
 	if !validCollection(application, collection) || !json.Valid(payload) {
 		return domain.MetadataDocument{}, domain.E(domain.CodeInvalidArgument, "invalid metadata document", nil)
 	}
-	if len(payload) > 1024*1024 {
+	if len(payload) > MaxDocumentBytes {
 		return domain.MetadataDocument{}, domain.E(domain.CodeInvalidArgument, "metadata document exceeds 1 MiB", nil)
 	}
 	return s.repo.PutMetadataDocument(ctx, userID, application, collection, payload)
@@ -129,7 +155,13 @@ func (s *Service) requireActiveSubscription(ctx context.Context, userID string) 
 func normalizeApplication(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
 
 func validCollection(application, collection string) bool {
-	return allowedCollections[normalizeApplication(application)][strings.TrimSpace(collection)]
+	collection = strings.TrimSpace(collection)
+	for _, allowed := range applicationCollections[normalizeApplication(application)] {
+		if collection == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func randomAPIKey() (string, error) {
