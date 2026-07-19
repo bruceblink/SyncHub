@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -137,7 +139,14 @@ func TestPostgresStoresLatestNewsPreferencesMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store LatestNews preferences: %v", err)
 	}
-	if document.Collection != "preferences" || string(document.Payload) != string(payload) {
+	var stored, expected map[string]any
+	if err := json.Unmarshal(document.Payload, &stored); err != nil {
+		t.Fatalf("decode stored preferences: %v", err)
+	}
+	if err := json.Unmarshal(payload, &expected); err != nil {
+		t.Fatalf("decode expected preferences: %v", err)
+	}
+	if document.Collection != "preferences" || !reflect.DeepEqual(stored, expected) {
 		t.Fatalf("stored preferences = %#v", document)
 	}
 }
