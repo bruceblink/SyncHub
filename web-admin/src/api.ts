@@ -1,6 +1,7 @@
 export const api = "/api/v1";
 export const tokenKey = "synchub.accessToken";
 export const userKey = "synchub.user";
+export const refreshTokenKey = "synchub.refreshToken";
 
 export type User = { id: string; email: string; status: string };
 export type FileNode = {
@@ -17,6 +18,18 @@ export type AuthResponse = {
   user: User;
   tokens: { access_token: string; refresh_token: string; expires_in: number };
 };
+
+export function storeAuth(data: AuthResponse) {
+  localStorage.setItem(tokenKey, data.tokens.access_token);
+  localStorage.setItem(refreshTokenKey, data.tokens.refresh_token);
+  localStorage.setItem(userKey, JSON.stringify(data.user));
+}
+
+export function clearAuth() {
+  localStorage.removeItem(tokenKey);
+  localStorage.removeItem(refreshTokenKey);
+  localStorage.removeItem(userKey);
+}
 export type UploadSession = { upload_id: string };
 export type StorageUsage = {
   file_count: number;

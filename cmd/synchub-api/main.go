@@ -40,10 +40,12 @@ func main() {
 		os.Exit(1)
 	}
 	authService := authsvc.NewService(repo, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+	githubOAuth := &authsvc.GitHubOAuth{ClientID: cfg.GitHubOAuthClientID, ClientSecret: cfg.GitHubOAuthSecret, RedirectURL: cfg.GitHubOAuthRedirectURL}
 	fileService := filesvc.NewService(repo, store, cfg.UploadChunkSize, cfg.UploadSessionTTL).WithStorageQuota(cfg.StorageQuotaBytes).WithTrashRetention(cfg.TrashRetention)
 	syncService := syncsvc.NewService(repo)
 	workerService := workersvc.NewService(repo, store)
 	apiServer := api.NewWithSyncAndStorage(authService, fileService, syncService, repo, store)
+	apiServer.ConfigureGitHubOAuth(githubOAuth)
 
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	defer stopWorker()

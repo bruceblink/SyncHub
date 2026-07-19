@@ -104,6 +104,102 @@ func (r *Repository) RevokeRefreshToken(ctx context.Context, tokenHash string) e
 	return wrapDBErr(err)
 }
 
+func (r *Repository) ResolveOAuthUser(ctx context.Context, provider, providerUserID, email, login, avatarURL string) (domain.User, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.User{}, wrapDBErr(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var user domain.User
+	err = tx.QueryRow(ctx, `
+		select u.id, u.email, coalesce(u.password_hash, ''), u.status, u.created_at, u.updated_at
+		from oauth_identities i
+		join users u on u.id = i.user_id
+		where i.provider = $1 and i.provider_user_id = $2 and u.status = 'active'
+	`, provider, providerUserID).Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	if err == nil {
+		_, err = tx.Exec(ctx, `
+			update oauth_identities set email = $3, provider_login = $4, avatar_url = $5, updated_at = now()
+			where provider = $1 and provider_user_id = $2
+		`, provider, providerUserID, email, login, avatarURL)
+		if err != nil {
+			return domain.User{}, wrapDBErr(err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return domain.User{}, wrapDBErr(err)
+		}
+		return user, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return domain.User{}, wrapDBErr(err)
+	}
+
+	err = tx.QueryRow(ctx, `
+		select id, email, coalesce(password_hash, ''), status, created_at, updated_at
+		from users where email = $1 and status = 'active'
+	`, email).Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		now := time.Now().UTC()
+		user = domain.User{ID: uuid.NewString(), Email: email, Status: "active", CreatedAt: now, UpdatedAt: now}
+		if err := tx.QueryRow(ctx, `
+			with created as (
+				insert into users (id, email, password_hash, status, created_at, updated_at)
+				values ($1, $2, null, $3, $4, $5)
+				returning id, email, coalesce(password_hash, ''), status, created_at, updated_at
+			), subscription as (
+				insert into subscriptions (user_id) select id from created
+			)
+			select id, email, coalesce(password_hash, ''), status, created_at, updated_at from created
+		`, user.ID, user.Email, user.Status, user.CreatedAt, user.UpdatedAt).Scan(
+			&user.ID, &user.Email, &user.PasswordHash, &user.Status, &user.CreatedAt, &user.UpdatedAt,
+		); err != nil {
+			return domain.User{}, wrapDBErr(err)
+		}
+	} else if err != nil {
+		return domain.User{}, wrapDBErr(err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		insert into oauth_identities (id, user_id, provider, provider_user_id, provider_login, email, avatar_url)
+		values ($1, $2, $3, $4, $5, $6, $7)
+	`, uuid.NewString(), user.ID, provider, providerUserID, login, email, avatarURL)
+	if isUniqueViolation(err) {
+		return domain.User{}, domain.E(domain.CodeAlreadyExists, "OAuth identity is already linked", err)
+	}
+	if err != nil {
+		return domain.User{}, wrapDBErr(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, wrapDBErr(err)
+	}
+	return user, nil
+}
+
+func (r *Repository) CreateOAuthLoginCode(ctx context.Context, userID, codeHash string, expiresAt time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		insert into oauth_login_codes (code_hash, user_id, expires_at)
+		values ($1, $2, $3)
+	`, codeHash, userID, expiresAt)
+	return wrapDBErr(err)
+}
+
+func (r *Repository) ConsumeOAuthLoginCode(ctx context.Context, codeHash string, now time.Time) (domain.User, error) {
+	var user domain.User
+	err := r.pool.QueryRow(ctx, `
+		with consumed as (
+			update oauth_login_codes
+			set consumed_at = $2
+			where code_hash = $1 and consumed_at is null and expires_at > $2
+			returning user_id
+		)
+		select u.id, u.email, coalesce(u.password_hash, ''), u.status, u.created_at, u.updated_at
+		from consumed c join users u on u.id = c.user_id
+		where u.status = 'active'
+	`, codeHash, now).Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	return user, wrapNotFound(err, "OAuth login code not found")
+}
+
 func (r *Repository) CreateAPIKey(ctx context.Context, userID, name, application, keyPrefix, secretHash string) (domain.APIKey, error) {
 	key := domain.APIKey{ID: uuid.NewString(), UserID: userID, Name: name, Application: application, KeyPrefix: keyPrefix, CreatedAt: time.Now().UTC()}
 	err := r.pool.QueryRow(ctx, `

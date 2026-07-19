@@ -1,10 +1,9 @@
-import { useState } from "react";
-import { LogIn } from "lucide-react";
+import { useEffect, useState } from "react";
+import { GitBranch, LogIn } from "lucide-react";
 import {
   errorMessage,
   request,
-  tokenKey,
-  userKey,
+  storeAuth,
   type AuthResponse,
   type User,
 } from "./api";
@@ -19,6 +18,13 @@ export function Auth({
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [githubEnabled, setGitHubEnabled] = useState(false);
+
+  useEffect(() => {
+    void request<{ github: boolean }>("/auth/providers")
+      .then((providers) => setGitHubEnabled(providers.github))
+      .catch(() => setGitHubEnabled(false));
+  }, []);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -29,8 +35,7 @@ export function Auth({
         method: "POST",
         body: { email, password },
       });
-      localStorage.setItem(tokenKey, data.tokens.access_token);
-      localStorage.setItem(userKey, JSON.stringify(data.user));
+      storeAuth(data);
       onAuthenticated(data.tokens.access_token, data.user);
     } catch (error) {
       setError(errorMessage(error));
@@ -60,6 +65,14 @@ export function Auth({
             {busy ? "正在处理..." : mode === "login" ? "登录" : "注册并登录"}
           </button>
         </form>
+        {githubEnabled && (
+          <>
+            <div className="auth-divider"><span>或</span></div>
+            <a className="oauth-button" href="/api/v1/auth/github">
+              <GitBranch size={18} /> 使用 GitHub 登录
+            </a>
+          </>
+        )}
         <button className="text-button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}>
           {mode === "login" ? "没有账户？创建一个" : "已有账户？登录"}
         </button>

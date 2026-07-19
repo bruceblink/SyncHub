@@ -22,6 +22,9 @@ type Repository interface {
 	CreateRefreshToken(ctx context.Context, userID, tokenHash string, expiresAt time.Time) (domain.RefreshToken, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (domain.RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
+	ResolveOAuthUser(ctx context.Context, provider, providerUserID, email, login, avatarURL string) (domain.User, error)
+	CreateOAuthLoginCode(ctx context.Context, userID, codeHash string, expiresAt time.Time) error
+	ConsumeOAuthLoginCode(ctx context.Context, codeHash string, now time.Time) (domain.User, error)
 }
 
 type Service struct {
@@ -68,9 +71,44 @@ func (s *Service) Login(ctx context.Context, email, password string) (domain.Use
 	if err != nil {
 		return domain.User{}, TokenPair{}, domain.E(domain.CodeInvalidCredentials, "invalid email or password", err)
 	}
+	if user.PasswordHash == "" {
+		return domain.User{}, TokenPair{}, domain.E(domain.CodeInvalidCredentials, "use the linked login provider", nil)
+	}
 	ok, err := VerifyPassword(password, user.PasswordHash)
 	if err != nil || !ok {
 		return domain.User{}, TokenPair{}, domain.E(domain.CodeInvalidCredentials, "invalid email or password", err)
+	}
+	tokens, err := s.issueTokens(ctx, user.ID)
+	return user, tokens, err
+}
+
+func (s *Service) CompleteOAuthLogin(ctx context.Context, provider, providerUserID, email, login, avatarURL string) (string, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	email = normalizeEmail(email)
+	if provider != "github" || strings.TrimSpace(providerUserID) == "" || email == "" {
+		return "", domain.E(domain.CodeInvalidArgument, "verified OAuth identity is required", nil)
+	}
+	user, err := s.repo.ResolveOAuthUser(ctx, provider, providerUserID, email, strings.TrimSpace(login), strings.TrimSpace(avatarURL))
+	if err != nil {
+		return "", err
+	}
+	code, err := randomToken(32)
+	if err != nil {
+		return "", domain.E(domain.CodeInternal, "failed to create OAuth login code", err)
+	}
+	if err := s.repo.CreateOAuthLoginCode(ctx, user.ID, TokenHash(code), time.Now().Add(2*time.Minute)); err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+func (s *Service) ExchangeOAuthLoginCode(ctx context.Context, code string) (domain.User, TokenPair, error) {
+	if strings.TrimSpace(code) == "" {
+		return domain.User{}, TokenPair{}, domain.E(domain.CodeUnauthenticated, "invalid OAuth login code", nil)
+	}
+	user, err := s.repo.ConsumeOAuthLoginCode(ctx, TokenHash(code), time.Now())
+	if err != nil {
+		return domain.User{}, TokenPair{}, domain.E(domain.CodeUnauthenticated, "invalid OAuth login code", err)
 	}
 	tokens, err := s.issueTokens(ctx, user.ID)
 	return user, tokens, err

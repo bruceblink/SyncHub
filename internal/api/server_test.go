@@ -333,6 +333,37 @@ func TestMetadataCapabilitiesArePublicAndMatchClientContract(t *testing.T) {
 	}
 }
 
+func TestGitHubLoginRequiresConfigurationAndSetsStateCookie(t *testing.T) {
+	server := New(nil, nil, nil)
+
+	providers := httptest.NewRecorder()
+	server.Handler().ServeHTTP(providers, httptest.NewRequest(http.MethodGet, "/api/v1/auth/providers", nil))
+	if providers.Code != http.StatusOK || !strings.Contains(providers.Body.String(), `"github":false`) {
+		t.Fatalf("disabled providers response = %d %s", providers.Code, providers.Body.String())
+	}
+
+	server.ConfigureGitHubOAuth(&authsvc.GitHubOAuth{ClientID: "client", ClientSecret: "secret", RedirectURL: "https://sync.example/callback"})
+	login := httptest.NewRecorder()
+	server.Handler().ServeHTTP(login, httptest.NewRequest(http.MethodGet, "/api/v1/auth/github", nil))
+	if login.Code != http.StatusFound || !strings.HasPrefix(login.Header().Get("Location"), "https://github.com/login/oauth/authorize?") {
+		t.Fatalf("GitHub login response = %d location=%q", login.Code, login.Header().Get("Location"))
+	}
+	cookies := login.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "synchub_oauth_state" || cookies[0].Value == "" || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteLaxMode {
+		t.Fatalf("OAuth state cookies = %#v", cookies)
+	}
+}
+
+func TestGitHubCallbackRejectsMissingStateBeforeProviderExchange(t *testing.T) {
+	server := New(nil, nil, nil)
+	server.ConfigureGitHubOAuth(&authsvc.GitHubOAuth{ClientID: "client", ClientSecret: "secret", RedirectURL: "https://sync.example/callback"})
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/auth/github/callback?code=code&state=missing", nil))
+	if rec.Code != http.StatusFound || !strings.Contains(rec.Header().Get("Location"), "oauth_error=invalid+OAuth+state") {
+		t.Fatalf("invalid callback response = %d location=%q", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
 func TestSyncEndpointsAcceptDesktopAPIKeyOrAccountSession(t *testing.T) {
 	apiKey := "shk_desktop_test"
 	jwtSecret := "sync-web-admin-test-secret"

@@ -239,6 +239,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
+  /api/v1/auth/providers:
+    get:
+      tags: [Auth]
+      summary: List configured login providers
+      security: []
+      responses:
+        "200": { description: Available OAuth providers. }
+  /api/v1/auth/github:
+    get:
+      tags: [Auth]
+      summary: Start GitHub OAuth2 login
+      security: []
+      responses:
+        "302": { description: Redirect to GitHub authorization. }
+  /api/v1/auth/github/callback:
+    get:
+      tags: [Auth]
+      summary: Complete GitHub OAuth2 authorization
+      security: []
+      responses:
+        "302": { description: Redirect to the management UI with a one-time login code. }
+  /api/v1/auth/oauth/exchange:
+    post:
+      tags: [Auth]
+      summary: Exchange a one-time OAuth login code for SyncHub tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        "200":
+          description: User and SyncHub tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
   /api/v1/auth/login:
     post:
       tags: [Auth]

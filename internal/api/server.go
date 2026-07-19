@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +39,7 @@ type Server struct {
 	db       Pinger
 	storage  storage.ReadinessChecker
 	metrics  *requestMetrics
+	github   *authsvc.GitHubOAuth
 }
 
 func New(auth *authsvc.Service, files *filesvc.Service, db Pinger) *Server {
@@ -65,6 +69,10 @@ func NewWithSyncAndStorage(auth *authsvc.Service, files *filesvc.Service, sync *
 
 func (s *Server) Handler() http.Handler {
 	return s.router
+}
+
+func (s *Server) ConfigureGitHubOAuth(github *authsvc.GitHubOAuth) {
+	s.github = github
 }
 
 func traceMiddleware() gin.HandlerFunc {
@@ -147,6 +155,10 @@ func (s *Server) routes() {
 	v1.POST("/auth/login", s.login)
 	v1.POST("/auth/refresh", s.refresh)
 	v1.POST("/auth/logout", s.logout)
+	v1.GET("/auth/providers", s.authProviders)
+	v1.GET("/auth/github", s.githubLogin)
+	v1.GET("/auth/github/callback", s.githubCallback)
+	v1.POST("/auth/oauth/exchange", s.oauthExchange)
 	v1.GET("/billing/plans", s.billingPlans)
 	v1.OPTIONS("/metadata/capabilities", s.metadataCORSMiddleware())
 	v1.GET("/metadata/capabilities", s.metadataCORSMiddleware(), s.metadataCapabilities)
@@ -416,6 +428,80 @@ func (s *Server) logout(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{})
+}
+
+func (s *Server) authProviders(c *gin.Context) {
+	ok(c, gin.H{"github": s.github != nil && s.github.Enabled()})
+}
+
+func (s *Server) githubLogin(c *gin.Context) {
+	if s.github == nil || !s.github.Enabled() {
+		fail(c, domain.E(domain.CodeNotFound, "GitHub login is not configured", nil))
+		return
+	}
+	stateBytes := make([]byte, 32)
+	if _, err := rand.Read(stateBytes); err != nil {
+		fail(c, domain.E(domain.CodeInternal, "failed to create OAuth state", err))
+		return
+	}
+	state := base64.RawURLEncoding.EncodeToString(stateBytes)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name: "synchub_oauth_state", Value: state, Path: "/api/v1/auth/github",
+		MaxAge: 600, HttpOnly: true, Secure: c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https",
+		SameSite: http.SameSiteLaxMode,
+	})
+	c.Redirect(http.StatusFound, s.github.AuthorizationURL(state))
+}
+
+func (s *Server) githubCallback(c *gin.Context) {
+	if s.github == nil || !s.github.Enabled() {
+		s.redirectOAuthResult(c, "", "GitHub login is not configured")
+		return
+	}
+	stateCookie, err := c.Request.Cookie("synchub_oauth_state")
+	http.SetCookie(c.Writer, &http.Cookie{Name: "synchub_oauth_state", Value: "", Path: "/api/v1/auth/github", MaxAge: -1, HttpOnly: true, Secure: c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https", SameSite: http.SameSiteLaxMode})
+	if err != nil || stateCookie.Value == "" || stateCookie.Value != c.Query("state") {
+		s.redirectOAuthResult(c, "", "invalid OAuth state")
+		return
+	}
+	identity, err := s.github.Exchange(c.Request.Context(), c.Query("code"))
+	if err != nil {
+		s.redirectOAuthResult(c, "", err.Error())
+		return
+	}
+	code, err := s.auth.CompleteOAuthLogin(c.Request.Context(), "github", identity.UserID, identity.Email, identity.Login, identity.AvatarURL)
+	if err != nil {
+		s.redirectOAuthResult(c, "", err.Error())
+		return
+	}
+	s.redirectOAuthResult(c, code, "")
+}
+
+func (s *Server) redirectOAuthResult(c *gin.Context, code, message string) {
+	query := url.Values{}
+	if code != "" {
+		query.Set("oauth_code", code)
+	}
+	if message != "" {
+		query.Set("oauth_error", message)
+	}
+	c.Redirect(http.StatusFound, "/app/?"+query.Encode())
+}
+
+func (s *Server) oauthExchange(c *gin.Context) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, domain.E(domain.CodeInvalidArgument, "invalid request body", err))
+		return
+	}
+	user, tokens, err := s.auth.ExchangeOAuthLoginCode(c.Request.Context(), req.Code)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, gin.H{"user": userDTO(user), "tokens": tokens})
 }
 
 func (s *Server) getFile(c *gin.Context) {

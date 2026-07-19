@@ -22,12 +22,34 @@ func TestEmbeddedMigrationsIncludeLatestNewsPreferencesConstraint(t *testing.T) 
 	if len(loaded) == 0 {
 		t.Fatal("no embedded migrations loaded")
 	}
+	var preferences *postgresMigration
+	for i := range loaded {
+		if loaded[i].Version == "000011_add_latestnews_preferences_collection" {
+			preferences = &loaded[i]
+			break
+		}
+	}
+	if preferences == nil {
+		t.Fatal("LatestNews preferences migration is missing")
+	}
+	if !strings.Contains(preferences.SQL, "'preferences'") || !strings.Contains(preferences.SQL, "app_metadata_documents_collection_check") {
+		t.Fatalf("preferences migration does not expand the collection constraint: %s", preferences.SQL)
+	}
+}
+
+func TestEmbeddedMigrationsIncludeOAuthIdentitySchema(t *testing.T) {
+	loaded, err := loadPostgresMigrations(migrations.FS)
+	if err != nil {
+		t.Fatalf("load embedded migrations: %v", err)
+	}
 	latest := loaded[len(loaded)-1]
-	if latest.Version != "000011_add_latestnews_preferences_collection" {
+	if latest.Version != "000012_add_oauth_identities" {
 		t.Fatalf("latest migration = %q", latest.Version)
 	}
-	if !strings.Contains(latest.SQL, "'preferences'") || !strings.Contains(latest.SQL, "app_metadata_documents_collection_check") {
-		t.Fatalf("latest migration does not expand the preferences constraint: %s", latest.SQL)
+	for _, fragment := range []string{"oauth_identities", "oauth_login_codes", "password_hash drop not null"} {
+		if !strings.Contains(latest.SQL, fragment) {
+			t.Fatalf("OAuth migration is missing %q: %s", fragment, latest.SQL)
+		}
 	}
 }
 
@@ -117,6 +139,47 @@ func TestPostgresStoresLatestNewsPreferencesMetadata(t *testing.T) {
 	}
 	if document.Collection != "preferences" || string(document.Payload) != string(payload) {
 		t.Fatalf("stored preferences = %#v", document)
+	}
+}
+
+func TestPostgresOAuthIdentityLinksExistingUserAndReusesProviderID(t *testing.T) {
+	repo, _ := newPostgresMigrationTestRepository(t)
+	ctx := context.Background()
+	email := "postgres-oauth-" + uuid.NewString() + "@example.com"
+	existing, err := repo.CreateUser(ctx, email, "hash")
+	if err != nil {
+		t.Fatalf("create existing user: %v", err)
+	}
+
+	linked, err := repo.ResolveOAuthUser(ctx, "github", "github-123", email, "octocat", "avatar-1")
+	if err != nil || linked.ID != existing.ID {
+		t.Fatalf("link existing user = %#v err=%v", linked, err)
+	}
+	reused, err := repo.ResolveOAuthUser(ctx, "github", "github-123", "changed@example.com", "octocat-renamed", "avatar-2")
+	if err != nil || reused.ID != existing.ID || reused.Email != email {
+		t.Fatalf("reuse provider identity = %#v err=%v", reused, err)
+	}
+
+	codeHash := "oauth-code-hash"
+	if err := repo.CreateOAuthLoginCode(ctx, existing.ID, codeHash, time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("create OAuth code: %v", err)
+	}
+	if exchanged, err := repo.ConsumeOAuthLoginCode(ctx, codeHash, time.Now()); err != nil || exchanged.ID != existing.ID {
+		t.Fatalf("consume OAuth code = %#v err=%v", exchanged, err)
+	}
+	if _, err := repo.ConsumeOAuthLoginCode(ctx, codeHash, time.Now()); domain.ErrorCodeOf(err) != domain.CodeNotFound {
+		t.Fatalf("replayed OAuth code error = %v", err)
+	}
+}
+
+func TestPostgresOAuthIdentityCreatesPasswordlessUser(t *testing.T) {
+	repo, _ := newPostgresMigrationTestRepository(t)
+	created, err := repo.ResolveOAuthUser(context.Background(), "github", "github-new-"+uuid.NewString(), "new-oauth-"+uuid.NewString()+"@example.com", "new-user", "")
+	if err != nil {
+		t.Fatalf("create OAuth user: %v", err)
+	}
+	if created.ID == "" || created.PasswordHash != "" {
+		t.Fatalf("OAuth user = %#v", created)
 	}
 }
 

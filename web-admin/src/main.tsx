@@ -31,10 +31,12 @@ import {
 } from "./chunked-upload";
 import {
   api,
+  clearAuth,
   errorMessage,
   formatDate,
   formatSize,
   request,
+  storeAuth,
   tokenKey,
   userKey,
   type FileListResponse,
@@ -43,6 +45,7 @@ import {
   type StorageUsage,
   type UploadSession,
   type User,
+  type AuthResponse,
 } from "./api";
 import { Auth } from "./auth";
 import { Dialog, type Modal } from "./dialog";
@@ -112,6 +115,28 @@ function App() {
   const [token, setToken] = useState(
     () => localStorage.getItem(tokenKey) || "",
   );
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauthCode = params.get("oauth_code");
+    const oauthError = params.get("oauth_error");
+    if (!oauthCode && !oauthError) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    if (oauthError) {
+      setError(oauthError);
+      return;
+    }
+    void request<AuthResponse>("/auth/oauth/exchange", {
+      method: "POST",
+      body: { code: oauthCode },
+    })
+      .then((data) => {
+        storeAuth(data);
+        setToken(data.tokens.access_token);
+        setUser(data.user);
+      })
+      .catch((error) => setError(errorMessage(error)));
+  }, []);
   const [user, setUser] = useState<User | null>(savedUser);
   const [page, setPage] = useState<Page>("files");
   const [parent, setParent] = useState<string | null>(null);
@@ -144,8 +169,7 @@ function App() {
   function logout() {
     uploadControllers.current.forEach((controller) => controller.abort());
     uploadControllers.current.clear();
-    localStorage.removeItem(tokenKey);
-    localStorage.removeItem(userKey);
+    clearAuth();
     setToken("");
     setUser(null);
     setItems([]);

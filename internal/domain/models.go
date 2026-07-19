@@ -20,6 +20,18 @@ type RefreshToken struct {
 	CreatedAt time.Time
 }
 
+type OAuthIdentity struct {
+	ID             string
+	UserID         string
+	Provider       string
+	ProviderUserID string
+	ProviderLogin  string
+	Email          string
+	AvatarURL      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type Subscription struct {
 	UserID                 string
 	Plan                   string
