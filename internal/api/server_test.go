@@ -333,6 +333,34 @@ func TestMetadataCapabilitiesArePublicAndMatchClientContract(t *testing.T) {
 	}
 }
 
+func TestMetadataEmptyDocumentMatchesBrowserClientContract(t *testing.T) {
+	apiKey := "shk_kvideo_test"
+	repo := &syncKeyRepository{keyHash: authsvc.TokenHash(apiKey), application: "kvideo", metadataNotFound: true}
+	server := New(nil, nil, repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metadata/kvideo/favorites", nil)
+	req.Header.Set("X-API-Key", apiKey)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty metadata status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Code any `json:"code"`
+		Data struct {
+			Payload any   `json:"payload"`
+			Version int64 `json:"version"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode empty metadata response: %v", err)
+	}
+	if body.Code != float64(0) || body.Data.Payload != nil || body.Data.Version != 0 {
+		t.Fatalf("empty metadata response = %#v", body)
+	}
+}
+
 func TestGitHubLoginRequiresConfigurationAndSetsStateCookie(t *testing.T) {
 	server := New(nil, nil, nil)
 
@@ -452,8 +480,10 @@ type fakeReadinessChecker struct {
 }
 
 type syncKeyRepository struct {
-	keyHash string
-	deleted bool
+	keyHash          string
+	application      string
+	metadataNotFound bool
+	deleted          bool
 }
 
 func (r *syncKeyRepository) Ping(context.Context) error { return nil }
@@ -504,7 +534,11 @@ func (r *syncKeyRepository) GetAPIKeyBySecretHash(_ context.Context, hash string
 	if hash != r.keyHash {
 		return domain.APIKey{}, domain.E(domain.CodeNotFound, "api key not found", nil)
 	}
-	return domain.APIKey{ID: "desktop-key", UserID: "user-1", Application: "synchub-desktop"}, nil
+	application := r.application
+	if application == "" {
+		application = "synchub-desktop"
+	}
+	return domain.APIKey{ID: "test-key", UserID: "user-1", Application: application}, nil
 }
 func (r *syncKeyRepository) TouchAPIKey(context.Context, string) error { return nil }
 func (r *syncKeyRepository) GetSubscription(context.Context, string) (domain.Subscription, error) {
@@ -514,6 +548,9 @@ func (r *syncKeyRepository) UpdateSubscriptionCancellation(context.Context, stri
 	return domain.Subscription{}, errors.New("not implemented")
 }
 func (r *syncKeyRepository) GetMetadataDocument(context.Context, string, string, string) (domain.MetadataDocument, error) {
+	if r.metadataNotFound {
+		return domain.MetadataDocument{}, domain.E(domain.CodeNotFound, "metadata document not found", nil)
+	}
 	return domain.MetadataDocument{}, errors.New("not implemented")
 }
 func (r *syncKeyRepository) PutMetadataDocument(context.Context, string, string, string, []byte) (domain.MetadataDocument, error) {
