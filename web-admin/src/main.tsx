@@ -35,6 +35,7 @@ import {
   errorMessage,
   formatDate,
   formatSize,
+  refreshTokenKey,
   request,
   storeAuth,
   tokenKey,
@@ -166,7 +167,7 @@ function App() {
     setMenuID(null);
     setPage(nextPage);
   }
-  function logout() {
+  function clearSession() {
     uploadControllers.current.forEach((controller) => controller.abort());
     uploadControllers.current.clear();
     clearAuth();
@@ -176,6 +177,16 @@ function App() {
     setTrail([]);
     setParent(null);
     setUploadTasks([]);
+  }
+  function logout() {
+    const refreshToken = localStorage.getItem(refreshTokenKey);
+    if (refreshToken) {
+      void request("/auth/logout", {
+        method: "POST",
+        body: { refresh_token: refreshToken },
+      }).catch(() => {});
+    }
+    clearSession();
   }
   async function load(parentID = parent, cursor = "") {
     if (!token) return;
